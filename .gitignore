@@ -55,3 +55,6 @@ Thumbs.db
 config.json
 secrets.json
 data/private_*.csv
+
+# Rust target folder
+/core/target/

@@ -1,0 +1,23 @@
+@prefix ex: <http://example.org/cyclegraph/> .
+@prefix schema: <http://schema.org/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Økt 1
+ex:session1 a schema:ExerciseAction ;
+    schema:power "200"^^xsd:float ;
+    schema:heartRate "150"^^xsd:float .
+
+# Økt 2
+ex:session2 a schema:ExerciseAction ;
+    schema:power "220"^^xsd:float ;
+    schema:heartRate "152"^^xsd:float .
+
+# Økt 3
+ex:session3 a schema:ExerciseAction ;
+    schema:power "210"^^xsd:float ;
+    schema:heartRate "148"^^xsd:float .
+
+# Økt 4
+ex:session4 a schema:ExerciseAction ;
+    schema:power "230"^^xsd:float ;
+    schema:heartRate "151"^^xsd:float .

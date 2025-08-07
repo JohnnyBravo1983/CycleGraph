@@ -1,0 +1,25 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix schema: <http://schema.org/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+schema:ExerciseActionShape
+    a sh:NodeShape ;
+    sh:targetClass schema:ExerciseAction ;
+
+    # Power må være float
+    sh:property [
+        sh:path schema:power ;
+        sh:datatype xsd:float ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "Power must be a single float value." ;
+    ] ;
+
+    # Heart rate må være float
+    sh:property [
+        sh:path schema:heartRate ;
+        sh:datatype xsd:float ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "Heart rate must be a single float value." ;
+    ] .

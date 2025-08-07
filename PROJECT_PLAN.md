@@ -1,10 +1,10 @@
 2025-08-07	Opprette prosjektstruktur	1
-2025-08-08	Sette opp Rust-core med pyo3 (enkel funksjon)	4
-2025-08-09	Installere maturin og teste kobling til Python	2
-2025-08-09	Lage analysefunksjon for effektivitet (Rust)	3
-2025-08-10	Sette opp Python CLI (analyze.py)	4
-2025-08-11	Lage første dummydata (CSV + RDF)	2
-2025-08-12	Kjøre CLI → Rust → output-flyt	3
+2025-08-08	Sette opp Rust-core med pyo3 (enkel funksjon)	4 Ferdig
+2025-08-09	Installere maturin og teste kobling til Python	2 Ferdig
+2025-08-09	Lage analysefunksjon for effektivitet (Rust)	3 Ferdig
+2025-08-10	Sette opp Python CLI (analyze.py)	4         Ferdig
+2025-08-11	Lage første dummydata (CSV + RDF)	2         Ferdig
+2025-08-12	Kjøre CLI → Rust → output-flyt	3             Ferdig
 2025-08-12	Finne masse testere (lokalt og bredt / LinkedIn)	2
 2025-08-13	Legge inn webanalyse (Plausible eller lignende)	2
 2025-08-14	Lage anonym logging fra CLI (analysebruk)	2
