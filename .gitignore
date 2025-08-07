@@ -3,20 +3,21 @@ __pycache__/
 *.py[cod]
 *.pyd
 *.pyo
-*.pyc
 .venv/
 venv/
 .env
 *.env
 *.sqlite3
 
-# Jupyter Notebooks (om det blir brukt)
+# Jupyter Notebooks
 .ipynb_checkpoints/
 
 # --- Rust ---
-/target/
-Cargo.lock  # Optional: legg til igjen hvis du ønsker eksakt avhengighetsstyring
+/core/target/
 *.rs.bk
+
+# Valgfritt: ignorer Cargo.lock for libs, men behold for bin-prosjekter
+# Cargo.lock
 
 # --- Maturin build ---
 *.so
@@ -26,7 +27,7 @@ Cargo.lock  # Optional: legg til igjen hvis du ønsker eksakt avhengighetsstyrin
 build/
 dist/
 
-# --- Web/JS (dersom webdemo har egen mappe) ---
+# --- Web/JS ---
 node_modules/
 *.log
 npm-debug.log*
@@ -39,22 +40,28 @@ pnpm-debug.log*
 # --- VS Code / IDE ---
 .vscode/
 *.code-workspace
+.idea/
 
 # --- OS / Editor-specific files ---
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
-.idea/
 *.bak
 *.tmp
-*.log
 
-# --- Custom files you want to protect ---
-# F.eks. lokal config, tokens, testdata osv
+# --- Sensitive / lokal data ---
 config.json
 secrets.json
+*.token
+*.key
+*.crt
+*.pem
+
+# --- Testdata som skal være privat ---
 data/private_*.csv
 
-# Rust target folder
-/core/target/
+# --- Unntak: behold offentlig testdata ---
+!data/sample.csv
+!data/sample.ttl
+!shapes/session_shape.ttl
