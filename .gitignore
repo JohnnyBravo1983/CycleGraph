@@ -1,0 +1,57 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pyc
+.venv/
+venv/
+.env
+*.env
+*.sqlite3
+
+# Jupyter Notebooks (om det blir brukt)
+.ipynb_checkpoints/
+
+# --- Rust ---
+/target/
+Cargo.lock  # Optional: legg til igjen hvis du ønsker eksakt avhengighetsstyring
+*.rs.bk
+
+# --- Maturin build ---
+*.so
+*.dll
+*.dylib
+*.egg-info/
+build/
+dist/
+
+# --- Web/JS (dersom webdemo har egen mappe) ---
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vite/
+.vite-cache/
+
+# --- VS Code / IDE ---
+.vscode/
+*.code-workspace
+
+# --- OS / Editor-specific files ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+*.bak
+*.tmp
+*.log
+
+# --- Custom files you want to protect ---
+# F.eks. lokal config, tokens, testdata osv
+config.json
+secrets.json
+data/private_*.csv
