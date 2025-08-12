@@ -1,11 +1,90 @@
-# CycleGraph – Masterplan
+Milepæl-plan (M1–M12)
+M1 – Prosjektstruktur & repo (Ferdig)
+M2 – Rust-core med pyo3 (Ferdig)
+M3 – CLI-oppsett & dataflyt (Ferdig)
+M4 – Dummydata & testkjøring (Ferdig)
+M5 – SHACL-validering (Ferdig)
+M6 – Strava-integrasjon (API & import) (Delvis ferdig – punkt 1–2 OK, 3–5 gjenstår)
+M7 – Analysefunksjoner (effektivitet, treningsscore) (Ikke startet)
+M8 – Webdemo & visualisering (Ikke startet)
+M9 – MVP-forberedelse & testing (Ikke startet)
+M10 – Feedback-innsamling & justeringer (Ikke startet)
+M11 – Demo-lansering & markedsføring (Ikke startet)
+M12 – Kommersialisering & skalering (Ikke startet)
 
-**Formål:**  
-CycleGraph er et verktøy for analyse av treningsdata (watt, puls, varighet) med Strava-integrasjon og Rust-kjerne via pyo3.  
-Målet er å gi syklister innsikt i puls/watt-effektivitet og utvikling over tid, med MVP-demo 1. september 2025.  
+M6 – Strava-integrasjon (API & import) – status per 2025-08-11
+✅ Punkt 1: Fiks authorize-bug (redirect/URL, scopes, token-exchange uten redirect_uri, lokal callback-server på port 5001).
+✅ Punkt 2: Sikre .env og tokensti (UTF-8 uten BOM), robust lasting, preemptiv refresh og rotasjon av refresh_token, vennlige feilmeldinger.
+⏭️ Neste: Punkt 3–5 (rate-limit & trygg polling, paging + --since/inkrementell sync, streams→CSV med time,hr,watts (+ ev. moving,altitude)).
+
+MVP-arkitektur (beslutning før M7)
+Dataserie/analyse: Bruke Parquet-filer pr. aktivitet + DuckDB for spørringer på tvers (erstatter CSV i runtime; CSV kan fortsatt skrives for eksport).
+
+App-data: SQLite for brukere, Strava-tokens (access/refresh/expires_at), aktivitets-manifest og import-jobber.
+
+Ikke med i MVP: Triplestore/RDF-server; vurderes etter M8 når vi må skalere spørringer.
+
+Synk: Manuell/batch i M7/M8; webhooks planlagt i M8 for autosync.
+
+Målbilde: 10–30 testere får raske analyser (watt vs HR, drift, enkle trender) uten server-DB for tidsserien.
+
+Suksesskriterier: <1s for enkle sammendrag, <3s for øktsammendrag over 100 økter, 0 feil ved re-analyse.
+
+Oppdateringsrutine
+Når en milepæl er ferdig:
+
+Oppdater status i tabellen over.
+
+Endre milepælstatus i planen nederst.
+
+Når du starter en ny milepæl-chat:
+
+Kopier hele Masterplan.md inn i chatten.
+
+Legg til milepæl-spesifikke “MÅL FOR MILEPÆLEN” og “NESTE OPPGAVE”-seksjoner.
+
+Lag commit i repoet.
+
+Vil du at jeg også lager en kort commit-melding for denne oppdateringen så du kan legge den rett inn i GitHub?
+
+
+
+
+
+
+Du sa:
+du nevnte 3 forskjellige features vi bør ha som strava ikke har som vi kan differensiere oss på. Bør dette med i masterplan eller begynner det å bli for mye nå?
+
+
+ChatGPT sa:
+Jeg ville tatt de tre funksjonene med, men som en kort "Differensieringsmål"-seksjon i masterplanen, ikke som tekniske backlog-oppgaver.
+
+Grunnen er at:
+
+De er en del av produktmål og brukeropplevelse for MVP, ikke bare utviklingsdetaljer.
+
+De gir deg og eventuelle samarbeidspartnere et klart bilde av hvorfor CycleGraph er interessant sammenlignet med Strava.
+
+De er enkle å skrive kort ned nå, og vi kan bryte dem ned i tekniske tasks senere i M7/M8.
+
+Jeg kan foreslå at vi legger dette inn under “MVP-arkitektur (beslutning før M7)” som et eget underpunkt:
+
+Differensieringsmål (MVP)
+Minst tre analyser som ikke finnes i Strava:
+
+Watt vs HR-effektivitet over tid – f.eks. watt ved faste pulsnivåer (140/150/160 bpm) for å spore formutvikling.
+
+Aerob drift (cardiac drift) – prosentvis endring i puls ved konstant watt gjennom en økt.
+
+Sone-tid mot effekt – fordeling av tid i puls-/effektsoner kombinert med gjennomsnittlig watt per sone.
+
+Vil du at jeg legger denne inn i masterplanen din nå, så den havner rett under “MVP-arkitektur”-delen vi nettopp skrev?
+CycleGraph – Masterplan
+Formål:
+CycleGraph er et verktøy for analyse av treningsdata (watt, puls, varighet) med Strava-integrasjon og Rust-kjerne via pyo3.
+Målet er å gi syklister innsikt i puls/watt-effektivitet og utvikling over tid, med MVP-demo 1. september 2025.
 Arkitekturen skal være modulær og skalerbar for fremtidig Azure-drift.
 
----CycleGraph – Masterplan
 Formål:
 CycleGraph er et verktøy for analyse av treningsdata (watt, puls, varighet) med Strava-integrasjon og Rust-kjerne via pyo3.
 Målet er å gi syklister innsikt i puls/watt-effektivitet og utvikling over tid, med MVP-demo 1. september 2025.
@@ -44,33 +123,44 @@ Dato	Milepæl	Status	Beskrivelse
 
 Milepæl-plan (M1–M12)
 M1 – Prosjektstruktur & repo (Ferdig)
-
 M2 – Rust-core med pyo3 (Ferdig)
-
 M3 – CLI-oppsett & dataflyt (Ferdig)
-
 M4 – Dummydata & testkjøring (Ferdig)
-
 M5 – SHACL-validering (Ferdig)
-
 M6 – Strava-integrasjon (API & import) (Delvis ferdig – punkt 1–2 OK, 3–5 gjenstår)
-
 M7 – Analysefunksjoner (effektivitet, treningsscore) (Ikke startet)
-
 M8 – Webdemo & visualisering (Ikke startet)
-
 M9 – MVP-forberedelse & testing (Ikke startet)
-
 M10 – Feedback-innsamling & justeringer (Ikke startet)
-
 M11 – Demo-lansering & markedsføring (Ikke startet)
-
 M12 – Kommersialisering & skalering (Ikke startet)
 
 M6 – Strava-integrasjon (API & import) – status per 2025-08-11
 ✅ Punkt 1: Fiks authorize-bug (redirect/URL, scopes, token-exchange uten redirect_uri, lokal callback-server på port 5001).
 ✅ Punkt 2: Sikre .env og tokensti (UTF-8 uten BOM), robust lasting, preemptiv refresh og rotasjon av refresh_token, vennlige feilmeldinger.
 ⏭️ Neste: Punkt 3–5 (rate-limit & trygg polling, paging + --since/inkrementell sync, streams→CSV med time,hr,watts (+ ev. moving,altitude)).
+
+MVP-arkitektur (beslutning før M7)
+Dataserie/analyse: Bruke Parquet-filer pr. aktivitet + DuckDB for spørringer på tvers (erstatter CSV i runtime; CSV kan fortsatt skrives for eksport).
+
+App-data: SQLite for brukere, Strava-tokens (access/refresh/expires_at), aktivitets-manifest og import-jobber.
+
+Ikke med i MVP: Triplestore/RDF-server; vurderes etter M8 når vi må skalere spørringer.
+
+Synk: Manuell/batch i M7/M8; webhooks planlagt i M8 for autosync.
+
+Målbilde: 10–30 testere får raske analyser (watt vs HR, drift, enkle trender) uten server-DB for tidsserien.
+
+Suksesskriterier: <1s for enkle sammendrag, <3s for øktsammendrag over 100 økter, 0 feil ved re-analyse.
+
+Differensieringsmål (MVP)
+Minst tre analyser som ikke finnes i Strava:
+
+Watt vs HR-effektivitet over tid – f.eks. watt ved faste pulsnivåer (140/150/160 bpm) for å spore formutvikling.
+
+Aerob drift (cardiac drift) – prosentvis endring i puls ved konstant watt gjennom en økt.
+
+Sone-tid mot effekt – fordeling av tid i puls-/effektsoner kombinert med gjennomsnittlig watt per sone.
 
 Oppdateringsrutine
 Når en milepæl er ferdig:
@@ -85,6 +175,4 @@ Kopier hele Masterplan.md inn i chatten.
 
 Legg til milepæl-spesifikke “MÅL FOR MILEPÆLEN” og “NESTE OPPGAVE”-seksjoner.
 
-Lag commit i repoet:
-
-
+Lag commit i repoet.
