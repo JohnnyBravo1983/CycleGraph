@@ -1,26 +1,24 @@
 <p align="center">
-  <img src="CycleGraph_Logo.png" alt="CycleGraph Logo" width="300"/>
+  <img src="docs/logo/CycleGraph_Logo.png" alt="CycleGraph Logo" width="200"/>
 </p>
 
+# 🚴‍♂️ CycleGraph
 
-# 🚴‍♂️ CycleGraph – Smarter Training, Better Trends
-
-**CycleGraph** er et analyseverktøy for syklister som kobler sammen puls, watt og varighet for å si noe om hvor effektiv treningen din faktisk er – og hvordan den utvikler seg over tid.
-
-🔁 Navnet spiller på to ting:
-- **Graph** som i grafdatamodell (RDF / kunnskapsgraf)
-- **Graph** som i treningsgraf – puls, watt, trender og fremgang
+Analyseverktøy for syklister som kombinerer **smart caching**, **Strava-integrasjon** og **avanserte treningsmetrikker** for å gi deg en enkel, rettferdig og inspirerende score på hver økt.
 
 ---
 
-## 💡 Hva gjør det?
-
-- 📈 Beregner **watt/puls-effektivitet** per økt
-- 🧪 Validerer om økten matcher intensjon (f.eks. terskeltrening)
-- 🚨 Varsler om avvik: lav effekt, høy puls, eller uvanlig mønster
-- 📊 Viser trend over tid – *blir du faktisk bedre?*
-- 🔁 Bruker smart caching for rask gjenbruk og spørring
-- 🔌 Strava-integrasjon og webgrensesnitt kommer i neste faser
+## ✨ Nøkkelfunksjoner (MVP)
+- 📊 **CGS-score** (CycleGraph Score) med tre delskårer:
+  - **Hvor hardt?** (Intensity)
+  - **Hvor lenge?** (Duration)
+  - **Hvor jevnt & effektivt?** (Quality)
+- 🏅 **Badges** som fremhever prestasjoner og særpreg i økten.
+- 📈 **Nøkkelmetrikker** som IF, NP, VI, Pa:Hr, W/slag – presentert med fargekoder og trendarrows.
+- 🔁 **Smart caching** for rask gjenbruk og spørring.
+- 🔌 **Strava-integrasjon** (import av dine økter, automatisk publisering av kommentarer).
+- 📉 **Mini-trend** – se forbedring over siste 3 økter.
+- 🔒 **Personvernklar** – lokal behandling, samtykke før publisering.
 
 ---
 
@@ -39,28 +37,33 @@
 CycleGraph er delt i to:
 
 ### 🔓 Åpen kjerne
-All treningsanalyse og datamodellering som ligger i `/core`, `/cli`, `/data` og `/shapes` er fritt tilgjengelig for læring og ikke-kommersiell bruk. Lisens: **CycleGraph Non-Commercial License v0.1**
+All treningsanalyse og datamodellering som ligger i `/core`, `/cli`, `/data` og `/shapes` er fritt tilgjengelig for læring og ikke-kommersiell bruk.  
+**Lisens:** CycleGraph Non-Commercial License v0.1
 
 ### 🔒 Prototype og kommersiell del
-Strava-integrasjon, API og webapp utvikles som en lukket MVP og er ikke inkludert i dette repoet. Disse delene vurderes for fremtidig kommersiell bruk.
+Webapp-frontend, Premium-funksjoner og enkelte API-endepunkter utvikles som en lukket MVP og er ikke inkludert i dette repoet. Disse delene vurderes for fremtidig kommersiell bruk.
 
 ---
 
 ## 📫 Vil du teste eller bidra?
 
 Er du syklist og nysgjerrig på hvor effektivt du trener?  
-Kontakt: jstromo83@gmail.com eller legg igjen en issue i repoet.
+Kontakt: **jstromo83@gmail.com** eller legg igjen en issue i repoet.
 
+---
 
-## 🖥️ Eksempel: Kjøring fra kommandolinjen
+## 🖥️ Eksempel: CLI-kjøring
 
 ```bash
 $ python cli/analyze.py --file data/2025-08-01.csv
 🚴‍♂️ CycleGraph v0.1
 
-⏱️ Varighet: 2t 5min
-💓 Snittpuls: 158 bpm
-⚡ Snittwatt: 198 W
+⏱️ Varighet: 2t 05m
+📊 CGS: 88  (Hvor hardt: 93 | Hvor lenge: 82 | Hvor jevnt & effektivt: 88)
+🏅 Badges: Iron Lungs
 
-📈 Effektivitet: 1.25 watt/puls
-✅ Status: Økten matcher terskelprofilen
+🔧 Nøkkelmetrikker
+• IF 0.92   • VI 1.11   • Pa:Hr 2.4%   • W/slag 1.59 (+10% vs baseline)
+🔁 Mini-trend: siste 3 økter snitt 85  (↑ +3%)
+
+🔗 Strava: «CycleGraph CGS 88 · IF 0.92 · VI 1.11 · Pa:Hr 2.4% · W/slag 1.59 (↑+10%) · Trend ↑+3%»
