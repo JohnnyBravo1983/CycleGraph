@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyd
 *.pyo
+*.pyc
 .venv/
 venv/
 .env
@@ -13,11 +14,9 @@ venv/
 .ipynb_checkpoints/
 
 # --- Rust ---
-/core/target/
+/target/
+Cargo.lock  # Optional: legg til igjen hvis du ønsker eksakt avhengighetsstyring
 *.rs.bk
-
-# Valgfritt: ignorer Cargo.lock for libs, men behold for bin-prosjekter
-# Cargo.lock
 
 # --- Maturin build ---
 *.so
@@ -40,28 +39,32 @@ pnpm-debug.log*
 # --- VS Code / IDE ---
 .vscode/
 *.code-workspace
-.idea/
 
 # --- OS / Editor-specific files ---
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
+.idea/
 *.bak
 *.tmp
+*.log
 
-# --- Sensitive / lokal data ---
+# --- Custom files to protect ---
 config.json
 secrets.json
-*.token
-*.key
-*.crt
-*.pem
-
-# --- Testdata som skal være privat ---
 data/private_*.csv
-
-# --- Unntak: behold offentlig testdata ---
-!data/sample.csv
-!data/sample.ttl
-!shapes/session_shape.ttl
+output/*.json
+output/*.csv
+strava_test_*.json
+strava_test_*.csv
+data/strava_tokens.json
+# Strava data & genererte filer
+data/activities.json
+data/streams/
+data/compat/
+data/*.ttl
+data/*.parquet
+output/
+# --- Rust target folder ---
+/core/target/
