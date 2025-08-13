@@ -387,6 +387,23 @@ def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str):
             w.writeheader()
             w.writerow(row)
 
+# NEW: skriv historikk-kopi når vi ikke er i --dry-run
+def write_history_copy(history_dir: str, report: Dict[str, Any]):
+    """
+    Skriver en historikk-kopi med dato i filnavnet.
+    Filnavn: {session_id}_{YYYY-MM-DD}.json
+    """
+    os.makedirs(history_dir, exist_ok=True)
+    sid = report.get("session_id") or "session"
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    fname = f"{sid}_{date_str}.json"
+    path = os.path.join(history_dir, fname)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"ADVARSEL: Klarte ikke å skrive history-fil: {path} ({e})", file=sys.stderr)
+
 
 def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):
     msg = ("[DRY-RUN] " if dry_run else "") + \
@@ -419,32 +436,50 @@ def median(vals: list[float]):
     else:
         return float((v[n // 2 - 1] + v[n // 2]) / 2.0)
 
+# NEW: robust baseline-laster (28d, ±25%, mtime-fallback)
 def load_baseline_wpb(history_dir: str, cur_sid: str, cur_dur_min: float):
+    """
+    Leser JSON-rapporter i history_dir og returnerer median W/beat for økter:
+      - innenfor siste 28 dager (basert på dato i filnavn ELLER filens mtime)
+      - med varighet innenfor ±25% av gjeldende økt
+    """
     now = datetime.utcnow()
     window_start = now - timedelta(days=28)
 
     files = sorted(glob.glob(os.path.join(history_dir, "*.json")))
     candidates = []
+
     for p in files:
+        # 1) Les rapport
         try:
             with open(p, "r", encoding="utf-8") as f:
                 r = json.load(f)
         except Exception:
             continue
 
-        sid = r.get("session_id") or os.path.basename(p)
-        dt = parse_date_from_sid_or_name(sid) or parse_date_from_sid_or_name(os.path.basename(p))
-        if dt and dt < window_start:
-            continue
+        # 2) Dato: session_id/filnavn → ellers mtime
+        sid_name = r.get("session_id") or os.path.basename(p)
+        dt = parse_date_from_sid_or_name(sid_name) or parse_date_from_sid_or_name(os.path.basename(p))
+        if not dt:
+            try:
+                mtime = os.path.getmtime(p)
+                dt = datetime.utcfromtimestamp(mtime)
+            except Exception:
+                dt = None
 
+        if dt and dt < window_start:
+            continue  # for gammel
+
+        # 3) Felt
         wpb = r.get("w_per_beat")
         dmin = r.get("duration_min")
         if not isinstance(wpb, (int, float)) or not isinstance(dmin, (int, float)):
             continue
 
+        # 4) Varighetsvindu ±25%
         lo = cur_dur_min * 0.75
         hi = cur_dur_min * 1.25
-        if dmin < lo or dmin > hi:
+        if not (lo <= dmin <= hi):
             continue
 
         candidates.append(float(wpb))
@@ -525,6 +560,9 @@ def cmd_session(args: argparse.Namespace) -> int:
                 print(f"[DRY-RUN] DESC: {pieces.desc_header}")
             else:
                 write_report(outdir, sid, report, fmt)
+                # NEW: seed history når vi IKKE er i dry-run
+                write_history_copy(history_dir, report)
+
             if getattr(args, "publish_to_strava", False):
                 publish_to_strava_stub(report, getattr(args, "dry_run", False))
 
@@ -548,6 +586,8 @@ def cmd_session(args: argparse.Namespace) -> int:
                 print(f"[DRY-RUN] DESC: {pieces.desc_header}")
             else:
                 write_report(outdir, sid, r, fmt)
+                # NEW: seed history når vi IKKE er i dry-run
+                write_history_copy(history_dir, r)
 
         if getattr(args, "publish_to_strava", False):
             publish_to_strava_stub(reports[-1], getattr(args, "dry_run", False))
