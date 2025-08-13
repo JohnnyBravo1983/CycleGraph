@@ -1,6 +1,6 @@
 import http.server, socketserver, urllib.parse, webbrowser
 
-PORT = 5001
+PORT = 5000
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/callback"):
