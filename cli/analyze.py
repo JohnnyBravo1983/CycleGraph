@@ -16,8 +16,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 # Formatter for publiseringstekster (M7 4.1)
-from cli.formatters.strava_publish import build_publish_texts
-
+from cli.formatters.strava_publish import PublishPieces, build_publish_texts
+from cli.strava_client import publish_to_strava
 # =========================
 #  Felles: importer kjernen
 # =========================
@@ -406,9 +406,56 @@ def write_history_copy(history_dir: str, report: Dict[str, Any]):
 
 
 def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):
-    msg = ("[DRY-RUN] " if dry_run else "") + \
-          "TODO --publish-to-strava er ikke aktivert i M7. Implementeres i M8."
-    print(msg, file=sys.stderr)
+    """
+    Ekte Strava-publish (navnet beholdes for bakoverkompabilitet).
+    Bruker build_publish_texts -> PublishPieces -> publish_to_strava.
+    """
+    # Finn språk dersom det ligger i report.args; ellers default "no"
+    lang = (report.get("args", {}) or {}).get("lang", "no")
+
+    try:
+        res = build_publish_texts(report, lang=lang)
+        # Håndter både PublishPieces-objekt og ev. (comment, header, body)-tuple
+        if hasattr(res, "comment"):
+            comment_text = getattr(res, "comment", "") or ""
+            desc_header_text = getattr(res, "desc_header", "") or ""
+            desc_body_text = getattr(res, "desc_body", "") or ""
+        else:
+            # antas å være tuple/list
+            comment_text, desc_header_text, desc_body_text = res
+    except Exception as e:
+        print(f"[strava] build_publish_texts feilet: {e}")
+        return None
+
+    pieces = PublishPieces(
+        comment=comment_text,
+        desc_header=desc_header_text,
+        desc_body=desc_body_text
+    )
+
+    try:
+        aid, status = publish_to_strava(pieces, lang=lang, dry_run=dry_run)
+        print(f"[strava] activity_id={aid} status={status}")
+        return aid, status
+    except Exception as e:
+        print(f"[strava] publisering feilet: {e}")
+        return None
+
+
+    pieces = PublishPieces(
+        comment=comment_text,
+        desc_header=desc_header_text,
+        desc_body=desc_body_text
+    )
+
+    try:
+        aid, status = publish_to_strava(pieces, lang=lang, dry_run=dry_run)
+        print(f"[strava] activity_id={aid} status={status}")
+        return aid, status
+    except Exception as e:
+        print(f"[strava] publisering feilet: {e}")
+        return None
+
 
 
 # -----------------------------
