@@ -68,3 +68,8 @@ data/*.parquet
 output/
 # --- Rust target folder ---
 /core/target/
+# Office lock files
+~$*.docx
+
+# Office lock files
+~$*.docx
