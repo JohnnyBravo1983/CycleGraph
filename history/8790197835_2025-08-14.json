@@ -1,0 +1,25 @@
+{
+  "session_id": "8790197835",
+  "duration_min": 60.316666,
+  "avg_power": 197.77287,
+  "avg_hr": 151.77452,
+  "np": 202.38857,
+  "if": 0.7784176,
+  "vi": 1.0233383,
+  "pa_hr_pct": -8.565295,
+  "w_per_beat": 1.3030703,
+  "w_per_beat_baseline": 1.2577,
+  "scores": {
+    "intensity": 22.804148,
+    "duration": 56.638,
+    "quality": 61.0,
+    "cgs": 44.413063
+  },
+  "badges": [
+    "Metronome"
+  ],
+  "trend": {
+    "cgs_last3_avg": null,
+    "cgs_delta_vs_last3": null
+  }
+}

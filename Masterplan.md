@@ -10,7 +10,7 @@ M3 – CLI-oppsett & dataflyt (Ferdig)
 M4 – Dummydata & testkjøring (Ferdig)
 M5 – SHACL-validering (Ferdig)
 M6 – Strava-integrasjon (API & import) (Ferdig)
-M7 – Analysefunksjoner (effektivitet, treningsscore) (Ikke startet)
+M7 – Analysefunksjoner (effektivitet, treningsscore) Ferdig
 M8 – Webdemo & visualisering (Ikke startet)
 M9 – MVP-forberedelse & testing (Ikke startet)
 M10 – Feedback-innsamling & justeringer (Ikke startet)
