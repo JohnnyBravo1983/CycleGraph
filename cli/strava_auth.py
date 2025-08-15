@@ -40,6 +40,16 @@ def exchange_code_for_token(code: str):
         json.dump(data, f, indent=2)
     print(f"✅ Tokens lagret i: {TOK_FILE}")
 
+
+def load_tokens(tok_file: str = TOK_FILE):
+    """
+    Leser Strava-tokenfilen og returnerer JSON som dict.
+    Bevisst enkel: kastes videre om filen mangler/er korrupt.
+    """
+    with open(tok_file, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:

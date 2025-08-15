@@ -1,0 +1,25 @@
+{
+  "session_id": "test_big_engine",
+  "duration_min": 59.016666,
+  "avg_power": 200.0,
+  "avg_hr": 140.0,
+  "np": 200.00217,
+  "if": 0.7692391,
+  "vi": 1.0000108,
+  "pa_hr_pct": null,
+  "w_per_beat": 1.4285715,
+  "w_per_beat_baseline": 1.2123,
+  "scores": {
+    "intensity": 18.089476,
+    "duration": 55.892933,
+    "quality": 65.0,
+    "cgs": 43.50367
+  },
+  "badges": [
+    "Big Engine"
+  ],
+  "trend": {
+    "cgs_last3_avg": null,
+    "cgs_delta_vs_last3": null
+  }
+}

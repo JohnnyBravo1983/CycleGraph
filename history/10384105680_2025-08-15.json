@@ -1,0 +1,23 @@
+{
+  "session_id": "10384105680",
+  "duration_min": 47.983334,
+  "avg_power": 198.20631,
+  "avg_hr": 163.49115,
+  "np": 208.28064,
+  "if": 0.8010794,
+  "vi": 1.0508275,
+  "pa_hr_pct": -9.706519,
+  "w_per_beat": 1.2123367,
+  "w_per_beat_baseline": 1.3205,
+  "scores": {
+    "intensity": 37.586388,
+    "duration": 49.09259,
+    "quality": 55.0,
+    "cgs": 46.262333
+  },
+  "badges": [],
+  "trend": {
+    "cgs_last3_avg": null,
+    "cgs_delta_vs_last3": null
+  }
+}

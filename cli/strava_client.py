@@ -1,207 +1,139 @@
-# cli/strava_client.py
 from __future__ import annotations
-
-import json
-import os
-import time
-from pathlib import Path
-from typing import Optional, Tuple
-
+import os, json
+from typing import Any, Dict, Optional, Tuple
 import requests
+from . import strava_auth as S  # type: ignore
 
-# Bruker eksisterende M6-byggesteiner
-# - S.TOK_FILE -> data/strava_tokens.json
-# - S.refresh_if_needed(tokens, cid, csec, leeway_secs) -> dict med {"Authorization": "Bearer ..."}
-# - S.load_tokens(path) -> dict (kan være definert i strava_import; legg til hvis mangler)
-from cli import strava_import as S
+API_BASE = "https://www.strava.com/api/v3"
+TOKEN_URL = "https://www.strava.com/oauth/token"
 
-STRAVA_API_BASE = "https://www.strava.com/api/v3"
-STATE_LAST_IMPORT = Path("state/last_import.json")
+CID = getattr(S, "CID", None) or os.getenv("STRAVA_CLIENT_ID") or ""
+CSECRET = getattr(S, "CSECRET", None) or os.getenv("STRAVA_CLIENT_SECRET") or ""
+TOK_FILE = getattr(S, "TOK_FILE", None) or "data/strava_tokens.json"
 
+def _safe_load_tokens() -> Dict[str, Any]:
+    if hasattr(S, "load_tokens"):
+        try:
+            return S.load_tokens(TOK_FILE)  # type: ignore
+        except TypeError:
+            return S.load_tokens()  # type: ignore
+    with open(TOK_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _save_tokens(tokens: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(TOK_FILE), exist_ok=True)
+    with open(TOK_FILE, "w", encoding="utf-8") as f:
+        json.dump(tokens, f, indent=2)
 
 class StravaClient:
-    """
-    Tynn klient som alltid henter ferske Authorization-headers via S.refresh_if_needed
-    og gjenbruker M6 sin robuste token/refresh-logikk.
-    """
-
-    def __init__(self, timeout: int = 10, max_retries_5xx: int = 3):
+    def __init__(self, timeout: float = 15.0):
         self.timeout = timeout
-        self.max_retries_5xx = max_retries_5xx
 
-    # ---------- Internals ----------
-    def _headers(self) -> dict:
-        """
-        Hent ferske Authorization-headers via refresh_if_needed.
-        Forventer ENV: STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET i .env,
-        og en gyldig token-fil på S.TOK_FILE (data/strava_tokens.json).
-        """
-        # 1) last tokens fra fil (roterer automatisk ved refresh i refresh_if_needed)
-        tokens = S.load_tokens(S.TOK_FILE)
+    def _headers(self) -> Dict[str, str]:
+        tokens = _safe_load_tokens()
+        access = tokens.get("access_token") or tokens.get("accessToken") or ""
+        return {"Authorization": f"Bearer {access}", "Accept": "application/json"}
 
-        # 2) klient-credentials fra env
-        cid = os.getenv("STRAVA_CLIENT_ID")
-        csec = os.getenv("STRAVA_CLIENT_SECRET")
+    def _refresh_access_token(self) -> None:
+        tokens = _safe_load_tokens()
+        rtoken = tokens.get("refresh_token")
+        if not rtoken:
+            raise RuntimeError("Missing refresh_token")
+        cid = CID or os.getenv("STRAVA_CLIENT_ID") or ""
+        csec = CSECRET or os.getenv("STRAVA_CLIENT_SECRET") or ""
         if not cid or not csec:
-            raise RuntimeError(
-                "STRAVA_CLIENT_ID/STRAVA_CLIENT_SECRET mangler i miljøvariabler (.env)."
-            )
+            raise RuntimeError("Missing client id/secret for refresh")
+        payload = {
+            "client_id": cid,
+            "client_secret": csec,
+            "grant_type": "refresh_token",
+            "refresh_token": rtoken,
+        }
+        resp = requests.post(TOKEN_URL, data=payload, timeout=self.timeout)
+        if resp.status_code != 200:
+            resp.raise_for_status()
+        _save_tokens(resp.json())
 
-        # 3) få ferske headers (refresh hvis nær utløp; leeway 1 time)
-        headers = S.refresh_if_needed(tokens, cid, csec, leeway_secs=3600)
-        # legg på Accept for JSON
-        headers["Accept"] = "application/json"
-        return headers
-
-    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """
-        Wrapper:
-        - legger på headers (inkl. automatisk refresh via _headers())
-        - håndterer 5xx med retry/backoff
-        - håndterer 429 (rate limit) med ryddig feilmelding
-        - håndterer 401/403 ved å prøve en gang til (nye headers)
-        """
-        headers = kwargs.pop("headers", {})
-        merged_headers = {**self._headers(), **headers}
-
-        last_exc = None
-        for attempt in range(self.max_retries_5xx + 1):
-            try:
-                resp = requests.request(
-                    method, url, headers=merged_headers, timeout=self.timeout, **kwargs
-                )
-
-                # 401/403: prøv én gang til med ferske headers
-                if resp.status_code in (401, 403):
-                    merged_headers = {**self._headers(), **headers}
-                    resp = requests.request(
-                        method, url, headers=merged_headers, timeout=self.timeout, **kwargs
-                    )
-
-                # 429: Strava rate limit
-                if resp.status_code == 429:
-                    detail = resp.text[:500]
-                    raise RuntimeError(f"Strava rate limited (429). Response: {detail}")
-
-                # 5xx: retry med liten backoff
-                if 500 <= resp.status_code < 600 and attempt < self.max_retries_5xx:
-                    time.sleep(2.0)
-                    continue
-
-                return resp
-
-            except requests.RequestException as e:
-                last_exc = e
-                if attempt < self.max_retries_5xx:
-                    time.sleep(2.0)
-                    continue
-                raise
-
-        if last_exc:
-            raise last_exc
-        raise RuntimeError("Unknown request failure")
+    def _request(self, method: str, url: str, *, params=None, json_body=None, retry_on_401: bool = True) -> requests.Response:
+        headers = self._headers()
+        resp = requests.request(method.upper(), url, params=params, json=json_body, headers=headers, timeout=self.timeout)
+        if resp.status_code == 401 and retry_on_401:
+            self._refresh_access_token()
+            headers = self._headers()
+            resp = requests.request(method.upper(), url, params=params, json=json_body, headers=headers, timeout=self.timeout)
+        if resp.status_code >= 400:
+            resp.raise_for_status()
+        return resp
 
     # ---------- Public API ----------
-    def get_latest_activity_id(self) -> int:
-        """
-        GET /athlete/activities?per_page=1  -> returnerer siste aktivitetens id
-        """
-        url = f"{STRAVA_API_BASE}/athlete/activities"
+    def get_latest_activity_id(self) -> Optional[int]:
+        url = f"{API_BASE}/athlete/activities"
         resp = self._request("GET", url, params={"per_page": 1})
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"Failed to fetch latest activities: {resp.status_code} {resp.text[:500]}"
-            )
         data = resp.json()
-        if not data or "id" not in data[0]:
-            raise RuntimeError(
-                f"No recent activities found or unexpected payload: {json.dumps(data)[:500]}"
-            )
-        return int(data[0]["id"])
-
-    def create_comment(self, activity_id: int, text: str) -> None:
-        """
-        POST /activities/{id}/comments
-        Payload: {'text': <comment>}
-        """
-        url = f"{STRAVA_API_BASE}/activities/{activity_id}/comments"
-        resp = self._request("POST", url, data={"text": text})
-        if resp.status_code not in (200, 201):
-            raise RuntimeError(
-                f"Failed to create comment: {resp.status_code} {resp.text[:500]}"
-            )
-
-    def update_description(self, activity_id: int, description: str) -> None:
-        """
-        PUT /activities/{id}
-        Payload: {'description': <full description>}
-        NB: Denne setter HELE description.
-        """
-        url = f"{STRAVA_API_BASE}/activities/{activity_id}"
-        resp = self._request("PUT", url, data={"description": description})
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"Failed to update description: {resp.status_code} {resp.text[:500]}"
-            )
-
-    # ---------- Fallbacks / Helpers ----------
-    @staticmethod
-    def load_last_import_activity_id() -> Optional[int]:
-        if STATE_LAST_IMPORT.exists():
-            try:
-                obj = json.loads(STATE_LAST_IMPORT.read_text(encoding="utf-8"))
-                aid = obj.get("activity_id")
-                return int(aid) if aid is not None else None
-            except Exception:
-                return None
+        if isinstance(data, list) and data:
+            aid = data[0].get("id")
+            return int(aid) if aid is not None else None
         return None
 
-    def resolve_target_activity_id(self) -> int:
-        """
-        1) Bruk state/last_import.json hvis finnes
-        2) Ellers hent siste aktivitet
-        """
-        aid = self.load_last_import_activity_id()
-        if aid is not None:
-            return aid
-        return self.get_latest_activity_id()
+    def update_description(self, activity_id: int, description: str) -> None:
+        url = f"{API_BASE}/activities/{activity_id}"
+        body = {"description": description}
+        self._request("PUT", url, json_body=body)
 
+    def publish_to_strava(self, pieces: Any, *, activity_id: Optional[int] = None, dry_run: bool = False, lang: str = "no") -> Tuple[Optional[int], str]:
+        aid = activity_id
+        if aid is None:
+            try:
+                with open(os.path.join("state","last_import.json"), "r", encoding="utf-8") as f:
+                    aid = json.load(f).get("activity_id")
+            except FileNotFoundError:
+                aid = None
+        if aid is None:
+            aid = self.get_latest_activity_id()
+        if not aid:
+            return None, "[strava] activity_id=None (no valid activity)"
 
-def publish_to_strava(
-    pieces,
-    lang: str = "no",
-    dry_run: bool = False,
-) -> Tuple[Optional[int], str]:
+        comment, description = self._extract_pieces(pieces)
+        if dry_run:
+            return aid, f"[strava] activity_id={aid} status=dry-run comment_len={len(comment or '')} description_len={len(description or '')} lang={lang}"
+
+        final_desc = description or ""
+        if comment:
+            # prepend comment into description (since public comment endpoint is not available)
+            final_desc = (comment + ("\n\n" + final_desc if final_desc else "")).strip()
+
+        if final_desc:
+            self.update_description(aid, final_desc)
+
+        return aid, f"[strava] activity_id={aid} status=published"
+
+    @staticmethod
+    def _extract_pieces(pieces: Any) -> Tuple[Optional[str], Optional[str]]:
+        comment = None; description = None
+        if pieces is None:
+            return None, None
+        if hasattr(pieces, "comment") or hasattr(pieces, "description"):
+            return getattr(pieces, "comment", None), getattr(pieces, "description", None)
+        if isinstance(pieces, dict):
+            comment = pieces.get("comment")
+            description = pieces.get("description")
+            if not description:
+                header = pieces.get("header") or ""
+                body = pieces.get("body") or ""
+                description = (header + "\n\n" + body).strip() if (header or body) else None
+            return comment, description
+        if isinstance(pieces, (list, tuple)):
+            if len(pieces) >= 2: return pieces[0], pieces[1]
+            if len(pieces) == 1: return None, pieces[0]
+        if isinstance(pieces, str):
+            return None, pieces
+        return None, None
+# --- module-level shim for legacy import ---
+def publish_to_strava(pieces, *, activity_id=None, dry_run=False, lang="no"):
     """
-    pieces: PublishPieces fra formatteren (comment, desc_header, desc_body?)
-    Return: (activity_id, status-str)
+    Back-compat wrapper used by analyze.py:
+    returns (activity_id, status_str)
     """
-    client = StravaClient()
-
-    # Bygg description av header + ev. body (unngå doble mellomrom/linjeskift)
-    header = (getattr(pieces, "desc_header", "") or "").strip()
-    body = (getattr(pieces, "desc_body", "") or "").strip()
-    if header and body:
-        description = f"{header}\n\n{body}".strip()
-    else:
-        description = header or body
-
-    comment = (getattr(pieces, "comment", "") or "").strip()
-
-    if dry_run:
-        return (
-            None,
-            f"[dry-run] Would publish to Strava: comment={len(comment)} chars, "
-            f"description={len(description)} chars, lang={lang}",
-        )
-
-    # Resolving target activity
-    aid = client.resolve_target_activity_id()
-
-    # Publiser i rekkefølge: kommentar → beskrivelse
-    if comment:
-        client.create_comment(aid, comment)
-    if description:
-        client.update_description(aid, description)
-
-    return aid, "published"
+    return StravaClient().publish_to_strava(
+        pieces, activity_id=activity_id, dry_run=dry_run, lang=lang
+    )
