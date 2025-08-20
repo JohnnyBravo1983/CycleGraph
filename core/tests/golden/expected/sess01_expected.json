@@ -1,0 +1,8 @@
+{
+  "ftp": 250.0,
+  "np":         { "value": 195.00,  "tol": 2.0 },
+  "if":         { "value": 0.780,  "tol": 0.03 },
+  "vi":         { "value": 1.00, "tol": 0.03 },
+  "pa_hr":      { "value": 1.02, "tol": 0.05 },
+  "w_per_beat": { "value": 1.566,  "tol": 0.10 }
+}

@@ -17,36 +17,40 @@ M10 – Feedback-innsamling & justeringer (Ikke startet)
 M11 – Demo-lansering & markedsføring (Ikke startet)
 M12 – Kommersialisering & skalering (Ikke startet) 
 
-Statusoversikt (oppdatert etter hver milepæl)
-Dato	Milepæl	Status	Beskrivelse
-2025-08-07	Opprette prosjektstruktur	Ferdig	Opprettet mappeoppsett (core, cli, data, docs, shapes), initialisert GitHub-repo (public) med README, lisens og .gitignore.
-2025-08-08	Sette opp Rust-core med pyo3 (enkel funksjon)	Ferdig	Konfigurert Cargo.toml med pyo3, lagt inn første testfunksjon og bekreftet bygging.
-2025-08-09	Installere maturin og teste kobling til Python	Ferdig	Installert og testet Maturin-build, bekreftet Python-import av Rust-modul.
-2025-08-09	Lage analysefunksjon for effektivitet (Rust)	Ferdig	Implementert beregning av snitteffektivitet, øktstatus og per-punkt-data, testet via Python.
-2025-08-10	Sette opp Python CLI (analyze.py)	Ferdig	Laget CLI med argparse, integrert Rust-funksjon, testet full CSV → Rust → output-flyt.
-2025-08-11	Lage første dummydata (CSV + RDF)	Ferdig	Opprettet sample_data med testfiler for CLI og validering.
-2025-08-12	Kjøre CLI → Rust → output-flyt	Ferdig	Verifisert analyse med dummydata, konsistent output.Ferdig
-2025-08-12	Finne masse testere (lokalt og bredt / LinkedIn)	Påbegynt	Strategi definert for lokal og online outreach, avventer Strava-integrasjon.
-2025-08-13	Legge inn webanalyse (Plausible eller lignende)	Ikke startet	
-2025-08-14	Lage anonym logging fra CLI (analysebruk)	Ikke startet	
-2025-08-14	Utvide analysefunksjon til flere økter	Ikke startet	
-2025-08-15	Implementere SHACL-validering	Ferdig	Lagt til SHACL-shapes og Python-script for RDF-validering, testet med dummydata.
-2025-08-16	Integrere validering i CLI	Ferdig	CLI-utvidelse med valideringsopsjon og terminaloutput.
-2025-08-17	Utvikle treningsscore-logikk	Ikke startet	
-2025-08-18	Opprette Strava API-tilgang og testimport	Ferdig	OAuth/scopes ok, token lagres sikkert; første testimport verifisert.
-2025-08-11	M6 – Strava OAuth autorisasjon	Ferdig	Fikset .env (UTF-8 uten BOM), lastet CID/secret korrekt, kjørte authorize → code → token (200 OK), lagret data/strava_tokens.json. Callback via http://127.0.0.1:5001/callback.
-2025-08-11	M6 – Tokenhåndtering & lagring	Ferdig	Preemptiv refresh, håndtering av rotert refresh_token, vennlige feilmeldinger. Første testimport gjennomført.
-2025-08-19	Lese Strava-data og konvertere til CSV/RDF	Ferdig	Streams→CSV per aktivitet (time,hr,watts,moving,altitude) + CSV→TTL; robust rate-limit/feilhåndtering.
-2025-08-20	Kjøre CLI-analyse på Strava-økter	Ferdig	Analyze kjørt på ≥3 ekte Ride-økter (HR+watts) uten feil; rapporter skrevet til output/.
-2025-08-22	Lage enkel webdemo med output	Ikke startet	
-2025-08-23	Visualisere grafer og fremgang (JS)	Ikke startet	
-2025-08-24	Forberede MVP for testsyklister	Ikke startet	
-2025-08-27	Samle feedback fra testere	Ikke startet	
-2025-08-29	Justere analyse ut fra feedback	Ikke startet	
-2025-09-01	🚀 Demo-lansering til testere og offentlig	Ikke startet	
-2025-09-01	Planlegge kommersialisering (beta / abonnement)	Påbegynt	Fastlagt Open Core-modell og trinnvis lanseringsplan.
-2025-09-02	Poste 'nå kommer den'-innlegg på LinkedIn	Ikke startet	
-2025-09-03	Etablere ny kanal / lenke for feedback	Ikke startet	
+Dato        Milepæl                                           Status      Beskrivelse
+2025-08-07  Opprette prosjektstruktur                         Ferdig      Opprettet mappeoppsett (core, cli, data, docs, shapes), initialisert GitHub-repo (public) med README, lisens og .gitignore.
+2025-08-08  Sette opp Rust-core med pyo3 (enkel funksjon)     Ferdig      Konfigurert Cargo.toml med pyo3, lagt inn første testfunksjon og bekreftet bygging.
+2025-08-09  Installere maturin og teste kobling til Python    Ferdig      Installert og testet Maturin-build, bekreftet Python-import av Rust-modul.
+2025-08-09  Lage analysefunksjon for effektivitet (Rust)      Ferdig      Implementert beregning av snitteffektivitet, øktstatus og per-punkt-data, testet via Python.
+2025-08-10  Sette opp Python CLI (analyze.py)                 Ferdig      Laget CLI med argparse, integrert Rust-funksjon, testet full CSV → Rust → output-flyt.
+2025-08-11  Lage første dummydata (CSV + RDF)                 Ferdig      Opprettet sample_data med testfiler for CLI og validering.
+2025-08-11  M6 – Strava OAuth autorisasjon                    Ferdig      Fikset .env (UTF-8 uten BOM), lastet CID/secret korrekt, authorize → code → token (200 OK), lagret data/strava_tokens.json. Callback via http://127.0.0.1:5001/callback.
+2025-08-11  M6 – Tokenhåndtering & lagring                    Ferdig      Preemptiv refresh, håndtering av rotert refresh_token, vennlige feilmeldinger. Første testimport gjennomført.
+2025-08-12  Kjøre CLI → Rust → output-flyt                    Ferdig      Verifisert analyse med dummydata, konsistent output.
+2025-08-12  Finne masse testere (lokalt og bredt / LinkedIn)  Påbegynt    Strategi definert for lokal og online outreach, avventer Strava-publisering.
+2025-08-13  Legge inn webanalyse (Plausible eller lignende)   Ikke startet
+2025-08-14  Lage anonym logging fra CLI (analysebruk)         Ikke startet
+2025-08-14  Utvide analysefunksjon til flere økter            Ikke startet
+2025-08-15  Implementere SHACL-validering                     Ferdig      Lagt til SHACL-shapes og Python-script for RDF-validering, testet med dummydata.
+2025-08-16  Integrere validering i CLI                        Ferdig      CLI-utvidelse med valideringsopsjon og terminaloutput.
+2025-08-17  Utvikle treningsscore-logikk (CGS v1)             Ferdig      IF/NP/VI/Pa:Hr/WpB + 28d baseline, vekter 0.4/0.3/0.3, badges Big Engine/Metronome.
+2025-08-18  Opprette Strava API-tilgang og testimport         Ferdig      OAuth/scopes ok, token lagres sikkert; første testimport verifisert.
+2025-08-19  Strava-klient (description update + fallback)     Ferdig      Robust klient m/ auto-refresh, header-fiks, comment→description fallback, idempotens-logg.
+2025-08-19  Lese Strava-data og konvertere til CSV/RDF        Ferdig      Streams→CSV (time,hr,watts,moving,altitude) + CSV→TTL; rate-limit/feilhåndtering.
+2025-08-20  Kjøre CLI-analyse på Strava-økter                 Ferdig      Analyze kjørt på ≥3 ekte Ride-økter (HR+watts) uten feil; rapporter skrevet til output/.
+2025-08-20  Python: formatter-tester (trim/lang/fallbacks)    Ferdig      tests/test_publish_formatter.py grønn (adaptiv compat-shim).
+2025-08-20  Rust: unit, golden og perf-guard                  Ferdig      5 tester grønt; golden toleranser lagt inn; 2h@1Hz ≤200ms.
+2025-08-20  Strava-publisering verifisert live                Ferdig      Tekst oppdatert på testaktivitet; dry-run støttes; lengde/ellipsis håndtert.
+2025-08-20  Dokumentasjon: CGS_v1, CLI usage, Strava publish  Ferdig      docs/*.md lagt inn; versjonsmapping & changelog.
+2025-08-22  Lage enkel webdemo med output                     Ikke startet
+2025-08-23  Visualisere grafer og fremgang (JS)               Ikke startet
+2025-08-24  Forberede MVP for testsyklister                   Ikke startet
+2025-08-27  Samle feedback fra testere                        Ikke startet
+2025-08-29  Justere analyse ut fra feedback                   Ikke startet
+2025-09-01  🚀 Demo-lansering til testere og offentlig         Ikke startet
+2025-09-01  Planlegge kommersialisering (beta / abonnement)   Påbegynt    Fastlagt Open Core-modell og trinnvis lanseringsplan.
+2025-09-02  Poste 'nå kommer den'-innlegg på LinkedIn         Ikke startet
+2025-09-03  Etablere ny kanal / lenke for feedback            Ikke startet
 
 M6 – Strava-integrasjon (API & import) – status per 2025-08-12
 ✅ OAuth & tokens på plass (redirect/scopes, .env).
@@ -56,6 +60,13 @@ M6 – Strava-integrasjon (API & import) – status per 2025-08-12
 ✅ Robust feilhåndtering (401/403/429/5xx).
 ✅ Analyze kjørt på ≥3 ekte Ride-økter; rapporter skrevet. 
 
+M7 – Analysefunksjoner (effektivitet, treningsscore) – status per 2025-08-20
+✅ CGS v1 (IF/NP/VI/Pa:Hr/WpB + 28d baseline ±25 % varighet, median→trimmed→global→None).
+✅ Badges: Big Engine (+6 %, ≥30 min), Metronome (VI≤1.05 & Pa:Hr≤1.05).
+✅ Python: Strava publish formatter (språk/trim/fallbacks) + enhetstester (grønt).
+✅ Rust: Unit + golden + perf-guard (2h@1Hz ≤200ms) – alle tester grønne.
+✅ Strava-klient: robust publish (auto-refresh, idempotens, fallback), verifisert live.
+✅ Docs: CGS_v1 (med changelog), CLI usage, Strava publish.
 
 
 

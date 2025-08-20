@@ -1,9 +1,20 @@
-use pyo3::prelude::*;
+// core/src/lib.rs
 
+// Eksponer metrics-modulen uansett (brukes av testene)
+pub mod metrics;
+
+// ---------------- PYTHON BINDINGS (skjules i testbuild) ----------------
+#[cfg(not(test))]
+use pyo3::prelude::*;
+#[cfg(not(test))]
+use pyo3::wrap_pyfunction;
+
+#[cfg(not(test))]
 #[pyfunction]
-fn calculate_efficiency_series(watts: Vec<f64>, pulses: Vec<f64>) 
-    -> PyResult<(f64, String, Vec<f64>, Vec<String>)> 
-{
+fn calculate_efficiency_series(
+    watts: Vec<f64>,
+    pulses: Vec<f64>,
+) -> PyResult<(f64, String, Vec<f64>, Vec<String>)> {
     if watts.is_empty() || pulses.is_empty() || watts.len() != pulses.len() {
         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
             "Watt og puls-lister må ha samme lengde og ikke være tomme.",
@@ -45,8 +56,209 @@ fn calculate_efficiency_series(watts: Vec<f64>, pulses: Vec<f64>)
     Ok((avg_eff, session_status, per_point_eff, per_point_status))
 }
 
+#[cfg(not(test))]
 #[pymodule]
-fn cyclegraph_core(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
+fn cyclegraph_core(
+    _py: Python,
+    m: &pyo3::Bound<'_, pyo3::types::PyModule>, // PyO3 0.22 signatur
+) -> PyResult<()> {
+    // Registrér py-funksjoner her (kan stå kommentert hvis du ikke trenger dem nå):
+    // m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
     Ok(())
+}
+// ---------------- END PYTHON BINDINGS -------------------
+
+
+// -----------------------------------------------------------------------------
+// TESTS (M7) – unit + golden + perf-guard
+// -----------------------------------------------------------------------------
+#[cfg(test)]
+mod m7_tests {
+    use std::{iter, path::PathBuf, time::Instant};
+
+    // Antatt metrics-API i crate::metrics
+    use crate::metrics;
+
+    // === Helpers ===
+    fn const_series(val: f32, n: usize) -> Vec<f32> {
+        iter::repeat(val).take(n).collect()
+    }
+    fn ramp_series(start: f32, step: f32, n: usize) -> Vec<f32> {
+        (0..n).map(|i| start + step * (i as f32)).collect()
+    }
+
+    // === Syntetiske unit-tester ===
+    #[test]
+    fn np_if_vi_constant_power() {
+        let hz = 1.0;
+        let p = const_series(200.0, 1800); // 30 min
+        let np = metrics::np(&p, hz);
+        let avg = 200.0;
+        let ftp = 250.0;
+        let iff = metrics::intensity_factor(np, ftp);
+        let vi = metrics::variability_index(np, avg);
+
+        assert!((np - avg).abs() < 1.0, "np={} avg={}", np, avg);
+        assert!((vi - 1.0).abs() < 0.02, "vi={}", vi);
+        assert!(iff > 0.0 && iff < 2.0);
+    }
+
+    #[test]
+    fn pa_hr_monotone_effort_reasonable() {
+        let hz = 1.0;
+        let p = ramp_series(120.0, 0.05, 3600);   // 1h svakt stigende effekt
+        let hr = ramp_series(120.0, 0.03, 3600);  // HR stiger saktere
+        let pa = metrics::pa_hr(&hr, &p, hz);
+        assert!(pa > 0.95 && pa < 1.08, "pa_hr={}", pa);
+    }
+
+    #[test]
+    fn w_per_beat_defined_when_hr_power_present() {
+        let p = const_series(210.0, 600);
+        let hr = const_series(150.0, 600);
+        let wpb = metrics::w_per_beat(&p, &hr);
+        assert!(wpb > 1.0 && wpb < 2.0, "w_per_beat={}", wpb);
+    }
+
+    // === Golden-tester (leser CSV + forventning fra JSON) ===
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    struct Row {
+    #[serde(rename = "time")]
+    _time: f32,   // vi leser "time", men bruker den ikke i M7-testene
+    hr: Option<f32>,
+    watts: Option<f32>,
+}
+
+
+    #[derive(Deserialize)]
+    struct ExpField { value: f32, tol: f32 }
+
+    #[derive(Deserialize)]
+    struct Expected {
+        #[serde(default)]
+        ftp: Option<f32>,
+        #[serde(default)]
+        np: Option<ExpField>,
+        #[serde(rename = "if", default)]
+        i_f: Option<ExpField>,
+        #[serde(default)]
+        vi: Option<ExpField>,
+        #[serde(default)]
+        pa_hr: Option<ExpField>,
+        #[serde(default)]
+        w_per_beat: Option<ExpField>,
+    }
+
+    fn manifest_path(p: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p)
+    }
+
+    fn read_streams(csv_path: &str) -> (Vec<f32>, Vec<f32>) {
+        let mut rdr = csv::Reader::from_path(manifest_path(csv_path))
+            .expect("open csv");
+        let mut hr = Vec::<f32>::new();
+        let mut p = Vec::<f32>::new();
+        for rec in rdr.deserialize::<Row>() {
+            let r = rec.expect("row");
+            hr.push(r.hr.unwrap_or(0.0));
+            p.push(r.watts.unwrap_or(0.0));
+        }
+        (p, hr)
+    }
+
+    fn read_expected(json_path: &str) -> Expected {
+        let f = std::fs::File::open(manifest_path(json_path)).expect("open json");
+        serde_json::from_reader::<_, Expected>(std::io::BufReader::new(f)).expect("parse expected")
+    }
+
+    fn approx(val: f32, exp: f32, tol: f32) -> bool {
+        (val - exp).abs() <= tol
+    }
+
+    #[test]
+    fn golden_sessions_match_with_tolerance() {
+        let cases = [
+            ("tests/golden/data/sess01_streams.csv", "tests/golden/expected/sess01_expected.json"),
+            ("tests/golden/data/sess02_streams.csv", "tests/golden/expected/sess02_expected.json"),
+            ("tests/golden/data/sess03_streams.csv", "tests/golden/expected/sess03_expected.json"),
+        ];
+
+        for (csv_path, json_path) in cases {
+            let (p, hr) = read_streams(csv_path);
+            assert!(!p.is_empty(), "empty power series for {}", csv_path);
+
+            let exp = read_expected(json_path);
+            let hz = 1.0;
+
+            let np = metrics::np(&p, hz);
+            let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
+            let ftp = exp.ftp.unwrap_or(250.0);
+            let iff = metrics::intensity_factor(np, ftp);
+            let vi  = metrics::variability_index(np, avg);
+            let pa  = metrics::pa_hr(&hr, &p, hz);
+            let wpb = metrics::w_per_beat(&p, &hr);
+
+            if let Some(f) = exp.np.as_ref()         { assert!(approx(np,  f.value, f.tol),   "NP {} vs {}±{} ({})",  np,  f.value, f.tol,  csv_path); }
+            if let Some(f) = exp.i_f.as_ref()        { assert!(approx(iff, f.value, f.tol),   "IF {} vs {}±{} ({})",  iff, f.value, f.tol,  csv_path); }
+            if let Some(f) = exp.vi.as_ref()         { assert!(approx(vi,  f.value, f.tol),   "VI {} vs {}±{} ({})",  vi,  f.value, f.tol,  csv_path); }
+            if let Some(f) = exp.pa_hr.as_ref()      { assert!(approx(pa,  f.value, f.tol),   "Pa:Hr {} vs {}±{} ({})", pa, f.value, f.tol, csv_path); }
+            if let Some(f) = exp.w_per_beat.as_ref() { assert!(approx(wpb, f.value, f.tol),   "WpB {} vs {}±{} ({})", wpb, f.value, f.tol,  csv_path); }
+        }
+    }
+
+    // HJELPER for å fylle expected-filer (kjør med --ignored)
+    #[test]
+    #[ignore]
+    fn dump_golden_values() {
+        let cases = [
+            ("tests/golden/data/sess01_streams.csv",  "tests/golden/expected/sess01_expected.json"),
+            ("tests/golden/data/sess02_streams.csv",  "tests/golden/expected/sess02_expected.json"),
+            ("tests/golden/data/sess03_streams.csv",  "tests/golden/expected/sess03_expected.json"),
+        ];
+        for (csv_path, json_path) in cases {
+            let (p, hr) = read_streams(csv_path);
+            let hz = 1.0;
+            let np = metrics::np(&p, hz);
+            let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
+            let ftp = 250.0;
+            let iff = metrics::intensity_factor(np, ftp);
+            let vi  = metrics::variability_index(np, avg);
+            let pa  = metrics::pa_hr(&hr, &p, hz);
+            let wpb = metrics::w_per_beat(&p, &hr);
+            println!("\n=== {} === (write into {})", csv_path, json_path);
+            println!("{{");
+            println!("  \"ftp\": {},", ftp);
+            println!("  \"np\":         {{ \"value\": {:.2},  \"tol\": 2.0 }},", np);
+            println!("  \"if\":         {{ \"value\": {:.3},  \"tol\": 0.03 }},", iff);
+            println!("  \"vi\":         {{ \"value\": {:.3},  \"tol\": 0.03 }},", vi);
+            println!("  \"pa_hr\":      {{ \"value\": {:.3},  \"tol\": 0.05 }},", pa);
+            println!("  \"w_per_beat\": {{ \"value\": {:.3},  \"tol\": 0.10 }}",  wpb);
+            println!("}}");
+        }
+    }
+
+    // === Perf-guard (2h @ 1Hz ≤ 200 ms; kan overstyres med CG_PERF_MS) ===
+    #[test]
+    fn perf_guard_two_hours_one_hz() {
+        let n = 2 * 60 * 60; // 7200 samples
+        let hz = 1.0;
+
+        // syntetiske data: små bølger
+        let p: Vec<f32>  = (0..n).map(|i| 180.0 + ((i % 60) as f32) * 0.5).collect();
+        let hr: Vec<f32> = (0..n).map(|i| 140.0 + ((i % 90) as f32) * 0.3).collect();
+
+        let t0 = Instant::now();
+        let np = metrics::np(&p, hz);
+        let _if = metrics::intensity_factor(np, 250.0);
+        let _vi = metrics::variability_index(np, 200.0);
+        let _pa = metrics::pa_hr(&hr, &p, hz);
+        let _wb = metrics::w_per_beat(&p, &hr);
+        let dt = t0.elapsed();
+
+        let limit_ms: u128 = std::env::var("CG_PERF_MS").ok()
+            .and_then(|s| s.parse::<u128>().ok()).unwrap_or(200);
+
+        assert!(dt.as_millis() <= limit_ms, "perf guard: {} ms > {} ms", dt.as_millis(), limit_ms);
+    }
 }
