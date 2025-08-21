@@ -73,3 +73,7 @@ output/
 
 # Office lock files
 ~$*.docx
+
+config/cgs_v1_1.yaml
+
+data/*.csv
