@@ -41,7 +41,6 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "pyo3",
- "pyo3-macros",
  "serde",
  "serde_json",
  "thiserror",

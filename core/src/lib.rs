@@ -1,85 +1,84 @@
+
 // core/src/lib.rs
 
-// Eksponer metrics-modulen uansett (brukes av testene)
+// Rust-kjernen (alltid tilgjengelig)
 pub mod metrics;
 
-// ---------------- PYTHON BINDINGS (skjules i testbuild) ----------------
-#[cfg(not(test))]
-use pyo3::prelude::*;
-#[cfg(not(test))]
-use pyo3::wrap_pyfunction;
+// -------- PYTHON BINDINGS (kun når --features python) --------
+#[cfg(feature = "python")]
+mod pybindings {
+    use pyo3::exceptions::PyValueError;
+    use pyo3::prelude::*;        // Bound, PyModule, PyResult, Python, etc.
+    use pyo3::wrap_pyfunction;   // makroen må importeres i samme modul
 
-#[cfg(not(test))]
-#[pyfunction]
-fn calculate_efficiency_series(
-    watts: Vec<f64>,
-    pulses: Vec<f64>,
-) -> PyResult<(f64, String, Vec<f64>, Vec<String>)> {
-    if watts.is_empty() || pulses.is_empty() || watts.len() != pulses.len() {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "Watt og puls-lister må ha samme lengde og ikke være tomme.",
-        ));
-    }
+    #[pyfunction]
+    pub fn calculate_efficiency_series(
+        watts: Vec<f64>,
+        pulses: Vec<f64>,
+    ) -> PyResult<(f64, String, Vec<f64>, Vec<String>)> {
+        if watts.is_empty() || pulses.is_empty() || watts.len() != pulses.len() {
+            return Err(PyErr::new::<PyValueError, _>(
+                "Watt og puls-lister må ha samme lengde og ikke være tomme.",
+            ));
+        }
 
-    // Beregn snittverdier
-    let avg_watt: f64 = watts.iter().sum::<f64>() / watts.len() as f64;
-    let avg_pulse: f64 = pulses.iter().sum::<f64>() / pulses.len() as f64;
-    let avg_eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
+        // Beregn snittverdier
+        let avg_watt: f64 = watts.iter().sum::<f64>() / watts.len() as f64;
+        let avg_pulse: f64 = pulses.iter().sum::<f64>() / pulses.len() as f64;
+        let avg_eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
 
-    // Status for hele økten
-    let session_status = if avg_eff < 1.0 {
-        "Lav effekt – vurder å øke tråkkfrekvens eller intensitet.".to_string()
-    } else if avg_pulse > 170.0 {
-        "Høy puls – vurder lengre restitusjon.".to_string()
-    } else {
-        "OK – treningen ser balansert ut.".to_string()
-    };
-
-    // Per-datapunkt effektivitet + status
-    let mut per_point_eff = Vec::new();
-    let mut per_point_status = Vec::new();
-
-    for (w, p) in watts.iter().zip(pulses.iter()) {
-        let eff = if *p == 0.0 { 0.0 } else { w / p };
-        per_point_eff.push(eff);
-
-        let status = if eff < 1.0 {
-            "Lav effekt".to_string()
-        } else if *p > 170.0 {
-            "Høy puls".to_string()
+        // Status for hele økten
+        let session_status = if avg_eff < 1.0 {
+            "Lav effekt – vurder å øke tråkkfrekvens eller intensitet.".to_string()
+        } else if avg_pulse > 170.0 {
+            "Høy puls – vurder lengre restitusjon.".to_string()
         } else {
-            "OK".to_string()
+            "OK – treningen ser balansert ut.".to_string()
         };
-        per_point_status.push(status);
+
+        // Per-datapunkt effektivitet + status
+        let mut per_point_eff = Vec::with_capacity(watts.len());
+        let mut per_point_status = Vec::with_capacity(watts.len());
+
+        for (w, p) in watts.iter().zip(pulses.iter()) {
+            let eff = if *p == 0.0 { 0.0 } else { w / p };
+            per_point_eff.push(eff);
+
+            let status = if eff < 1.0 {
+                "Lav effekt"
+            } else if *p > 170.0 {
+                "Høy puls"
+            } else {
+                "OK"
+            }
+            .to_string();
+            per_point_status.push(status);
+        }
+
+        Ok((avg_eff, session_status, per_point_eff, per_point_status))
     }
 
-    Ok((avg_eff, session_status, per_point_eff, per_point_status))
+    // PyO3 0.22: Bound<'_, PyModule>
+    #[pymodule]
+    fn cyclegraph_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
+        Ok(())
+    }
 }
+// -------- END PYTHON BINDINGS --------
 
-#[cfg(not(test))]
-#[pymodule]
-fn cyclegraph_core(
-    _py: Python,
-    m: &pyo3::Bound<'_, pyo3::types::PyModule>, // PyO3 0.22 signatur
-) -> PyResult<()> {
-    // Registrér py-funksjoner her (kan stå kommentert hvis du ikke trenger dem nå):
-    // m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
-    Ok(())
-}
-// ---------------- END PYTHON BINDINGS -------------------
+
 
 
 // -----------------------------------------------------------------------------
 // TESTS (M7) – unit + golden + perf-guard
+// (uendret – kjører uten python-feature)
 // -----------------------------------------------------------------------------
 #[cfg(test)]
 mod m7_tests {
     use std::{iter, path::PathBuf, time::Instant};
-
-    // Antatt metrics-API i crate::metrics
     use crate::metrics;
 
-    // === Helpers ===
     fn const_series(val: f32, n: usize) -> Vec<f32> {
         iter::repeat(val).take(n).collect()
     }
@@ -87,11 +86,10 @@ mod m7_tests {
         (0..n).map(|i| start + step * (i as f32)).collect()
     }
 
-    // === Syntetiske unit-tester ===
     #[test]
     fn np_if_vi_constant_power() {
         let hz = 1.0;
-        let p = const_series(200.0, 1800); // 30 min
+        let p = const_series(200.0, 1800);
         let np = metrics::np(&p, hz);
         let avg = 200.0;
         let ftp = 250.0;
@@ -106,8 +104,8 @@ mod m7_tests {
     #[test]
     fn pa_hr_monotone_effort_reasonable() {
         let hz = 1.0;
-        let p = ramp_series(120.0, 0.05, 3600);   // 1h svakt stigende effekt
-        let hr = ramp_series(120.0, 0.03, 3600);  // HR stiger saktere
+        let p = ramp_series(120.0, 0.05, 3600);
+        let hr = ramp_series(120.0, 0.03, 3600);
         let pa = metrics::pa_hr(&hr, &p, hz);
         assert!(pa > 0.95 && pa < 1.08, "pa_hr={}", pa);
     }
@@ -120,16 +118,14 @@ mod m7_tests {
         assert!(wpb > 1.0 && wpb < 2.0, "w_per_beat={}", wpb);
     }
 
-    // === Golden-tester (leser CSV + forventning fra JSON) ===
     use serde::Deserialize;
     #[derive(Deserialize)]
     struct Row {
-    #[serde(rename = "time")]
-    _time: f32,   // vi leser "time", men bruker den ikke i M7-testene
-    hr: Option<f32>,
-    watts: Option<f32>,
-}
-
+        #[serde(rename = "time")]
+        _time: f32,
+        hr: Option<f32>,
+        watts: Option<f32>,
+    }
 
     #[derive(Deserialize)]
     struct ExpField { value: f32, tol: f32 }
@@ -155,8 +151,7 @@ mod m7_tests {
     }
 
     fn read_streams(csv_path: &str) -> (Vec<f32>, Vec<f32>) {
-        let mut rdr = csv::Reader::from_path(manifest_path(csv_path))
-            .expect("open csv");
+        let mut rdr = csv::Reader::from_path(manifest_path(csv_path)).expect("open csv");
         let mut hr = Vec::<f32>::new();
         let mut p = Vec::<f32>::new();
         for rec in rdr.deserialize::<Row>() {
@@ -191,7 +186,7 @@ mod m7_tests {
             let exp = read_expected(json_path);
             let hz = 1.0;
 
-            let np = metrics::np(&p, hz);
+            let np  = metrics::np(&p, hz);
             let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
             let ftp = exp.ftp.unwrap_or(250.0);
             let iff = metrics::intensity_factor(np, ftp);
@@ -207,49 +202,15 @@ mod m7_tests {
         }
     }
 
-    // HJELPER for å fylle expected-filer (kjør med --ignored)
-    #[test]
-    #[ignore]
-    fn dump_golden_values() {
-        let cases = [
-            ("tests/golden/data/sess01_streams.csv",  "tests/golden/expected/sess01_expected.json"),
-            ("tests/golden/data/sess02_streams.csv",  "tests/golden/expected/sess02_expected.json"),
-            ("tests/golden/data/sess03_streams.csv",  "tests/golden/expected/sess03_expected.json"),
-        ];
-        for (csv_path, json_path) in cases {
-            let (p, hr) = read_streams(csv_path);
-            let hz = 1.0;
-            let np = metrics::np(&p, hz);
-            let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
-            let ftp = 250.0;
-            let iff = metrics::intensity_factor(np, ftp);
-            let vi  = metrics::variability_index(np, avg);
-            let pa  = metrics::pa_hr(&hr, &p, hz);
-            let wpb = metrics::w_per_beat(&p, &hr);
-            println!("\n=== {} === (write into {})", csv_path, json_path);
-            println!("{{");
-            println!("  \"ftp\": {},", ftp);
-            println!("  \"np\":         {{ \"value\": {:.2},  \"tol\": 2.0 }},", np);
-            println!("  \"if\":         {{ \"value\": {:.3},  \"tol\": 0.03 }},", iff);
-            println!("  \"vi\":         {{ \"value\": {:.3},  \"tol\": 0.03 }},", vi);
-            println!("  \"pa_hr\":      {{ \"value\": {:.3},  \"tol\": 0.05 }},", pa);
-            println!("  \"w_per_beat\": {{ \"value\": {:.3},  \"tol\": 0.10 }}",  wpb);
-            println!("}}");
-        }
-    }
-
-    // === Perf-guard (2h @ 1Hz ≤ 200 ms; kan overstyres med CG_PERF_MS) ===
     #[test]
     fn perf_guard_two_hours_one_hz() {
         let n = 2 * 60 * 60; // 7200 samples
         let hz = 1.0;
-
-        // syntetiske data: små bølger
         let p: Vec<f32>  = (0..n).map(|i| 180.0 + ((i % 60) as f32) * 0.5).collect();
         let hr: Vec<f32> = (0..n).map(|i| 140.0 + ((i % 90) as f32) * 0.3).collect();
 
         let t0 = Instant::now();
-        let np = metrics::np(&p, hz);
+        let np  = metrics::np(&p, hz);
         let _if = metrics::intensity_factor(np, 250.0);
         let _vi = metrics::variability_index(np, 200.0);
         let _pa = metrics::pa_hr(&hr, &p, hz);
@@ -259,6 +220,12 @@ mod m7_tests {
         let limit_ms: u128 = std::env::var("CG_PERF_MS").ok()
             .and_then(|s| s.parse::<u128>().ok()).unwrap_or(200);
 
-        assert!(dt.as_millis() <= limit_ms, "perf guard: {} ms > {} ms", dt.as_millis(), limit_ms);
+    assert!(
+    dt.as_millis() <= limit_ms,
+    "perf guard: {} ms > {} ms",
+    dt.as_millis(),
+    limit_ms
+);
+
     }
 }
