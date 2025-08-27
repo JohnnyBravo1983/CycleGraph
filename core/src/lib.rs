@@ -1,4 +1,3 @@
-
 // core/src/lib.rs
 
 // Rust-kjernen (alltid tilgjengelig)
@@ -8,8 +7,8 @@ pub mod metrics;
 #[cfg(feature = "python")]
 mod pybindings {
     use pyo3::exceptions::PyValueError;
-    use pyo3::prelude::*;        // Bound, PyModule, PyResult, Python, etc.
-    use pyo3::wrap_pyfunction;   // makroen må importeres i samme modul
+    use pyo3::prelude::*;
+    use pyo3::wrap_pyfunction;
 
     #[pyfunction]
     pub fn calculate_efficiency_series(
@@ -68,16 +67,15 @@ mod pybindings {
 // -------- END PYTHON BINDINGS --------
 
 
-
-
 // -----------------------------------------------------------------------------
 // TESTS (M7) – unit + golden + perf-guard
-// (uendret – kjører uten python-feature)
+// (kjører uten python-feature)
 // -----------------------------------------------------------------------------
 #[cfg(test)]
 mod m7_tests {
-    use std::{iter, path::PathBuf, time::Instant};
     use crate::metrics;
+    use serde::{Deserialize, Serialize};
+    use std::{iter, path::PathBuf, time::Instant};
 
     fn const_series(val: f32, n: usize) -> Vec<f32> {
         iter::repeat(val).take(n).collect()
@@ -118,8 +116,8 @@ mod m7_tests {
         assert!(wpb > 1.0 && wpb < 2.0, "w_per_beat={}", wpb);
     }
 
-    use serde::Deserialize;
-    #[derive(Deserialize)]
+    // ---------- IO structs for golden ----------
+    #[derive(Deserialize, Serialize)]
     struct Row {
         #[serde(rename = "time")]
         _time: f32,
@@ -127,10 +125,13 @@ mod m7_tests {
         watts: Option<f32>,
     }
 
-    #[derive(Deserialize)]
-    struct ExpField { value: f32, tol: f32 }
+    #[derive(Deserialize, Serialize)]
+    struct ExpField {
+        value: f32,
+        tol: f32,
+    }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Serialize)]
     struct Expected {
         #[serde(default)]
         ftp: Option<f32>,
@@ -145,6 +146,7 @@ mod m7_tests {
         #[serde(default)]
         w_per_beat: Option<ExpField>,
     }
+    // -------------------------------------------
 
     fn manifest_path(p: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p)
@@ -171,6 +173,7 @@ mod m7_tests {
         (val - exp).abs() <= tol
     }
 
+    // ------------------- OPPDATERT GOLDEN-TEST -------------------
     #[test]
     fn golden_sessions_match_with_tolerance() {
         let cases = [
@@ -179,53 +182,85 @@ mod m7_tests {
             ("tests/golden/data/sess03_streams.csv", "tests/golden/expected/sess03_expected.json"),
         ];
 
+        // Env-flag: oppdater golden når du ønsker
+        let update = std::env::var("CG_UPDATE_GOLDEN").ok().as_deref() == Some("1");
+
         for (csv_path, json_path) in cases {
             let (p, hr) = read_streams(csv_path);
             assert!(!p.is_empty(), "empty power series for {}", csv_path);
 
-            let exp = read_expected(json_path);
+            // Beregn verdier (samme logikk som i originaltesten)
             let hz = 1.0;
-
-            let np  = metrics::np(&p, hz);
+            let np = metrics::np(&p, hz);
             let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
-            let ftp = exp.ftp.unwrap_or(250.0);
+            let ftp = 250.0; // fallback
             let iff = metrics::intensity_factor(np, ftp);
-            let vi  = metrics::variability_index(np, avg);
-            let pa  = metrics::pa_hr(&hr, &p, hz);
+            let vi = metrics::variability_index(np, avg);
+            let pa = metrics::pa_hr(&hr, &p, hz);
             let wpb = metrics::w_per_beat(&p, &hr);
 
-            if let Some(f) = exp.np.as_ref()         { assert!(approx(np,  f.value, f.tol),   "NP {} vs {}±{} ({})",  np,  f.value, f.tol,  csv_path); }
-            if let Some(f) = exp.i_f.as_ref()        { assert!(approx(iff, f.value, f.tol),   "IF {} vs {}±{} ({})",  iff, f.value, f.tol,  csv_path); }
-            if let Some(f) = exp.vi.as_ref()         { assert!(approx(vi,  f.value, f.tol),   "VI {} vs {}±{} ({})",  vi,  f.value, f.tol,  csv_path); }
-            if let Some(f) = exp.pa_hr.as_ref()      { assert!(approx(pa,  f.value, f.tol),   "Pa:Hr {} vs {}±{} ({})", pa, f.value, f.tol, csv_path); }
-            if let Some(f) = exp.w_per_beat.as_ref() { assert!(approx(wpb, f.value, f.tol),   "WpB {} vs {}±{} ({})", wpb, f.value, f.tol,  csv_path); }
+            if update {
+                // Skriv ny fasit (med fornuftige toleranser)
+                let new = Expected {
+                    ftp: Some(ftp),
+                    np: Some(ExpField { value: np, tol: 0.5 }),
+                    i_f: Some(ExpField { value: iff, tol: 0.05 }),
+                    vi: Some(ExpField { value: vi, tol: 0.05 }),
+                    pa_hr: Some(ExpField { value: pa, tol: 0.05 }),
+                    w_per_beat: Some(ExpField { value: wpb, tol: 0.05 }),
+                };
+                let pretty = serde_json::to_string_pretty(&new).unwrap();
+                std::fs::write(json_path, pretty).unwrap();
+                continue;
+            }
+
+            // Sammenlign mot eksisterende fasit
+            let exp = read_expected(json_path);
+
+            if let Some(f) = exp.np.as_ref() {
+                assert!(approx(np, f.value, f.tol), "NP {} vs {}±{} ({})", np, f.value, f.tol, csv_path);
+            }
+            if let Some(f) = exp.i_f.as_ref() {
+                assert!(approx(iff, f.value, f.tol), "IF {} vs {}±{} ({})", iff, f.value, f.tol, csv_path);
+            }
+            if let Some(f) = exp.vi.as_ref() {
+                assert!(approx(vi, f.value, f.tol), "VI {} vs {}±{} ({})", vi, f.value, f.tol, csv_path);
+            }
+            if let Some(f) = exp.pa_hr.as_ref() {
+                assert!(approx(pa, f.value, f.tol), "Pa:Hr {} vs {}±{} ({})", pa, f.value, f.tol, csv_path);
+            }
+            if let Some(f) = exp.w_per_beat.as_ref() {
+                assert!(approx(wpb, f.value, f.tol), "WpB {} vs {}±{} ({})", wpb, f.value, f.tol, csv_path);
+            }
         }
     }
+    // ------------------------------------------------------------
 
     #[test]
     fn perf_guard_two_hours_one_hz() {
         let n = 2 * 60 * 60; // 7200 samples
         let hz = 1.0;
-        let p: Vec<f32>  = (0..n).map(|i| 180.0 + ((i % 60) as f32) * 0.5).collect();
+        let p: Vec<f32> = (0..n).map(|i| 180.0 + ((i % 60) as f32) * 0.5).collect();
         let hr: Vec<f32> = (0..n).map(|i| 140.0 + ((i % 90) as f32) * 0.3).collect();
 
         let t0 = Instant::now();
-        let np  = metrics::np(&p, hz);
+        let np = metrics::np(&p, hz);
         let _if = metrics::intensity_factor(np, 250.0);
         let _vi = metrics::variability_index(np, 200.0);
         let _pa = metrics::pa_hr(&hr, &p, hz);
         let _wb = metrics::w_per_beat(&p, &hr);
         let dt = t0.elapsed();
 
-        let limit_ms: u128 = std::env::var("CG_PERF_MS").ok()
-            .and_then(|s| s.parse::<u128>().ok()).unwrap_or(200);
+        let limit_ms: u128 = std::env::var("CG_PERF_MS")
+            .ok()
+            .and_then(|s| s.parse::<u128>().ok())
+            .unwrap_or(200);
 
-    assert!(
-    dt.as_millis() <= limit_ms,
-    "perf guard: {} ms > {} ms",
-    dt.as_millis(),
-    limit_ms
-);
-
+        assert!(
+            dt.as_millis() <= limit_ms,
+            "perf guard: {} ms > {} ms",
+            dt.as_millis(),
+            limit_ms
+        );
     }
 }
