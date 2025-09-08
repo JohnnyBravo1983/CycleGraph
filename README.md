@@ -1,6 +1,6 @@
 # 🚴‍♂️ CycleGraph
 
-Analyseverktøy for syklister som kombinerer **smart caching**, **Strava-integrasjon** og **avanserte treningsmetrikker** for å gi deg en enkel, rettferdig og inspirerende score på hver økt.
+🚴 CycleGraph – et treningsverktøy bygget av en mosjonistsyklist, for å spore fremgang og nå nye mål – fra topp 40 % i 2025 til topp 10 % i 2028.
 
 ![CycleGraph Logo](docs/CycleGraph_Logo.png)
 
