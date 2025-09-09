@@ -26,12 +26,16 @@ jobs:
     - name: Install maturin
       run: pip install maturin pytest
 
-    - name: Build Rust bindings
-      working-directory: core
-      run: maturin develop
+    - name: Build wheel
+  working-directory: core
+  run: maturin build --release
 
-    - name: Run Python tests
-      run: pytest -q tests/test_analyze_session.py
+- name: Install wheel
+  run: pip install core/target/wheels/*.whl
+
+- name: Run Python tests
+  run: pytest -q tests/test_analyze_session.py
+
 
     - name: Run Rust tests
       working-directory: core
