@@ -9,34 +9,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
 
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
 
-    - name: Install maturin
-      run: pip install maturin pytest
+      - name: Install maturin
+        run: pip install maturin pytest
 
-    - name: Build wheel
-  working-directory: core
-  run: maturin build --release
+      - name: Build wheel
+        working-directory: core
+        run: maturin build --release
 
-- name: Install wheel
-  run: pip install core/target/wheels/*.whl
+      - name: Install wheel
+        run: pip install core/target/wheels/*.whl
 
-- name: Run Python tests
-  run: pytest -q tests/test_analyze_session.py
+      - name: Run Python tests
+        run: pytest -q tests/test_analyze_session.py
 
-
-    - name: Run Rust tests
-      working-directory: core
-      run: cargo test --tests -q
+      - name: Run Rust tests
+        working-directory: core
+        run: cargo test --tests -q
