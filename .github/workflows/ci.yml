@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Install maturin
+      run: pip install maturin pytest
+
+    - name: Build Rust bindings
+      working-directory: core
+      run: maturin develop
+
+    - name: Run Python tests
+      run: pytest -q tests/test_analyze_session.py
+
+    - name: Run Rust tests
+      working-directory: core
+      run: cargo test --tests -q
