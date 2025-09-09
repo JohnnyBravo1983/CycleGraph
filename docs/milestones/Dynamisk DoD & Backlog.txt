@@ -1,0 +1,106 @@
+# Definition of Done — Frontlog
+*Samlet oversikt over hva som er ferdig, påbegynt og planlagt. Ikke-sensitive, høynivå punkter.*
+
+Sist oppdatert: 2025-09-09
+
+---
+
+## ✅ FERDIG
+
+### M1 — Prosjektstruktur & repo
+- Standard repo-oppsett: `core/`, `cli/`, `docs/`, `data/`, `shapes/`, `tests/`.
+- Init GitHub-repo (README, lisens, .gitignore).
+- Bygg/kjørbare grunnkommandoer dokumentert i README (Rust/Python).
+- CI eller lokal “quick check”: `cargo check` og enkel Python-kall fungerer.
+
+### M2 — Rust-core med PyO3
+- Cargo.toml satt opp med PyO3 av riktig versjon.
+- Minst én eksponert Rust-funksjon bundet til Python (importerbar i Python).
+- `cargo test` (grunnleggende) og “import i Python” fungerer lokalt.
+- Kodekommentarer: hvor core-API lever og hvordan bygge.
+
+### M3 — CLI-oppsett & dataflyt
+- `cli/analyze.py` kjører ende-til-ende mot core (Rust) med argparse-flagg.
+- I/O-kontrakt: leser CSV/streams, skriver rapport/JSON til `output/`.
+- Grunnleggende feilhåndtering (fil mangler, feil format) med tydelige feilmeldinger.
+- “Happy path” demonstrert på sample data.
+
+### M4 — Dummydata & testkjøring
+- Dummy/samples tilgjengelig i repo (ikke sensitive).
+- Kjøreeksempel dokumentert: `python -m cli.analyze ...` produserer forutsigbar rapport.
+- Sanity-sjekk: verdier i rapport er konsistente og uten exceptions.
+- Enkle tester/skript verifiserer flyten.
+
+### M5 — SHACL-validering
+- SHACL-shapes for RDF definert i `shapes/`.
+- Valideringsscript i Python: kjørbar via CLI-flag eller separat kommando.
+- Eksempelfiler validerer OK; feil rapporteres forståelig.
+- Kort bruksdokumentasjon i `docs/` (hva, hvordan, hvor output havner).
+
+### M6 — Strava-integrasjon (API & import)
+- OAuth-flyt verifisert; tokens lagres sikkert lokalt (ingen hemmeligheter i repo).
+- Henting av aktiviteter med paging og tidsfilter (`--since`) fungerer.
+- Streams → CSV (minst `time,hr,watts`), robust håndtering av 401/403/429/5xx.
+- Inkrementell state (ingen duplikater), og grunnlogg over kjøringer.
+- End-to-end “import → analyze” fungerer på ≥3 reelle økter (lokalt verifisert).
+
+
+
+### M7.5 — GitHub Actions (CI)
+- Workflow for å bygge PyO3, kjøre `cargo test` (inkl. golden) og `scripts/system_test.sh`.
+- Akseptanse: grønn kjøring på push/PR, systemtest fullført uten feil.
+
+### M7 — Analysefunksjoner (effektivitet, treningsscore)
+- CGS v1 etablert: IF/NP/VI/Pa:Hr/WpB + 28d baseline (±25 %), tydelige fallbacks.
+- Badges: Big Engine (+6 %, ≥30 min) og Metronome (VI≤1.05, Pa:Hr≤1.05).
+- Python: Strava publish-formatter m/ språk, trimming og fallbacks + tester grønne.
+- Rust: unit + golden + perf-guard (2h@1Hz ≤200 ms) grønne.
+- Strava-klient: auto-refresh, header-fix, comment→description-fallback, verifisert live.
+- Docs: CGS_v1, CLI usage, Strava publish oppdatert.
+
+### M7.5 — Backend-forfining (CGS v1.1, explain)
+- Systemtest grønn på steg 0–7: PyO3-import, CLI-hjelp, E2E med sample, idempotens, feilhåndtering, Rust/golden, perf-smoke (~0.73s).
+- SHACL- og Strava-mock-test kan hoppes når ingen `.ttl` eller mock-data er tilgjengelig.
+- Fikser gjort: ryddet `cmd_session`, fikset `continue`-feil, lagt til `mod metrics;` i `lib.rs` (løste E0432), output verifisert deterministisk.
+
+### M7.5 — Forebyggende tester
+- Pytest: `_analyze_session_bridge()` kaster `ValueError` ved tomme arrays.
+- Rust golden-test for `w_per_beat()` med edge-case input (NaN/null/mismatch).
+- Branch: `feature/m7.5-preventive-tests`
+- Tester grønne: `pytest` + `cargo test` (inkl. golden).
+- Observasjoner: `w_per_beat()` håndterer NaN/mismatch robust; logging/Result kan vurderes senere.
+
+---
+
+## 🟡 PÅBEGYNT
+*(ingen åpne oppgaver her nå)*---
+
+## 🔜 PLANLAGT (IKKE STARTET)
+
+### M7.6 — Watt-engine v1 (backend klar)
+- Implementere wattberegning v1 med værdata og sykkeltype som input.
+- Utvide Rust-funksjonene, teste med golden tests + live økter.
+- Perf-sjekk (idempotens, kaldstart < 3s).
+- DoD-punkt: oppdater **CGS score** til v1.1 når implementasjonen fungerer og er testet.
+
+###Hva - Legge til parameter for treningsmodus (`--mode roller|outdoor`) i CLI/backend.
+  - Roller: bruk watt fra rulle, hopp over værdata.
+  - Outdoor: aktiver beregning med værdata, sykkeltype og terreng.
+- Akseptanse: 
+  - CLI støtter `--mode` flagg.
+  - Systemtest viser forskjell i output (værdata kun brukt ved `--mode outdoor`).
+  - Idempotens og golden tests grønne for begge moduser.
+
+### M8 — Demo & visualisering
+- Enkel frontend/webdemo som viser nøkkelmetrikker (NP, IF, VI, Pa:Hr, W/slag, CGS, CGS-Watt v1) for én økt.
+- Integrasjon mot CLI-output, rapporter og eventuelt Strava publish (dry-run først).
+- Skal gi reell verdi for syklist og fungere som første MVP/demo.
+
+---
+
+### Notater
+- Sensitive nøkler, ekte tokens og personlige data holdes utenfor repoet.
+- Denne DoD-listen er bevisst sanert og høynivå for offentlig deling.
+- Strukturen “Ferdig / Påbegynt / Planlagt” gir både frontlog og backlog i ett.
+
+

@@ -17,7 +17,8 @@ from typing import List, Dict, Any
 
 # Formatter for publiseringstekster (M7 4.1)
 from cli.formatters.strava_publish import PublishPieces, build_publish_texts
-from cli.strava_client import publish_to_strava
+from cli.strava_client import StravaClient
+
 # =========================
 #  Felles: importer kjernen
 # =========================
@@ -25,63 +26,53 @@ from cli.strava_client import publish_to_strava
 # 1) Api.analyze_session(...) / Api.analyze_session_json(...) (statisk/klassemetode)
 # 2) analyze_session(...)
 # 3) calculate_efficiency_series(...) (legacy)
+
 _analyze_session_bridge = None
 _calc_eff_series = None
 
 try:
-    from cyclegraph_core import Api  # pyo3-eksport uten konstruktør
-
-    def _analyze_session(samples, meta, cfg):
-        return Api.analyze_session(samples, meta, cfg)
-
-    def _analyze_session_json(samples_json: str, meta_json: str, cfg_json: str | None):
-        return Api.analyze_session_json(samples_json, meta_json, cfg_json)
+    from cyclegraph_core import analyze_session as rust_analyze_session
+    try:
+        from cyclegraph_core import calculate_efficiency_series as _func_calc_eff
+    except ImportError:
+        _func_calc_eff = None
 
     def _analyze_session_bridge(samples, meta, cfg):
-        # Prøv JSON-varianten først; fall tilbake til dict-API hvis nødvendig
         try:
-            out_json = _analyze_session_json(
-                json.dumps(samples),
-                json.dumps(meta),
-                json.dumps(cfg) if cfg else None
-            )
-            return json.loads(out_json)
-        except Exception:
-            return _analyze_session(samples, meta, cfg)
+            valid = [
+                s for s in samples
+                if "watts" in s and "hr" in s and s["watts"] is not None and s["hr"] is not None
+            ]
+            watts = [s["watts"] for s in valid]
+            pulses = [s["hr"] for s in valid]
+        except Exception as e:
+            raise ValueError(f"Feil ved uthenting av watt/puls: {e}")
+        
+        result = rust_analyze_session(watts, pulses)
+        print(f"DEBUG: rust_analyze_session output = {result}", file=sys.stderr)
+        return result
+
 
     def _calc_eff_series(watts: List[float], pulses: List[float]):
-        return Api.calculate_efficiency_series(watts, pulses)
-
-except ImportError:
-    try:
-        from cyclegraph_core import analyze_session as _func_analyze_session
-        try:
-            from cyclegraph_core import calculate_efficiency_series as _func_calc_eff
-        except ImportError:
-            _func_calc_eff = None
-
-        def _analyze_session_bridge(samples, meta, cfg):
-            return _func_analyze_session(samples, meta, cfg)
-
-        def _calc_eff_series(watts: List[float], pulses: List[float]):
-            if _func_calc_eff is None:
-                raise ImportError(
-                    "cyclegraph_core.calculate_efficiency_series mangler. "
-                    "Bygg kjernen i core/: 'maturin develop --release'."
-                )
-            return _func_calc_eff(watts, pulses)
-
-    except ImportError:
-        from cyclegraph_core import calculate_efficiency_series as _legacy_calc_eff
-
-        def _analyze_session_bridge(samples, meta, cfg):
+        if _func_calc_eff is None:
             raise ImportError(
-                "Ingen analyze_session tilgjengelig i cyclegraph_core. "
+                "cyclegraph_core.calculate_efficiency_series mangler. "
                 "Bygg kjernen i core/: 'maturin develop --release'."
             )
+        return _func_calc_eff(watts, pulses)
 
-        def _calc_eff_series(watts: List[float], pulses: List[float]):
-            return _legacy_calc_eff(watts, pulses)
+except ImportError:
+    from cyclegraph_core import calculate_efficiency_series as _legacy_calc_eff
+
+    def _analyze_session_bridge(samples, meta, cfg):
+        raise ImportError(
+            "Ingen analyze_session tilgjengelig i cyclegraph_core. "
+            "Bygg kjernen i core/: 'maturin develop --release'."
+        )
+
+    def _calc_eff_series(watts: List[float], pulses: List[float]):
+        return _legacy_calc_eff(watts, pulses)
+
 # =====================================================
 
 
@@ -405,23 +396,22 @@ def write_history_copy(history_dir: str, report: Dict[str, Any]):
         print(f"ADVARSEL: Klarte ikke å skrive history-fil: {path} ({e})", file=sys.stderr)
 
 
+from cli.strava_client import StravaClient  # sørg for at denne importen er øverst
+
 def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):
     """
     Ekte Strava-publish (navnet beholdes for bakoverkompabilitet).
-    Bruker build_publish_texts -> PublishPieces -> publish_to_strava.
+    Bruker build_publish_texts -> PublishPieces -> StravaClient().publish_to_strava.
     """
-    # Finn språk dersom det ligger i report.args; ellers default "no"
     lang = (report.get("args", {}) or {}).get("lang", "no")
 
     try:
         res = build_publish_texts(report, lang=lang)
-        # Håndter både PublishPieces-objekt og ev. (comment, header, body)-tuple
         if hasattr(res, "comment"):
             comment_text = getattr(res, "comment", "") or ""
             desc_header_text = getattr(res, "desc_header", "") or ""
             desc_body_text = getattr(res, "desc_body", "") or ""
         else:
-            # antas å være tuple/list
             comment_text, desc_header_text, desc_body_text = res
     except Exception as e:
         print(f"[strava] build_publish_texts feilet: {e}")
@@ -434,22 +424,7 @@ def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):
     )
 
     try:
-        aid, status = publish_to_strava(pieces, lang=lang, dry_run=dry_run)
-        print(f"[strava] activity_id={aid} status={status}")
-        return aid, status
-    except Exception as e:
-        print(f"[strava] publisering feilet: {e}")
-        return None
-
-
-    pieces = PublishPieces(
-        comment=comment_text,
-        desc_header=desc_header_text,
-        desc_body=desc_body_text
-    )
-
-    try:
-        aid, status = publish_to_strava(pieces, lang=lang, dry_run=dry_run)
+        aid, status = StravaClient(lang=lang).publish_to_strava(pieces, dry_run=dry_run)
         print(f"[strava] activity_id={aid} status={status}")
         return aid, status
     except Exception as e:
@@ -549,6 +524,7 @@ def cmd_session(args: argparse.Namespace) -> int:
     history_dir = cfg.get("history_dir", "history")
     outdir = getattr(args, "out", "output")
     fmt = getattr(args, "format", "json")
+    lang = getattr(args, "lang", "no")
 
     paths = sorted(glob.glob(args.input))
     if getattr(args, "debug", False):
@@ -577,7 +553,6 @@ def cmd_session(args: argparse.Namespace) -> int:
             "start_time_utc": None
         }
 
-        # FTP prioritet: --set-ftp > --auto-ftp > cfg.ftp
         if getattr(args, "set_ftp", None) is not None:
             meta["ftp"] = float(args.set_ftp)
         elif getattr(args, "auto_ftp", False):
@@ -587,40 +562,52 @@ def cmd_session(args: argparse.Namespace) -> int:
         elif "ftp" in cfg:
             meta["ftp"] = cfg.get("ftp")
 
-        # KJØR KJERNEANALYSE via bridge (støtter både JSON- og dict-API)
-        report = _analyze_session_bridge(samples, meta, cfg)
+        report_raw = _analyze_session_bridge(samples, meta, cfg)
 
-        # 28d baseline + Big Engine (post-prosess)
+        if isinstance(report_raw, str) and report_raw.strip() == "":
+            print(f"ADVARSEL: _analyze_session_bridge returnerte tom streng for {path}", file=sys.stderr)
+            continue
+
+        try:
+            report = json.loads(report_raw) if isinstance(report_raw, str) else report_raw
+        except json.JSONDecodeError as e:
+            print(f"ADVARSEL: Klarte ikke å parse JSON for {path}: {e}", file=sys.stderr)
+            continue
+
         baseline = load_baseline_wpb(history_dir, sid, report.get("duration_min", 0.0))
         if baseline is not None:
             report["w_per_beat_baseline"] = round(baseline, 4)
-        maybe_apply_big_engine_badge(report)
 
+        maybe_apply_big_engine_badge(report)
         reports.append(report)
 
-        # Skriv nå hvis ikke batch
         if not getattr(args, "batch", False):
             if getattr(args, "dry_run", False):
                 print(json.dumps(report, ensure_ascii=False, indent=2))
-                pieces = build_publish_texts(report, lang=getattr(args, "lang", "no"))
-                print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                try:
+                    pieces = build_publish_texts(report, lang=lang)
+                    print(f"[DRY-RUN] COMMENT: {pieces.comment}")
+                    print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                except Exception as e:
+                    print(f"[DRY-RUN] build_publish_texts feilet: {e}")
             else:
                 write_report(outdir, sid, report, fmt)
-                # NEW: seed history når vi IKKE er i dry-run
                 write_history_copy(history_dir, report)
 
             if getattr(args, "publish_to_strava", False):
-                publish_to_strava_stub(report, getattr(args, "dry_run", False))
+                try:
+                    pieces = build_publish_texts(report, lang=lang)
+                    aid, status = StravaClient(lang=lang).publish_to_strava(pieces, dry_run=getattr(args, "dry_run", False))
+                    print(f"[STRAVA] activity_id={aid} status={status}")
+                except Exception as e:
+                    print(f"[STRAVA] publisering feilet: {e}")
 
-    # Batch etterbehandling
     if getattr(args, "batch", False) and reports:
         if getattr(args, "with_trend", False):
             apply_trend_last3(reports)
 
         for r in reports:
             sid = r.get("session_id", "session")
-            # baseline/badge også her (i tilfelle history fylles underveis)
             baseline = load_baseline_wpb(history_dir, sid, r.get("duration_min", 0.0))
             if baseline is not None:
                 r["w_per_beat_baseline"] = round(baseline, 4)
@@ -628,18 +615,28 @@ def cmd_session(args: argparse.Namespace) -> int:
 
             if getattr(args, "dry_run", False):
                 print(json.dumps(r, ensure_ascii=False, indent=2))
-                pieces = build_publish_texts(r, lang=getattr(args, "lang", "no"))
-                print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                try:
+                    pieces = build_publish_texts(r, lang=lang)
+                    print(f"[DRY-RUN] COMMENT: {pieces.comment}")
+                    print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                except Exception as e:
+                    print(f"[DRY-RUN] build_publish_texts feilet: {e}")
             else:
                 write_report(outdir, sid, r, fmt)
-                # NEW: seed history når vi IKKE er i dry-run
                 write_history_copy(history_dir, r)
 
         if getattr(args, "publish_to_strava", False):
-            publish_to_strava_stub(reports[-1], getattr(args, "dry_run", False))
+            try:
+                pieces = build_publish_texts(reports[-1], lang=lang)
+                aid, status = StravaClient(lang=lang).publish_to_strava(pieces, dry_run=getattr(args, "dry_run", False))
+                print(f"[STRAVA] activity_id={aid} status={status}")
+            except Exception as e:
+                print(f"[STRAVA] publisering feilet: {e}")
 
     return 0
+
+
+
 
 
 # ===============
