@@ -28,10 +28,14 @@ def test_dry_run_returns_expected_message():
 
 
 def test_resolve_activity_from_state(tmp_path, monkeypatch):
-    # Sørg for at state/last_import.json finnes og peker til 42
-    state_dir = Path("state")
+    state_dir = tmp_path / "state"  # ← riktig mappe!
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "last_import.json").write_text(json.dumps({"activity_id": 42}), encoding="utf-8")
+
+    client = sc.StravaClient(state_dir=state_dir)
+    assert client.resolve_target_activity_id("latest") == "42"
+
+
 
     # Mock auth-flyten (ingen ekte tokens eller ENV nødvendig)
     monkeypatch.setattr(sc.S, "load_tokens", lambda path: {"access_token": "dummy"})
@@ -51,8 +55,7 @@ def test_resolve_activity_from_state(tmp_path, monkeypatch):
 
     monkeypatch.setattr("requests.request", lambda *a, **k: DummyResp(200, json_data=[]))
 
-    client = sc.StravaClient()
-    assert client.resolve_target_activity_id() == 42
+
 
 
 def test_publish_comment_and_description(monkeypatch, tmp_path):
@@ -64,8 +67,8 @@ def test_publish_comment_and_description(monkeypatch, tmp_path):
     )
 
     # Tving target activity id = 123 (hopper over GET /athlete/activities)
-    client = sc.StravaClient()
-    monkeypatch.setattr(client, "resolve_target_activity_id", lambda: 123)
+    client = sc.StravaClient(state_dir=state_dir)
+   
     # Injiser vår klient når publish_to_strava lager en StravaClient()
     monkeypatch.setattr(sc, "StravaClient", lambda *a, **k: client)
 

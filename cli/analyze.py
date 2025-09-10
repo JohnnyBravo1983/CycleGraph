@@ -552,6 +552,11 @@ def cmd_session(args: argparse.Namespace) -> int:
             "hr_max": cfg.get("hr_max"),
             "start_time_utc": None
         }
+        if getattr(args, "mode", None):
+           print(f"🎛️ Overstyrt modus: {args.mode}")
+           meta["mode"] = args.mode
+        else:
+           print("🔍 Ingen overstyring – modus settes automatisk senere hvis relevant.")
 
         if getattr(args, "set_ftp", None) is not None:
             meta["ftp"] = float(args.set_ftp)
@@ -653,6 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
     pe.set_defaults(func=cmd_efficiency)
 
     ps = sub.add_parser("session", help="Analyser treningsøkter (NP/IF/VI/Pa:Hr/WpB/CGS) fra CSV.")
+    ps.add_argument("--mode", choices=["roller", "outdoor"], help="Overstyr auto-modus (roller|outdoor)")
     ps.add_argument("--input", required=True, help="Glob for CSV, f.eks. data/*.csv")
     ps.add_argument("--out", default="output", help="Output-mappe (default: output/)")
     ps.add_argument("--cfg", default="", help="Path til config.json")
