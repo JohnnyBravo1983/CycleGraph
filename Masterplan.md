@@ -42,7 +42,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-08-20 | M7   | Analysefunksjoner                      | Ferdig   | CGS v1, badges, baseline, Strava publish (dry-run/lang), live publisering.  |
 | 2025-09-09 | M7.5 | Backend-forfining (CGS v1.1, explain)  | Ferdig   | CI satt opp, systemtest grønn, perf ~0.73s, fixes gjort, forebyggende tester planlagt. |
 | 2025-09-09 | M7.5 | Forebyggende tester                    | Ferdig   | Pytest ValueError for `_analyze_session_bridge`, Rust golden-test for `w_per_beat` (NaN/null/mismatch). Alle tester grønne. |
----
+| 2025-09-09 | M7.5 | GitHub Actions (basic CI)              | Ferdig   | Minimal workflow: `pytest -q` og `cargo test --tests -q` kjøres på push/PR. |---
 
 ## Milepælsrapporter
 
@@ -63,14 +63,20 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 - ✅ Tester (pytest) grønne.  
 - ⚠️ Kjent: enkelte data/streams/*.csv mangler gyldige samples (påvirker ikke publisering).  
 
-### M7.5 – Backend-forfining (CGS v1.1, explain) – status per 2025-09-09
-- ✅ CI (GitHub Actions) kjører: build PyO3, cargo test (inkl. golden), system_test.sh.  
+ ### M7.5 – Backend-forfining (CGS v1.1, explain) – status per 2025-09-09
 - ✅ Systemtest grønn (0–7), perf (kald start) ~0.73s.  
 - ⏭️ SHACL/Strava-mock hoppet (ingen .ttl / ingen Pulled:).  
-- 🔧 Fikser: ryddet cmd_session, continue-fix, lagt til `mod metrics;` (løste E0432), verifisert deterministisk output.  
-- 🧪 Plan: pytest for `_analyze_session_bridge()` (tomme arrays → ValueError), Rust golden for `w_per_beat()` (NaN/null/mismatch).  
+- ✅ Forebyggende tester:  
+  - Pytest for `_analyze_session_bridge()` (tomme arrays → ValueError).  
+  - Rust golden for `w_per_beat()` (NaN/null/mismatch).  
+  - Alle tester grønne (pytest + cargo test).  
 
----
+### M7.5 – GitHub Actions (basic CI) – status per 2025-09-09
+- ✅ Minimal workflow konfigurert i `.github/workflows/ci.yml`.  
+- ✅ Kjører `pytest -q` og `cargo test --tests -q` på push/PR.  
+- ✅ Første kjøring verifisert grønn på GitHub.  
+- ⏭️ Kan utvides senere med systemtest og golden-sjekker.
+
 
 ## Oppdateringsrutine
 Når en milepæl eller oppgave er ferdig:  
