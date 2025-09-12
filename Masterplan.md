@@ -43,6 +43,10 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-09-09 | M7.5 | Backend-forfining (CGS v1.1, explain)  | Ferdig   | CI satt opp, systemtest grønn, perf ~0.73s, fixes gjort, forebyggende tester planlagt. |
 | 2025-09-09 | M7.5 | Forebyggende tester                    | Ferdig   | Pytest ValueError for `_analyze_session_bridge`, Rust golden-test for `w_per_beat` (NaN/null/mismatch). Alle tester grønne. |
 | 2025-09-09 | M7.5 | GitHub Actions (basic CI)              | Ferdig   | Minimal workflow: `pytest -q` og `cargo test --tests -q` kjøres på push/PR. |---
+| 2025-09-10 | M7.6 | Strava Fetch & modusdeteksjon (S1)     | Ferdig   | Auto-modus med trainer/sport_type/device_watts, CLI-flag --mode, JSON-ruting. |
+|  2025-09-12| M7.6 | No-watt fallback & policy (S1B) | Ferdig | Fallback til hr_only implementert, structured WARN, metrics lagt inn, tester grønne.
+
+
 
 ## Milepælsrapporter
 
@@ -76,6 +80,28 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 - ✅ Kjører `pytest -q` og `cargo test --tests -q` på push/PR.  
 - ✅ Første kjøring verifisert grønn på GitHub.  
 - ⏭️ Kan utvides senere med systemtest og golden-sjekker.
+
+### M7.6 – Watt-engine v1 & Precision Watt – status per 2025-09-10
+- ✅ Sprint S1 – Strava Fetch & modusdeteksjon ferdig:
+  - Auto-modus basert på `trainer`, `sport_type`, `device_watts`.
+  - CLI-flag `--mode roller|outdoor` overstyrer auto.
+  - JSON-output rutes til korrekt pipeline (indoor/outdoor).
+  - Tester: pytest + cargo test grønne.
+- ⚠️ Funn: Enkelte Strava-økter mangler watt (`device_watts=False`) → policy nødvendig.
+- 🔜 Sprint S1B – No-watt fallback & policy planlagt:
+  - Backend: rute til `hr_only` pipeline, structured WARN-logg.
+  - Frontend (senere): varsel “Ingen effekt-data registrert”.
+  - Metrics: `sessions_no_power_total`, `sessions_device_watts_false_total`.
+
+### M7.6 – No-watt fallback & policy – status per 2025-09-11
+- ✅ Backend: ruter økter uten watt eller device_watts=False til hr_only pipeline.
+- ✅ Logging: structured WARN med no_power_reason.
+- ✅ Metrics: sessions_no_power_total og sessions_device_watts_false_total.
+- ✅ Tester: pytest + cargo grønne, golden validert.
+- ✅ Git hygiene: eksempelfiler lagt til, secrets/state ignorert.
+- ⏭️ Frontend-varsel kommer i M8.
+
+
 
 
 ## Oppdateringsrutine

@@ -30,3 +30,9 @@ pub fn w_per_beat(power: &[f32], hr: &[f32]) -> f32 {
     let avg_hr = hr.iter().copied().sum::<f32>() / (hr.len() as f32);
     if avg_hr > 0.0 { avg_p / avg_hr } else { 0.0 }
 }
+
+use once_cell::sync::Lazy;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub static SESSIONS_NO_POWER_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
+pub static SESSIONS_DEVICE_WATTS_FALSE_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));

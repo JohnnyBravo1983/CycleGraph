@@ -30,48 +30,56 @@ from cli.strava_client import StravaClient
 _analyze_session_bridge = None
 _calc_eff_series = None
 
+# === IMPORTER FUNKSJONER FRA KJERNEMODULEN ===
 try:
     from cyclegraph_core import analyze_session as rust_analyze_session
-    try:
-        from cyclegraph_core import calculate_efficiency_series as _func_calc_eff
-    except ImportError:
-        _func_calc_eff = None
-
-    def _analyze_session_bridge(samples, meta, cfg):
-        try:
-            valid = [
-                s for s in samples
-                if "watts" in s and "hr" in s and s["watts"] is not None and s["hr"] is not None
-            ]
-            watts = [s["watts"] for s in valid]
-            pulses = [s["hr"] for s in valid]
-        except Exception as e:
-            raise ValueError(f"Feil ved uthenting av watt/puls: {e}")
-        
-        result = rust_analyze_session(watts, pulses)
-        print(f"DEBUG: rust_analyze_session output = {result}", file=sys.stderr)
-        return result
-
-
-    def _calc_eff_series(watts: List[float], pulses: List[float]):
-        if _func_calc_eff is None:
-            raise ImportError(
-                "cyclegraph_core.calculate_efficiency_series mangler. "
-                "Bygg kjernen i core/: 'maturin develop --release'."
-            )
-        return _func_calc_eff(watts, pulses)
-
 except ImportError:
-    from cyclegraph_core import calculate_efficiency_series as _legacy_calc_eff
+    rust_analyze_session = None
 
-    def _analyze_session_bridge(samples, meta, cfg):
+try:
+    from cyclegraph_core import calculate_efficiency_series as _func_calc_eff
+except ImportError:
+    _func_calc_eff = None  # Hvis du har en legacy-versjon, importer den her
+
+# === ANALYSEFUNKSJON ===
+def _analyze_session_bridge(samples, meta, cfg):
+    if rust_analyze_session is None:
         raise ImportError(
             "Ingen analyze_session tilgjengelig i cyclegraph_core. "
             "Bygg kjernen i core/: 'maturin develop --release'."
         )
 
-    def _calc_eff_series(watts: List[float], pulses: List[float]):
-        return _legacy_calc_eff(watts, pulses)
+    try:
+        valid = [
+            s for s in samples
+            if "watts" in s and "hr" in s and s["watts"] is not None and s["hr"] is not None
+        ]
+        watts = [s["watts"] for s in valid]
+        pulses = [s["hr"] for s in valid]
+    except Exception as e:
+        raise ValueError(f"Feil ved uthenting av watt/puls: {e}")
+
+    try:
+        result = rust_analyze_session(watts, pulses)
+        print(f"DEBUG: rust_analyze_session output = {result}", file=sys.stderr)
+        return result
+    except ValueError as e:
+        print("⚠️ Ingen effekt-data registrert – enkelte metrikker begrenset.")
+        print(f"DEBUG: rust_analyze_session feilet med: {e}", file=sys.stderr)
+        return {
+            "mode": "hr_only",
+            "status": "LIMITED",
+            "avg_pulse": np.mean(pulses) if pulses else None
+        }
+
+# === EFFEKTIVITETSFUNKSJON ===
+def _calc_eff_series(watts: List[float], pulses: List[float]):
+    if _func_calc_eff is None:
+        raise ImportError(
+            "cyclegraph_core.calculate_efficiency_series mangler. "
+            "Bygg kjernen i core/: 'maturin develop --release'."
+        )
+    return _func_calc_eff(watts,pulses)
 
 # =====================================================
 
