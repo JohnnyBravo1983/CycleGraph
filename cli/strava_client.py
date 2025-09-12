@@ -35,33 +35,10 @@ import requests
 
 def publish_to_strava(pieces, dry_run=False, lang="no", headers=None) -> tuple[str, str]:
     activity_id = resolve_activity_from_state()
-
-    # Håndter dry-run før vi sjekker activity_id
-    if dry_run:
-        if isinstance(pieces, dict):
-            description = pieces.get("description", "")
-            comment = pieces.get("comment", "")
-        else:
-            description = getattr(pieces, "desc_header", "")
-            comment = getattr(pieces, "comment", "")
-
-        msg = (
-            f"[dry-run] activity_id={activity_id or ''} "
-            f"comment={comment} "
-            f"description={description} "
-            f"lang={lang}"
-        )
-
-        url = f"https://www.strava.com/api/v3/activities/{activity_id or '<none>'}"
-        print(f"[DRY-RUN] PATCH {url}")
-        print(json.dumps({"description": description, "name": comment}, ensure_ascii=False, indent=2))
-        return "", msg
-
-    # Normal flyt: krever activity_id
     if not activity_id:
         return "", "missing_activity_id"
 
-    # Hent verdier trygt fra pieces
+    # Hent verdier trygt fra pieces (enten dict eller objekt med attributter)
     if isinstance(pieces, dict):
         description = pieces.get("description", "")
         comment = pieces.get("comment", "")
@@ -74,6 +51,18 @@ def publish_to_strava(pieces, dry_run=False, lang="no", headers=None) -> tuple[s
         "description": description,
         "name": comment
     }
+
+    msg = (
+        f"[dry-run] activity_id={activity_id} "
+        f"comment={comment} "
+        f"description={description} "
+        f"lang={lang}"
+    )
+
+    if dry_run:
+        print(f"[DRY-RUN] PATCH {url}")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return "", msg
 
     if headers is None:
         return activity_id, "missing_headers"
@@ -90,7 +79,6 @@ def publish_to_strava(pieces, dry_run=False, lang="no", headers=None) -> tuple[s
             return activity_id, f"error_{response.status_code}"
 
     return activity_id, "auth_failed"
-
 
 
 
