@@ -23,7 +23,7 @@ jobs:
       - name: Install Python deps
         run: |
               python -m pip install --upgrade pip
-             pip install maturin pytest requests
+              pip install maturin pytest requests
 
 
       - name: Build wheel
