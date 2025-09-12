@@ -23,9 +23,8 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install maturin pytest requests
+          pip install maturin pytest requests python-dotenv
 
-      # Provide ephemeral config/secrets for tests (no real tokens committed)
       - name: Provide test tokens and state
         run: |
           cp cli/tokens_example.py cli/tokens.py
