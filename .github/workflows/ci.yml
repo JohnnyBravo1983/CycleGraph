@@ -34,7 +34,8 @@ jobs:
         run: pip install core/target/wheels/*.whl
 
       - name: Run Python tests
-        run: pytest -q tests/test_analyze_session.py
+      - run: pytest -q
+
 
       - name: Run Rust tests
         working-directory: core
