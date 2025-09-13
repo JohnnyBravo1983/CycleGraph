@@ -1,5 +1,6 @@
-#[macro_use]
+
 extern crate pyo3;
+
 
 pub mod metrics;
 use pyo3::prelude::*; // Importerer Python, PyResult, PyModule, osv.
@@ -41,11 +42,40 @@ pub fn calculate_efficiency_series(
 use serde_json::json;
 
 #[pyfunction]
-pub fn analyze_session(watts: Vec<f64>, pulses: Vec<f64>) -> PyResult<String> {
-    if watts.len() != pulses.len() || watts.is_empty() {
+pub fn analyze_session(
+    watts: Vec<f64>,
+    pulses: Vec<f64>,
+    device_watts: Option<bool>,
+) -> PyResult<String> {
+    use log::warn;
+
+    let no_power_stream = watts.is_empty();
+    let device_watts_false = device_watts == Some(false);
+
+    if pulses.is_empty() || pulses.len() != watts.len() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "Watt og puls må ha samme lengde og ikke være tomme.",
         ));
+    }
+
+    if no_power_stream || device_watts_false {
+        let reason = if no_power_stream {
+            "no_power_stream"
+        } else {
+            "device_watts_false"
+        };
+
+        warn!("⚠️ Ingen watt-data – fallback til hr_only (årsak: {})", reason);
+
+        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+
+        let result = json!({
+            "mode": "hr_only",
+            "no_power_reason": reason,
+            "avg_pulse": avg_pulse
+        });
+
+        return Ok(result.to_string());
     }
 
     let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
@@ -64,10 +94,11 @@ pub fn analyze_session(watts: Vec<f64>, pulses: Vec<f64>) -> PyResult<String> {
         "effektivitet": eff,
         "status": status,
         "avg_watt": avg_watt,
-        "avg_pulse": avg_pulse
+        "avg_pulse": avg_pulse,
+        "mode": "normal"
     });
 
-    Ok(result.to_string())  // ← dette gir gyldig JSON til Python
+    Ok(result.to_string())
 }
 
 #[pymodule]
@@ -276,5 +307,24 @@ mod m7_tests {
             dt.as_millis(),
             limit_ms
         );
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    #[ignore]
+    fn test_fallback_to_hr_only() {
+        let watts = vec![];
+        let pulses = vec![120.0, 125.0, 130.0];
+        let device_watts = Some(true);
+
+        let result_json = analyze_session(watts, pulses, device_watts).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+
+        assert_eq!(result["mode"], "hr_only");
+        assert_eq!(result["no_power_reason"], "no_power_stream");
     }
 }

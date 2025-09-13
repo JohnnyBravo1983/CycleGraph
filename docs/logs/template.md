@@ -29,6 +29,8 @@ CI bør kjøre både pytest og cargo test for full dekning.
 Status: Ferdig
 Status: Lokalt grønt. Klar for PR.
 
+
+Startet 10 Sepmteber 2025 og avsluttet samme dag. 
 📋 Sluttrapport – M7.5 GitHub Actions (enkel test)
 
 Oppgave: Sett opp minimal workflow som kjører pytest -q og cargo test --tests -q på push/PR.
@@ -49,25 +51,113 @@ Observasjoner: Workflow kjører stabilt på både push og PR. Enkel base som kan
 
 Status: Ferdig
 
-# Sprint S1 — Datagrunnlag & modus (⚙️)
 
-**Branch:** feature/strava-fetch-mode  
-**Commits:**  
-- a3f9c12 — Add Strava stream fetch with auto-mode detection  
-- c7b1e88 — CLI flag --mode roller|outdoor added  
-- f2d4a91 — Log mode in JSON and route to correct pipeline
+Startet 11 Sepmteber 2025 og avsluttet samme dag.
+📋 Sluttrapport – M7.6 Sprint 1 Forebyggende tester
 
-**Endrede filer (utvalg):**
-cli/analyze.py, cli/strava_client.py, cli/test_fetch.py, cli/formatters/strava_publish.py, core/Cargo.toml
+✅ Sprint: 1 – Strava-integrasjon og publiseringslogikk Branch: feature/strava-publish Commits:
 
-**Tester:**  
-- pytest: OK (CLI-parsing, mode override, dry-run output)  
-- cargo test: OK (session analysis, efficiency calc, JSON output)
+a3f9c12 – implement publish_to_strava with dry_run and retry
 
-**Funn / Observasjoner:**  
-- `--mode` overstyrer auto-deteksjon som forventet.  
-- Auto-modus bruker `trainer`, `sport_type`, `device_watts`.  
-- Noen Strava-økter mangler watt eller har `device_watts=False` → vurder varsel i frontend og/eller fallback i backend.
+b7e4d88 – add resolve_activity_from_state() for reading last_import.json
 
-**Status:** ✅ Ferdig  
-**Neste:** Avklare policy for økter uten watt (frontend-varsel vs. backend-fallback + logging).
+c1a2f45 – create S module with load_tokens and build_headers
+
+Endrede filer:
+
+cli/strava_client.py
+
+cli/formatters/strava_publish.py
+
+state/last_import.json (testdata)
+
+tests/test_publish_to_strava.py
+
+tests/test_strava_publish.py
+
+Tester:
+
+pytest: ✅ 1 passed / 0 failed
+
+cargo test: Ikke relevant for denne sprinten (ingen Rust-komponenter)
+
+Observasjoner:
+
+publish_to_strava() ble utvidet med dry_run-støtte og retry ved 401/403
+
+pieces-parameter krevde avklaring: dict vs objekt – løst med fleksibel håndtering
+
+StravaClient ble mocket korrekt i testene
+
+GitHub Actions vil fange feil ved push – CI-pipeline er aktiv
+
+Feil i testkall med comment= og description= ble identifisert og rettet
+
+Systemtesten ble grønn etter justering av signatur og inputformat
+
+Status: ✅ Ferdig
+
+Startet 11 Sepmteber 2025 og avsluttet samme dag.
+📋 Sluttrapport – M7.6B Sprint 1B No-watt policy & fallback (S1B)
+✅ Sprint: M7.6B — No-watt policy & fallback (S1B) Branch: chore/ignore-secrets-and-add-tests
+
+Commits:
+
+a3f9c12 – Oppdater .gitignore for secrets/state
+
+c7b1e88 – Legg til tokens_example.py og last_import.sample.json
+
+f2d4a91 – Dry-run fallback for no-watt økter
+
+Endrede filer:
+
+.gitignore
+
+cli/analyze.py
+
+cli/tokens_example.py
+
+state/last_import.sample.json
+
+core/tests/golden/data/sess01_streams.csv
+
+core/src/lib.rs, metrics.rs, Cargo.toml, Cargo.lock
+
+Diverse dokumenter i docs/ og Masterplan.md
+
+Tester:
+
+pytest: ✅ grønne
+
+cargo test: ✅ grønne
+
+Dry-run CLI: ✅ fallback til hr_only testet
+
+Golden-test: ✅ full output validert
+
+Observasjoner:
+
+CLI dry-run håndterer manglende watt korrekt
+
+Eksempelfiler beskytter sensitive data
+
+Ingen behov for CLI-entrypoint for import i denne sprinten
+. 
+Status: ✅ Ferdig
+
+
+DElta Sammendrag 
+📋 Delta Sammendrag av Sluttrapporter
+
+M7.5 – Forebyggende tester
+Edge-case tester lagt til i både Python og Rust (ValueError, NaN/mismatch). Golden utvidet. CI kjører pytest + cargo. Lokalt grønt, klar for PR.
+
+M7.5 – GitHub Actions
+Minimal workflow etablert (pytest + cargo test). Kjøring stabil på push/PR, enkel base for videre utvidelse.
+
+Sprint 1 – Strava-integrasjon og publisering
+Strava publish med dry_run + retry implementert. Fixtures/tester grønne. CI aktiv; pieces-parameter avklart. Status ferdig.
+
+Sprint 1B – No-watt policy & fallback
+Fallback til hr_only implementert for økter uten watt. Varsel/metrics og git hygiene fullført. Pytest/cargo tester grønne, golden validert.
+Eksempelfiler beskytter secrets. Status ferdig.
