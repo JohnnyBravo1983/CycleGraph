@@ -41,13 +41,18 @@ jobs:
 
       - name: Install wheel
         run: |
-          WHEEL=$(find core/target/wheels -name "*.whl" | head -n 1)
-          if [ -n "$WHEEL" ]; then
-            echo "Installing wheel: $WHEEL"
-            pip install "$WHEEL"
-            python -c "import cyclegraph_core" || (echo 'cyclegraph_core not found after install' && exit 1)
+          if [ -d core/target/wheels ]; then
+            WHEEL=$(find core/target/wheels -name "*.whl" | head -n 1)
+            if [ -n "$WHEEL" ]; then
+              echo "Installing wheel: $WHEEL"
+              pip install "$WHEEL"
+              python -c "import cyclegraph_core" || (echo 'cyclegraph_core not found after install' && exit 1)
+            else
+              echo "No wheel file found inside core/target/wheels"
+              exit 1
+            fi
           else
-            echo "No wheel found, skipping install"
+            echo "Wheel directory core/target/wheels does not exist"
             exit 1
           fi
 
