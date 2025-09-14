@@ -9,7 +9,7 @@ readme = "../README.md"
 [lib]
 name = "cyclegraph_core"
 crate-type = ["cdylib"]  # ✅ Fjernet "rlib" – kun cdylib trengs for Python bindings
-
+lib = true
 [dependencies]
 pyo3 = { version = "0.20", features = ["extension-module"] }
 serde = { version = "1.0", features = ["derive"] }
