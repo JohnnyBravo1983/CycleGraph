@@ -57,11 +57,12 @@ jobs:
           fi
 
       - name: Debug PyO3 linker config
+        working-directory: core
         run: |
           echo "🔍 Python sysconfig:"
           python3.12 -c "import sysconfig; print(sysconfig.get_config_vars())"
           echo "🔍 Searching for libpython:"
-          find /usr -name "libpython3.12.*" || echo "libpython not found"
+          find /usr/lib /usr/local/lib -name "libpython3.12.*" || echo "libpython not found"
           echo "🔍 Cargo verbose build:"
           cargo build -vv
 
