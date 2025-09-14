@@ -8,7 +8,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      PYO3_PYTHON: python3
+      PYO3_PYTHON: python3.12
 
     steps:
       - name: Checkout repo
@@ -21,6 +21,11 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3.12-dev
 
       - name: Install Python deps
         run: |
