@@ -36,12 +36,11 @@ jobs:
           fi
 
       - name: Build wheel
-        working-directory: core
         run: maturin build --release -i python3.11
 
-      - name: Install wheel if exists
+      - name: Install wheel
         run: |
-          WHEEL=$(find core/target -name "*.whl" | head -n 1)
+          WHEEL=$(find target/wheels -name "*.whl" | head -n 1)
           if [ -n "$WHEEL" ]; then
             echo "Installing wheel: $WHEEL"
             pip install "$WHEEL"
