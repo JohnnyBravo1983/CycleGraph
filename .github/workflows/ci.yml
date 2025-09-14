@@ -43,9 +43,11 @@ jobs:
         run: |
           WHEEL=$(ls core/target/wheels/*.whl 2>/dev/null || true)
           if [ -n "$WHEEL" ]; then
-            pip install $WHEEL
+            pip install "$WHEEL"
+            python -c "import cyclegraph_core" || (echo 'cyclegraph_core not found after install' && exit 1)
           else
             echo "No wheel found, skipping install"
+            exit 1
           fi
 
       - name: Run Python tests
