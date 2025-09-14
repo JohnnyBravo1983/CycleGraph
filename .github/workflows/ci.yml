@@ -41,7 +41,7 @@ jobs:
 
       - name: Install wheel
         run: |
-          WHEEL=$(find core/target/release/wheels -name "*.whl" | head -n 1)
+          WHEEL=$(find core/target/wheels -name "*.whl" | head -n 1)
           if [ -n "$WHEEL" ]; then
             echo "Installing wheel: $WHEEL"
             pip install "$WHEEL"
