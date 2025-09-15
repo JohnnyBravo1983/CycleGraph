@@ -1,18 +1,45 @@
-//! Midlertidige, enkle implementasjoner for å få testoppsett og golden-tests på plass.
-//!
-//! - NP:   bruker gjennomsnittseffekt
-//! - IF:   NP / FTP
-//! - VI:   NP / gjennomsnittseffekt
-//! - Pa:Hr: returnerer 1.0 (innenfor rimelig testintervall)
-//! - W/beat: gjennomsnittlig watt delt på gjennomsnittlig puls
+//! Trenings- og værrelaterte metrics brukt i CycleGraph
 
 use once_cell::sync::Lazy;
+use prometheus::{IntCounter, Registry};
 use std::sync::atomic::AtomicUsize;
 
+/// 🌦️ Metrics for vær-cache (brukes i WeatherClient)
+#[derive(Debug)]
+pub struct Metrics {
+    pub weather_cache_hit_total: IntCounter,
+    pub weather_cache_miss_total: IntCounter,
+}
+
+impl Metrics {
+    pub fn new(registry: &Registry) -> Self {
+        let hit = IntCounter::new("weather_cache_hit_total", "Total cache hits").unwrap();
+        let miss = IntCounter::new("weather_cache_miss_total", "Total cache misses").unwrap();
+
+        registry.register(Box::new(hit.clone())).unwrap();
+        registry.register(Box::new(miss.clone())).unwrap();
+
+        Metrics {
+            weather_cache_hit_total: hit,
+            weather_cache_miss_total: miss,
+        }
+    }
+}
+
+/// 🔧 Hjelpefunksjoner for å hente vær-metrics
+pub fn weather_cache_hit_total(metrics: &Metrics) -> &IntCounter {
+    &metrics.weather_cache_hit_total
+}
+
+pub fn weather_cache_miss_total(metrics: &Metrics) -> &IntCounter {
+    &metrics.weather_cache_miss_total
+}
+
+/// 📊 Globale tellere for sessions uten kraftdata (én definisjon hver)
 pub static SESSIONS_NO_POWER_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 pub static SESSIONS_DEVICE_WATTS_FALSE_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 
-/// Normalized Power (NP) – her bare gjennomsnittseffekt for enkelhet.
+/// 🔢 Normalized Power (NP) – her bare gjennomsnittseffekt for enkelhet
 pub fn np(p: &[f32], _hz: f32) -> f32 {
     if p.is_empty() {
         0.0

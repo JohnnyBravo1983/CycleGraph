@@ -1,13 +1,15 @@
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
-use pyo3::types::PyAny;
+// use pyo3::types::PyAny; // uncomment if used
 use serde_json::json;
-use log::warn;
 
+// Moduler
 pub mod metrics;
-pub use metrics::w_per_beat;
-
 pub mod analyzer;
+pub mod weather;
+// Importér fra metrics (trygt – ingen lokale redefinisjoner)
+use crate::metrics::{Metrics, weather_cache_hit_total, weather_cache_miss_total};
+pub use metrics::w_per_beat;
 
 #[pyfunction]
 pub fn calculate_efficiency_series(
@@ -113,6 +115,7 @@ pub fn analyze_session(
 fn cyclegraph_core(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_session, m)?)?;
+    m.add_function(wrap_pyfunction!(profile_from_json, m)?)?;
     Ok(())
 }
 // -------- END PYTHON BINDINGS --------
@@ -340,4 +343,64 @@ fn test_fallback_to_hr_only() {
         assert_eq!(reason, "no_power_stream");
         Ok(())
     }).unwrap(); // ← denne avslutter Python::with_gil
+}
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub total_weight: Option<f64>,
+    pub bike_type: Option<String>,
+    pub crr: Option<f64>,
+    pub estimat: bool,
+}
+
+impl Profile {
+    pub fn from_json(json: &str) -> Self {
+        let mut parsed: Profile = serde_json::from_str(json).unwrap_or_else(|_| Profile {
+            total_weight: None,
+            bike_type: None,
+            crr: None,
+            estimat: true,
+        });
+
+        let missing = parsed.total_weight.is_none()
+            || parsed.bike_type.is_none()
+            || parsed.crr.is_none();
+
+        if missing {
+            parsed.total_weight.get_or_insert(78.0);
+            parsed.bike_type.get_or_insert("road".to_string());
+            parsed.crr.get_or_insert(0.005);
+            parsed.estimat = true;
+        } else {
+            parsed.estimat = false;
+        }
+
+        parsed
+    }
+}
+
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PyProfile {
+    #[pyo3(get)]
+    pub total_weight: f64,
+    #[pyo3(get)]
+    pub bike_type: String,
+    #[pyo3(get)]
+    pub crr: f64,
+    #[pyo3(get)]
+    pub estimat: bool,
+}
+
+#[pyfunction]
+pub fn profile_from_json(json: &str) -> PyProfile {
+    let profile = Profile::from_json(json);
+    PyProfile {
+        total_weight: profile.total_weight.unwrap_or(78.0),
+        bike_type: profile.bike_type.unwrap_or_else(|| "road".to_string()),
+        crr: profile.crr.unwrap_or(0.005),
+        estimat: profile.estimat,
+    }
 }

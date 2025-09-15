@@ -138,40 +138,7 @@ def read_efficiency_csv(file_path: str):
     return watts, pulses
 
 
-def cmd_efficiency(args: argparse.Namespace) -> int:
-    if args.validate:
-        conforms, report = validate_rdf()
-        print("SHACL validation:", "OK ✅" if conforms else "FAILED ❌")
-        if not conforms:
-            print(report)
-            return 2
 
-    watts, pulses = read_efficiency_csv(args.file)
-    avg_eff, session_status, per_point_eff, per_point_status = _calc_eff_series(watts, pulses)
-
-    print("\n📊 CycleGraph Report (Efficiency)")
-    print("=================================")
-    print(f"Snitteffektivitet: {avg_eff:.2f} watt/puls")
-    print(f"Øktstatus: {session_status}\n")
-
-    print("Per datapunkt:")
-    for i, (eff, status) in enumerate(zip(per_point_eff, per_point_status), start=1):
-        print(f"  Punkt {i}: {eff:.2f} watt/puls – {status}")
-
-    if args.json:
-        report_data = {
-            "average_efficiency": round(avg_eff, 2),
-            "session_status": session_status,
-            "points": [
-                {"point": i + 1, "efficiency": round(eff, 2), "status": status}
-                for i, (eff, status) in enumerate(zip(per_point_eff, per_point_status))
-            ],
-        }
-        os.makedirs(os.path.dirname(args.json) or ".", exist_ok=True)
-        with open(args.json, "w", encoding="utf-8") as f:
-            json.dump(report_data, f, ensure_ascii=False, indent=2)
-        print(f"\n💾 Rapport lagret som JSON: {args.json}")
-    return 0
 
 
 # =================================
@@ -527,168 +494,30 @@ def maybe_apply_big_engine_badge(report: dict) -> None:
                 badges.append("Big Engine")
 
 
-def cmd_session(args: argparse.Namespace) -> int:
-    cfg = load_cfg(args.cfg)
-    history_dir = cfg.get("history_dir", "history")
-    outdir = getattr(args, "out", "output")
-    fmt = getattr(args, "format", "json")
-    lang = getattr(args, "lang", "no")
 
-    paths = sorted(glob.glob(args.input))
-    if getattr(args, "debug", False):
-        print("DEBUG: input filer:", paths, file=sys.stderr)
-    if not paths:
-        print(f"Ingen filer for pattern: {args.input}", file=sys.stderr)
-        return 2
 
-    reports: List[Dict[str, Any]] = []
-
-    for path in paths:
-        samples = read_session_csv(path, debug=getattr(args, "debug", False))
-        if getattr(args, "debug", False):
-            print(f"DEBUG: {path} -> {len(samples)} samples", file=sys.stderr)
-        if not samples:
-            print(f"ADVARSEL: {path} har ingen gyldige samples.", file=sys.stderr)
-            continue
-
-        sid = session_id_from_path(path)
-        duration_sec = infer_duration_sec(samples)
-        meta = {
-            "session_id": sid,
-            "duration_sec": duration_sec,
-            "ftp": None,
-            "hr_max": cfg.get("hr_max"),
-            "start_time_utc": None
-        }
-        if getattr(args, "mode", None):
-           print(f"🎛️ Overstyrt modus: {args.mode}")
-           meta["mode"] = args.mode
-        else:
-           print("🔍 Ingen overstyring – modus settes automatisk senere hvis relevant.")
-
-        if getattr(args, "set_ftp", None) is not None:
-            meta["ftp"] = float(args.set_ftp)
-        elif getattr(args, "auto_ftp", False):
-            ftp_est = estimate_ftp_20min95(samples)
-            if ftp_est > 0:
-                meta["ftp"] = round(ftp_est, 1)
-        elif "ftp" in cfg:
-            meta["ftp"] = cfg.get("ftp")
-
-        report_raw = _analyze_session_bridge(samples, meta, cfg)
-
-        if isinstance(report_raw, str) and report_raw.strip() == "":
-            print(f"ADVARSEL: _analyze_session_bridge returnerte tom streng for {path}", file=sys.stderr)
-            continue
-
-        try:
-            report = json.loads(report_raw) if isinstance(report_raw, str) else report_raw
-        except json.JSONDecodeError as e:
-            print(f"ADVARSEL: Klarte ikke å parse JSON for {path}: {e}", file=sys.stderr)
-            continue
-
-        baseline = load_baseline_wpb(history_dir, sid, report.get("duration_min", 0.0))
-        if baseline is not None:
-            report["w_per_beat_baseline"] = round(baseline, 4)
-
-        maybe_apply_big_engine_badge(report)
-        reports.append(report)
-
-        if not getattr(args, "batch", False):
-            if getattr(args, "dry_run", False):
-                print(json.dumps(report, ensure_ascii=False, indent=2))
-                try:
-                    pieces = build_publish_texts(report, lang=lang)
-                    print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                    print(f"[DRY-RUN] DESC: {pieces.desc_header}")
-                except Exception as e:
-                    print(f"[DRY-RUN] build_publish_texts feilet: {e}")
-            else:
-                write_report(outdir, sid, report, fmt)
-                write_history_copy(history_dir, report)
-
-            if getattr(args, "publish_to_strava", False):
-                try:
-                    pieces = build_publish_texts(report, lang=lang)
-                    aid, status = StravaClient(lang=lang).publish_to_strava(pieces, dry_run=getattr(args, "dry_run", False))
-                    print(f"[STRAVA] activity_id={aid} status={status}")
-                except Exception as e:
-                    print(f"[STRAVA] publisering feilet: {e}")
-
-    if getattr(args, "batch", False) and reports:
-        if getattr(args, "with_trend", False):
-            apply_trend_last3(reports)
-
-        for r in reports:
-            sid = r.get("session_id", "session")
-            baseline = load_baseline_wpb(history_dir, sid, r.get("duration_min", 0.0))
-            if baseline is not None:
-                r["w_per_beat_baseline"] = round(baseline, 4)
-            maybe_apply_big_engine_badge(r)
-
-            if getattr(args, "dry_run", False):
-                print(json.dumps(r, ensure_ascii=False, indent=2))
-                try:
-                    pieces = build_publish_texts(r, lang=lang)
-                    print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                    print(f"[DRY-RUN] DESC: {pieces.desc_header}")
-                except Exception as e:
-                    print(f"[DRY-RUN] build_publish_texts feilet: {e}")
-            else:
-                write_report(outdir, sid, r, fmt)
-                write_history_copy(history_dir, r)
-
-        if getattr(args, "publish_to_strava", False):
-            try:
-                pieces = build_publish_texts(reports[-1], lang=lang)
-                aid, status = StravaClient(lang=lang).publish_to_strava(pieces, dry_run=getattr(args, "dry_run", False))
-                print(f"[STRAVA] activity_id={aid} status={status}")
-            except Exception as e:
-                print(f"[STRAVA] publisering feilet: {e}")
-
-    return 0
+from cli.parser import build_parser
 
 
 
+import json
+from pathlib import Path
+from cyclegraph_core import profile_from_json
+from cli.parser import build_parser  # Husk denne importen
 
-
-# ===============
-#  Argparse setup
-# ===============
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="CycleGraph CLI (efficiency | session)")
-    sub = p.add_subparsers(dest="command", required=True)
-
-    pe = sub.add_parser("efficiency", help="Analyser watt/puls-effektivitet fra CSV (kolonner: watt,puls).")
-    pe.add_argument("--file", required=True, help="Path til CSV med kolonner 'watt' og 'puls'.")
-    pe.add_argument("--validate", action="store_true", help="Valider RDF mot SHACL før analyse.")
-    pe.add_argument("--json", help="Lagre efficiency-rapport som JSON.")
-    pe.set_defaults(func=cmd_efficiency)
-
-    ps = sub.add_parser("session", help="Analyser treningsøkter (NP/IF/VI/Pa:Hr/WpB/CGS) fra CSV.")
-    ps.add_argument("--mode", choices=["roller", "outdoor"], help="Overstyr auto-modus (roller|outdoor)")
-    ps.add_argument("--input", required=True, help="Glob for CSV, f.eks. data/*.csv")
-    ps.add_argument("--out", default="output", help="Output-mappe (default: output/)")
-    ps.add_argument("--cfg", default="", help="Path til config.json")
-    ps.add_argument("--format", choices=["json", "csv", "both"], default="json", help="Rapportformat")
-    ps.add_argument("--batch", action="store_true", help="Analyser alle filer i én batch")
-    ps.add_argument("--with-trend", action="store_true", help="Legg til minitrend (siste 3) i batch")
-    ps.add_argument("--set-ftp", type=float, default=None, help="Overstyr FTP for alle sessions")
-    ps.add_argument("--auto-ftp", action="store_true", help="Estimer FTP (20min*0.95) hvis mulig")
-    ps.add_argument("--publish-to-strava", action="store_true", help="(Stub) Publiser kort/tekst til Strava")
-    ps.add_argument("--dry-run", action="store_true", help="Skriv kun til stdout (ingen filer)")
-    ps.add_argument("--debug", action="store_true", help="Print diagnostikk om CSV-parsing pr. fil")
-    ps.add_argument("--lang", choices=["no", "en"], default="no", help="Språk for publiseringstekster (no/en)")
-    ps.set_defaults(func=cmd_session)
-
-    return p
-
+def load_profile():
+    path = Path("state/profile.sample.json")
+    if not path.exists():
+        return profile_from_json("{}")
+    with open(path) as f:
+        return profile_from_json(f.read())
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    profile = load_profile()
+    print("Profil:", profile)
+
+    # Hvis du senere vil bruke profilen i args.func, kan du sende den inn her
     sys.exit(args.func(args))
-
-
-if __name__ == "__main__":
-    main()

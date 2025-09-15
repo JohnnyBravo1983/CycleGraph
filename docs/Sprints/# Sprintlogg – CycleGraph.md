@@ -19,29 +19,25 @@ M7.6 Watt-engine v1 & Precision Watt v1.0 (Backend)
   - Hva gikk bra  Auto-modus og CLI-override fungerte stabilt; alle tester grønne både lokalt og i CI.
   - Hva kan forbedres Enkelte Strava-økter manglet watt (device_watts=False) → krever policy og fallback (lagt inn som oppfølging i Sprint S1B). 
 
-S2 — Vær & profiler (🌤️) ✅
-Sprint [ID 2]
-Start: 12.09.2025
-Ferdig: 13.09.2025
-Estimat: 8–12 timer
-Faktisk tid: 9 timer
+
+Sprint [S1B] – No-watt fallback & policy
+Dato start: 13.09.2025
+Dato ferdig: 14.09.2025
+Estimat: 8–10 timer
+Faktisk tid: ca. 14 timer (mye debugging CI/pytest/cargo)
 
 Endringer:
-Implementert værklient med støtte for vind, temperatur og trykk.
-Caching per (lat, lon, timestamp) med lokal kv-store.
-Profilsettings lagt til: total vekt, sykkeltype, dekk/underlag (Crr-preset).
-Validering av profil med fallback til default og estimat=True-flagg.
-Metrics lagt til: weather_cache_hit_total, weather_cache_miss_total.
+Implementert fallback til hr_only for økter uten watt eller device_watts=False.
+Structured WARN-logg med no_power_reason.
+Metrics: sessions_no_power_total og sessions_device_watts_false_total.
+Varsel lagt til i publish dry-run.
+Git hygiene: .gitignore oppdatert, eksempelfiler (tokens_example.py, last_import.sample.json) lagt til.
 
 Tester:
-Lokale tester på cache-hit og profilvalidering.
-CI kjørt med selektiv teststrategi (sanity-test hoppet over – publiseringsflyt ikke berørt).
-pytest -v grønn på relevante moduler.
+pytest -q grønn (fixtures for no-watt).
+cargo test --tests -q grønn (analyzer-test med mode="hr_only").
+Golden-test validert output.
 Status: Ferdig
-
 Observasjoner:
-✅ Cache-rate over 95 % ved rekjøring av samme økt.
-✅ Profilvalidering fungerer med default og flagging.
-🧠 CI-oppsett justert for høy ROI: sanity-test kjøres kun ved endringer i publiseringsflyt.
-🚫 Ingen endringer i publish_to_strava() → ingen behov for full systemtest.
-Neste: Sprint S3 — Fysikkmotor (🚴) med golden test og fysisk modell. Klar for å koble vær + profil inn i beregningene.
+Hva gikk bra: Fallback-løsningen fungerte, metrics og logging på plass; både pytest og cargo grønn lokalt og i CI.
+Hva kan forbedres: CI-debugging tok tid (requests, dotenv, tokens); bør rydde opp i workflow (planlagt S2B – CI hardening). Frontend-varsel håndteres i M8.
