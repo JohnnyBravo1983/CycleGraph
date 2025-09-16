@@ -7,8 +7,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     pe = sub.add_parser("efficiency", help="Analyser watt/puls-effektivitet fra CSV (kolonner: watt,puls).")
-    pe.add_argument("--file", required=True, help="Path til CSV med kolonner 'watt' og 'puls'.")
-    pe.add_argument("--validate", action="store_true", help="Valider RDF mot SHACL før analyse.")
+    pe.add_argument("--file", help="Path til CSV med kolonner 'watt' og 'puls'. (påkrevd uten --dry-run)")
+    # pe.add_argument("--validate", action="store_true", help="Valider RDF mot SHACL før analyse.")
     pe.add_argument("--json", help="Lagre efficiency-rapport som JSON.")
     pe.add_argument("--dry-run", action="store_true", help="Run without making changes")
     pe.set_defaults(func=cmd_efficiency)
