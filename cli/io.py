@@ -1,3 +1,4 @@
+import csv
 from typing import List, Dict, Any
 
 def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
