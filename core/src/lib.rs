@@ -1,3 +1,4 @@
+mod physics;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 // use pyo3::types::PyAny; // uncomment if used
@@ -7,6 +8,9 @@ use serde_json::json;
 pub mod metrics;
 pub mod analyzer;
 pub mod weather;
+pub use physics::compute_power;
+pub mod models;
+//pub use models::{Sample, Weather};//
 
 // Importér fra metrics (kommentert midlertidig – brukes ikke ennå)
 // TODO: Aktiver metrics når cache-lag implementeres
@@ -385,6 +389,7 @@ impl Profile {
         parsed
     }
 }
+
 
 #[pyclass]
 #[derive(Debug, Clone)]
