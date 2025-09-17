@@ -97,52 +97,69 @@ Systemtesten ble grønn etter justering av signatur og inputformat
 
 Status: ✅ Ferdig
 
-Startet 11 Sepmteber 2025 og avsluttet samme dag.
+Startet 11. september 2025 og avsluttet 14. september 2025.
 📋 Sluttrapport – M7.6B Sprint 1B No-watt policy & fallback (S1B)
-✅ Sprint: M7.6B — No-watt policy & fallback (S1B) Branch: chore/ignore-secrets-and-add-tests
+✅ Sprint: M7.6B — No-watt policy & fallback (S1B)
+Branch: chore/ignore-secrets-and-add-tests
 
 Commits:
-
 a3f9c12 – Oppdater .gitignore for secrets/state
-
 c7b1e88 – Legg til tokens_example.py og last_import.sample.json
-
 f2d4a91 – Dry-run fallback for no-watt økter
 
 Endrede filer:
-
 .gitignore
-
 cli/analyze.py
-
 cli/tokens_example.py
-
 state/last_import.sample.json
-
 core/tests/golden/data/sess01_streams.csv
-
 core/src/lib.rs, metrics.rs, Cargo.toml, Cargo.lock
-
 Diverse dokumenter i docs/ og Masterplan.md
 
 Tester:
-
-pytest: ✅ grønne
-
-cargo test: ✅ grønne
-
+pytest: ✅ grønne (inkludert fixtures for no-watt / device_watts=False)
+cargo test: ✅ grønne (analyzer-test viser mode="hr_only")
 Dry-run CLI: ✅ fallback til hr_only testet
-
 Golden-test: ✅ full output validert
 
 Observasjoner:
-
 CLI dry-run håndterer manglende watt korrekt
-
 Eksempelfiler beskytter sensitive data
-
 Ingen behov for CLI-entrypoint for import i denne sprinten
-. 
+Debugging i CI tok ekstra tid (manglende requests, dotenv, tokens) → løst med sample-filer og justert workflow.
+Rust-tester ble midlertidig deaktivert under feilsøk, men reaktivert og grønn.
+Frontend-varsel planlagt til M8 (ikke med i denne sprinten).
+Status: ✅ Ferdig
+
+✅ Sprint: S2 – Strava Weather Branch: feature/weather-context
+
+Commits:
+a9c3f1d – Add find_valid_weather.py with validation logic
+b2f7e8a – Integrate fetch_weather.py with location/start support
+c4d1a3e – Add probe-forecast fallback and debug logging
+d7e9f6b – Finalize adjusted efficiency output and CLI integration
+
+Endrede filer:
+cli/find_valid_weather.py
+cli/fetch_weather.py
+cli/weather_client_mock.py
+cli/weather_metrics.py
+cli/diagnose_data.py
+tools/find_valid_weather.py
+tools/filter_valid_rows.py
+data/session_2025-09-16_weather.json
+efficiency.py (splittet fra analyze til egen fil) 
+parser.py     (splittet fra analyze til egen fil) 
+Tester:
+pytest: ✅ Alle relevante tester passerte
+
+cargo test: ✅ Cargo-test viser stabile tall (±1–2W)
+Observasjoner:
+Open-Meteo archive-endpoint feiler for fremtidige datoer
+probe-forecast gir fungerende fallback
+Debug-modus gir full transparens
+Automatisk og manuell timestamp-validering fungerer
+CLI-analyse gir justert effektivitet basert på værkontekst
 Status: ✅ Ferdig
 
 
@@ -159,5 +176,6 @@ Sprint 1 – Strava-integrasjon og publisering
 Strava publish med dry_run + retry implementert. Fixtures/tester grønne. CI aktiv; pieces-parameter avklart. Status ferdig.
 
 Sprint 1B – No-watt policy & fallback
-Fallback til hr_only implementert for økter uten watt. Varsel/metrics og git hygiene fullført. Pytest/cargo tester grønne, golden validert.
-Eksempelfiler beskytter secrets. Status ferdig.
+Fallback til hr_only implementert for økter uten watt. Varsel/metrics og git hygiene fullført. Pytest/cargo tester grønne, 
+golden validert. Eksempelfiler beskytter secrets. CI krevde ekstra debugging (requests/dotenv/tokens), løst via sample-filer
+og workflow-oppdatering. Frontend-varsel håndteres i M8. Status ferdig.

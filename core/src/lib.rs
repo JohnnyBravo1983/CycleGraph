@@ -115,12 +115,14 @@ pub fn analyze_session(
 }
 
 #[pymodule]
-fn cyclegraph_core(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn cyclegraph_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
     m.add_function(wrap_pyfunction!(analyze_session, m)?)?;
     m.add_function(wrap_pyfunction!(profile_from_json, m)?)?;
     Ok(())
 }
+
+// -------- END PYTHON BINDINGS --------
 // -------- END PYTHON BINDINGS --------
 
 
