@@ -52,3 +52,21 @@ fn test_aero_power() {
     let power = compute_power(&samples, &profile, &weather);
     assert!(power[0] > 0.0);
 }
+
+
+#[test]
+fn test_acceleration_power() {
+    let samples = vec![
+        Sample { t: 0.0, v_ms: 5.0, altitude_m: 100.0, heading_deg: 0.0, moving: true },
+        Sample { t: 1.0, v_ms: 6.0, altitude_m: 100.0, heading_deg: 0.0, moving: true },
+    ];
+    let profile = Profile {
+        total_weight: Some(75.0),
+        crr: Some(0.004),
+        ..Default::default()
+    };
+    let weather = Weather::default();
+
+    let power = compute_power(&samples, &profile, &weather);
+    assert!(power[1] > power[0]); // akselerasjon gir økt effekt
+}
