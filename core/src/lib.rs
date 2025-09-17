@@ -7,8 +7,11 @@ use serde_json::json;
 pub mod metrics;
 pub mod analyzer;
 pub mod weather;
-// Importér fra metrics (trygt – ingen lokale redefinisjoner)
-use crate::metrics::{Metrics, weather_cache_hit_total, weather_cache_miss_total};
+
+// Importér fra metrics (kommentert midlertidig – brukes ikke ennå)
+// TODO: Aktiver metrics når cache-lag implementeres
+// use crate::metrics::{Metrics, weather_cache_hit_total, weather_cache_miss_total};
+
 pub use metrics::w_per_beat;
 
 #[pyfunction]
