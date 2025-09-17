@@ -1,7 +1,7 @@
 // core/src/physics.rs
+use crate::smoothing::smooth_altitude;
 use crate::Profile;
 use crate::models::{Sample, Weather};
-
 
 fn compute_air_density(weather: &Weather) -> Option<f64> {
     let temp_k = weather.air_temp_c + 273.15;
@@ -13,19 +13,22 @@ fn compute_air_density(weather: &Weather) -> Option<f64> {
     }
 }
 
-
 pub fn compute_power(samples: &[Sample], profile: &Profile, weather: &Weather) -> Vec<f64> {
     let g = 9.80665;
     let rho = compute_air_density(weather).unwrap_or(1.225);
+
+    // 🔧 Nytt: smoothet høyde-profil
+    let altitudes = smooth_altitude(samples);
+
     let mut power = Vec::with_capacity(samples.len());
 
     for i in 0..samples.len() {
         let s = &samples[i];
         let v = if s.moving { s.v_ms } else { 0.0 };
 
-        // Slope estimation
+        // Slope estimation (bruk smoothet høyde)
         let slope = if i + 1 < samples.len() {
-            let dz = samples[i + 1].altitude_m - s.altitude_m;
+            let dz = altitudes[i + 1] - altitudes[i];
             let dx = v.max(0.1);
             (dz / dx).atan()
         } else {

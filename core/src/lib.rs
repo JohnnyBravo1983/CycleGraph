@@ -10,6 +10,7 @@ pub mod analyzer;
 pub mod weather;
 pub use physics::compute_power;
 pub mod models;
+pub mod smoothing;
 //pub use models::{Sample, Weather};//
 
 // Importér fra metrics (kommentert midlertidig – brukes ikke ennå)
