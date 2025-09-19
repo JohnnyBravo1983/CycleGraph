@@ -31,6 +31,12 @@ jobs:
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
+      # NEW: Ensure Python 3.12 headers are available for building against system Python
+      - name: Install Python 3.12 dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3.12-dev
+
       - name: Build Rust wheel
         working-directory: core
         run: maturin build --release -i python3.12
