@@ -1,7 +1,6 @@
 mod physics;
-use pyo3::prelude::*;
-use pyo3::wrap_pyfunction;
-// use pyo3::types::PyAny; // uncomment if used
+
+// -------- Rust-only imports --------
 use serde_json::json;
 
 // Moduler
@@ -11,14 +10,53 @@ pub mod weather;
 pub use physics::compute_power;
 pub mod models;
 pub mod smoothing;
-//pub use models::{Sample, Weather};//
-
-// Importér fra metrics (kommentert midlertidig – brukes ikke ennå)
-// TODO: Aktiver metrics når cache-lag implementeres
-// use crate::metrics::{Metrics, weather_cache_hit_total, weather_cache_miss_total};
 
 pub use metrics::w_per_beat;
 
+// ================== PyO3 bindninger kun når --features python ==================
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+#[cfg(feature = "python")]
+use pyo3::wrap_pyfunction;
+
+// -------------------- Rust-only API --------------------
+pub fn analyze_session_rust(
+    watts: Vec<f64>,
+    pulses: Vec<f64>,
+    device_watts: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    if pulses.is_empty() || (!watts.is_empty() && pulses.len() != watts.len()) {
+        return Err("Watt og puls må ha samme lengde (dersom watt er tilstede) og puls-listen kan ikke være tom.".to_string());
+    }
+
+    let no_power_stream = watts.is_empty();
+    let device_watts_false = device_watts == Some(false);
+
+    let result = if no_power_stream || device_watts_false {
+        let reason = if no_power_stream { "no_power_stream" } else { "device_watts_false" };
+        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+
+        json!({ "mode": "hr_only", "no_power_reason": reason, "avg_pulse": avg_pulse })
+    } else {
+        let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
+        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+        let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
+        let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
+
+        json!({
+            "effektivitet": eff,
+            "status": status,
+            "avg_watt": avg_watt,
+            "avg_pulse": avg_pulse,
+            "mode": "normal"
+        })
+    };
+
+    Ok(result)
+}
+
+// -------------------- PyO3 bindings (feature-gated) --------------------
+#[cfg(feature = "python")]
 #[pyfunction]
 pub fn calculate_efficiency_series(
     watts: Vec<f64>,
@@ -54,57 +92,7 @@ pub fn calculate_efficiency_series(
     Ok((avg_eff, session_status, per_point_eff, per_point_status))
 }
 
-pub fn analyze_session_rust(
-    watts: Vec<f64>,
-    pulses: Vec<f64>,
-    device_watts: Option<bool>,
-) -> Result<serde_json::Value, String> {
-    if pulses.is_empty() || (!watts.is_empty() && pulses.len() != watts.len()) {
-        return Err("Watt og puls må ha samme lengde (dersom watt er tilstede) og puls-listen kan ikke være tom.".to_string());
-    }
-
-    let no_power_stream = watts.is_empty();
-    let device_watts_false = device_watts == Some(false);
-
-    let result = if no_power_stream || device_watts_false {
-        let reason = if no_power_stream {
-            "no_power_stream"
-        } else {
-            "device_watts_false"
-        };
-
-        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
-
-        json!({
-            "mode": "hr_only",
-            "no_power_reason": reason,
-            "avg_pulse": avg_pulse
-        })
-    } else {
-        let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
-        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
-        let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
-
-        let status = if eff < 1.0 {
-            "Lav effekt"
-        } else if avg_pulse > 170.0 {
-            "Høy puls"
-        } else {
-            "OK"
-        };
-
-        json!({
-            "effektivitet": eff,
-            "status": status,
-            "avg_watt": avg_watt,
-            "avg_pulse": avg_pulse,
-            "mode": "normal"
-        })
-    };
-
-    Ok(result)
-}
-
+#[cfg(feature = "python")]
 #[pyfunction]
 pub fn analyze_session(
     py: Python<'_>,
@@ -119,6 +107,70 @@ pub fn analyze_session(
     Ok(py_obj.into())
 }
 
+// --------- Profile-typer for Python (feature-gated) ---------
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub total_weight: Option<f64>,
+    pub bike_type: Option<String>,
+    pub crr: Option<f64>,
+    pub estimat: bool,
+}
+
+impl Profile {
+    pub fn from_json(json: &str) -> Self {
+        let mut parsed: Profile = serde_json::from_str(json).unwrap_or_else(|_| Profile {
+            total_weight: None,
+            bike_type: None,
+            crr: None,
+            estimat: true,
+        });
+
+        let missing = parsed.total_weight.is_none()
+            || parsed.bike_type.is_none()
+            || parsed.crr.is_none();
+
+        if missing {
+            parsed.total_weight.get_or_insert(78.0);
+            parsed.bike_type.get_or_insert("road".to_string());
+            parsed.crr.get_or_insert(0.005);
+            parsed.estimat = true;
+        } else {
+            parsed.estimat = false;
+        }
+
+        parsed
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PyProfile {
+    #[pyo3(get)]
+    pub total_weight: f64,
+    #[pyo3(get)]
+    pub bike_type: String,
+    #[pyo3(get)]
+    pub crr: f64,
+    #[pyo3(get)]
+    pub estimat: bool,
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn profile_from_json(json: &str) -> PyProfile {
+    let profile = Profile::from_json(json);
+    PyProfile {
+        total_weight: profile.total_weight.unwrap_or(78.0),
+        bike_type: profile.bike_type.unwrap_or_else(|| "road".to_string()),
+        crr: profile.crr.unwrap_or(0.005),
+        estimat: profile.estimat,
+    }
+}
+
+#[cfg(feature = "python")]
 #[pymodule]
 fn cyclegraph_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
@@ -127,14 +179,7 @@ fn cyclegraph_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
-// -------- END PYTHON BINDINGS --------
-// -------- END PYTHON BINDINGS --------
-
-
-// -----------------------------------------------------------------------------
-// TESTS (M7) – unit + golden + perf-guard
-// (kjører uten python-feature)
-// -----------------------------------------------------------------------------
+// ================== TESTS (Rust-only) ==================
 #[cfg(test)]
 mod m7_tests {
     use crate::metrics;
@@ -190,27 +235,17 @@ mod m7_tests {
     }
 
     #[derive(Deserialize, Serialize)]
-    struct ExpField {
-        value: f32,
-        tol: f32,
-    }
+    struct ExpField { value: f32, tol: f32 }
 
     #[derive(Deserialize, Serialize)]
     struct Expected {
-        #[serde(default)]
-        ftp: Option<f32>,
-        #[serde(default)]
-        np: Option<ExpField>,
-        #[serde(rename = "if", default)]
-        i_f: Option<ExpField>,
-        #[serde(default)]
-        vi: Option<ExpField>,
-        #[serde(default)]
-        pa_hr: Option<ExpField>,
-        #[serde(default)]
-        w_per_beat: Option<ExpField>,
+        #[serde(default)] ftp: Option<f32>,
+        #[serde(default)] np: Option<ExpField>,
+        #[serde(rename = "if", default)] i_f: Option<ExpField>,
+        #[serde(default)] vi: Option<ExpField>,
+        #[serde(default)] pa_hr: Option<ExpField>,
+        #[serde(default)] w_per_beat: Option<ExpField>,
     }
-    // -------------------------------------------
 
     fn manifest_path(p: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p)
@@ -228,18 +263,14 @@ mod m7_tests {
         (p, hr)
     }
 
-    // ⬇️ Fix: undertrykk dead_code-varsel for hjelpesfunksjonen (ikke i bruk nå)
     #[allow(dead_code)]
     fn read_expected(json_path: &str) -> Expected {
         let f = std::fs::File::open(manifest_path(json_path)).expect("open json");
         serde_json::from_reader::<_, Expected>(std::io::BufReader::new(f)).expect("parse expected")
     }
 
-    fn approx(val: f32, exp: f32, tol: f32) -> bool {
-        (val - exp).abs() <= tol
-    }
+    fn approx(val: f32, exp: f32, tol: f32) -> bool { (val - exp).abs() <= tol }
 
-    // ------------------- OPPDATERT GOLDEN-TEST -------------------
     #[test]
     fn golden_sessions_match_with_tolerance() {
         let cases = [
@@ -248,50 +279,44 @@ mod m7_tests {
             ("tests/golden/data/sess03_streams.csv", "tests/golden/expected/sess03_expected.json"),
         ];
 
-        // Env-flag: oppdater golden når du ønsker
         let update = std::env::var("CG_UPDATE_GOLDEN").ok().as_deref() == Some("1");
 
         for (csv_path, json_path) in cases {
             let (p, hr) = read_streams(csv_path);
             assert!(!p.is_empty(), "empty power series for {}", csv_path);
 
-            // Beregn verdier (samme logikk som i originaltesten)
             let hz = 1.0;
             let np = metrics::np(&p, hz);
             let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
-            let ftp = 250.0; // fallback
+            let ftp = 250.0;
             let iff = metrics::intensity_factor(np, ftp);
             let vi = metrics::variability_index(np, avg);
             let pa = metrics::pa_hr(&hr, &p, hz);
             let wpb = metrics::w_per_beat(&p, &hr);
 
             if update {
-                // Skriv ny fasit (med fornuftige toleranser)
                 let new = Expected {
                     ftp: Some(ftp),
-                    np: Some(ExpField { value: np, tol: 0.5 } ),
-                    i_f: Some(ExpField { value: iff, tol: 0.05 } ),
-                    vi: Some(ExpField { value: vi, tol: 0.05 } ),
-                    pa_hr: Some(ExpField { value: pa, tol: 0.05 } ),
-                    w_per_beat: Some(ExpField { value: wpb, tol: 0.05 } ),
+                    np: Some(ExpField { value: np, tol: 0.5 }),
+                    i_f: Some(ExpField { value: iff, tol: 0.05 }),
+                    vi: Some(ExpField { value: vi, tol: 0.05 }),
+                    pa_hr: Some(ExpField { value: pa, tol: 0.05 }),
+                    w_per_beat: Some(ExpField { value: wpb, tol: 0.05 }),
                 };
                 let pretty = serde_json::to_string_pretty(&new).unwrap();
                 std::fs::write(json_path, pretty).unwrap();
                 continue;
             }
 
-            // Sammenlign med forventet
             let expected: Expected = serde_json::from_str(&std::fs::read_to_string(json_path).unwrap()).unwrap();
 
             if csv_path.ends_with("sess01_streams.csv") {
-                // Override for denne filen – du har kontrollert at wpb ≈ 1.45
                 assert!(approx(wpb, 1.45, 0.05), "WpB {} vs {}±{} ({})", wpb, 1.45, 0.05, csv_path);
             } else {
                 let f = expected.w_per_beat.as_ref().unwrap();
                 assert!(approx(wpb, f.value, f.tol), "WpB {} vs {}±{} ({})", wpb, f.value, f.tol, csv_path);
             }
 
-            // Resten av assertions
             let f = expected.np.as_ref().unwrap();
             assert!(approx(np, f.value, f.tol), "NP {} vs {}±{} ({})", np, f.value, f.tol, csv_path);
 
@@ -326,94 +351,31 @@ mod m7_tests {
             .and_then(|s| s.parse::<u128>().ok())
             .unwrap_or(200);
 
-        assert!(
-            dt.as_millis() <= limit_ms,
-            "perf guard: {} ms > {} ms",
-            dt.as_millis(),
-            limit_ms
-        );
-    }
-}
-   
-use pyo3::Python;
-
-#[test]
-fn test_fallback_to_hr_only() {
-    pyo3::prepare_freethreaded_python();
-    let watts = vec![];
-    let pulses = vec![120.0, 125.0, 130.0];
-    let device_watts = Some(true);
-
-    Python::with_gil(|py| -> pyo3::PyResult<()> {
-        let result = analyze_session(py, watts.clone(), pulses.clone(), device_watts).unwrap();
-        let result_ref = result.as_ref(py);
-
-        let mode: &str = result_ref.get_item("mode")?.extract()?;
-        let reason: &str = result_ref.get_item("no_power_reason")?.extract()?;
-
-        assert_eq!(mode, "hr_only");
-        assert_eq!(reason, "no_power_stream");
-        Ok(())
-    }).unwrap(); // ← denne avslutter Python::with_gil
-}
-
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Profile {
-    pub total_weight: Option<f64>,
-    pub bike_type: Option<String>,
-    pub crr: Option<f64>,
-    pub estimat: bool,
-}
-
-impl Profile {
-    pub fn from_json(json: &str) -> Self {
-        let mut parsed: Profile = serde_json::from_str(json).unwrap_or_else(|_| Profile {
-            total_weight: None,
-            bike_type: None,
-            crr: None,
-            estimat: true,
-        });
-
-        let missing = parsed.total_weight.is_none()
-            || parsed.bike_type.is_none()
-            || parsed.crr.is_none();
-
-        if missing {
-            parsed.total_weight.get_or_insert(78.0);
-            parsed.bike_type.get_or_insert("road".to_string());
-            parsed.crr.get_or_insert(0.005);
-            parsed.estimat = true;
-        } else {
-            parsed.estimat = false;
-        }
-
-        parsed
+        assert!(dt.as_millis() <= limit_ms, "perf guard: {} ms > {} ms", dt.as_millis(), limit_ms);
     }
 }
 
+// ================== Python-avhengig test (feature-gated) ==================
+#[cfg(all(test, feature = "python"))]
+mod py_tests {
+    use super::*;
+    use pyo3::prelude::*;
 
-#[pyclass]
-#[derive(Debug, Clone)]
-pub struct PyProfile {
-    #[pyo3(get)]
-    pub total_weight: f64,
-    #[pyo3(get)]
-    pub bike_type: String,
-    #[pyo3(get)]
-    pub crr: f64,
-    #[pyo3(get)]
-    pub estimat: bool,
-}
+    #[test]
+    fn test_fallback_to_hr_only() {
+        pyo3::prepare_freethreaded_python();
+        let watts = vec![];
+        let pulses = vec![120.0, 125.0, 130.0];
+        let device_watts = Some(true);
 
-#[pyfunction]
-pub fn profile_from_json(json: &str) -> PyProfile {
-    let profile = Profile::from_json(json);
-    PyProfile {
-        total_weight: profile.total_weight.unwrap_or(78.0),
-        bike_type: profile.bike_type.unwrap_or_else(|| "road".to_string()),
-        crr: profile.crr.unwrap_or(0.005),
-        estimat: profile.estimat,
+        Python::with_gil(|py| -> pyo3::PyResult<()> {
+            let result = analyze_session(py, watts.clone(), pulses.clone(), device_watts).unwrap();
+            let result_ref = result.as_ref(py);
+            let mode: &str = result_ref.get_item("mode")?.extract()?;
+            let reason: &str = result_ref.get_item("no_power_reason")?.extract()?;
+            assert_eq!(mode, "hr_only");
+            assert_eq!(reason, "no_power_stream");
+            Ok(())
+        }).unwrap();
     }
 }
