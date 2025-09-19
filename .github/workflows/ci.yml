@@ -47,13 +47,15 @@ jobs:
           pip install "$WHEEL"
           python -c "import cyclegraph_core"
 
-      - name: Run Rust unit tests
+      # Kjør alle lib-tester (inkl. unit)
+      - name: Run Rust unit tests (lib)
         working-directory: core
-        run: cargo test --tests -- --nocapture
+        run: cargo test --lib -- --nocapture
 
+      # Kjør golden-testen ved navnefilter i lib
       - name: Run golden test (syntetisk segment)
         working-directory: core
-        run: cargo test --test test_golden -- --nocapture
+        run: cargo test --lib golden_sessions_match_with_tolerance -- --nocapture
 
       - name: Run Python CLI tests
         run: pytest -k "physics_cli" --ignore=cli/test_fetch.py
