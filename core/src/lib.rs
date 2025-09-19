@@ -228,6 +228,8 @@ mod m7_tests {
         (p, hr)
     }
 
+    // ⬇️ Fix: undertrykk dead_code-varsel for hjelpesfunksjonen (ikke i bruk nå)
+    #[allow(dead_code)]
     fn read_expected(json_path: &str) -> Expected {
         let f = std::fs::File::open(manifest_path(json_path)).expect("open json");
         serde_json::from_reader::<_, Expected>(std::io::BufReader::new(f)).expect("parse expected")
@@ -239,70 +241,70 @@ mod m7_tests {
 
     // ------------------- OPPDATERT GOLDEN-TEST -------------------
     #[test]
-fn golden_sessions_match_with_tolerance() {
-    let cases = [
-        ("tests/golden/data/sess01_streams.csv", "tests/golden/expected/sess01_expected.json"),
-        ("tests/golden/data/sess02_streams.csv", "tests/golden/expected/sess02_expected.json"),
-        ("tests/golden/data/sess03_streams.csv", "tests/golden/expected/sess03_expected.json"),
-    ];
+    fn golden_sessions_match_with_tolerance() {
+        let cases = [
+            ("tests/golden/data/sess01_streams.csv", "tests/golden/expected/sess01_expected.json"),
+            ("tests/golden/data/sess02_streams.csv", "tests/golden/expected/sess02_expected.json"),
+            ("tests/golden/data/sess03_streams.csv", "tests/golden/expected/sess03_expected.json"),
+        ];
 
-    // Env-flag: oppdater golden når du ønsker
-    let update = std::env::var("CG_UPDATE_GOLDEN").ok().as_deref() == Some("1");
+        // Env-flag: oppdater golden når du ønsker
+        let update = std::env::var("CG_UPDATE_GOLDEN").ok().as_deref() == Some("1");
 
-    for (csv_path, json_path) in cases {
-        let (p, hr) = read_streams(csv_path);
-        assert!(!p.is_empty(), "empty power series for {}", csv_path);
+        for (csv_path, json_path) in cases {
+            let (p, hr) = read_streams(csv_path);
+            assert!(!p.is_empty(), "empty power series for {}", csv_path);
 
-        // Beregn verdier (samme logikk som i originaltesten)
-        let hz = 1.0;
-        let np = metrics::np(&p, hz);
-        let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
-        let ftp = 250.0; // fallback
-        let iff = metrics::intensity_factor(np, ftp);
-        let vi = metrics::variability_index(np, avg);
-        let pa = metrics::pa_hr(&hr, &p, hz);
-        let wpb = metrics::w_per_beat(&p, &hr);
+            // Beregn verdier (samme logikk som i originaltesten)
+            let hz = 1.0;
+            let np = metrics::np(&p, hz);
+            let avg = p.iter().copied().sum::<f32>() / (p.len() as f32).max(1.0);
+            let ftp = 250.0; // fallback
+            let iff = metrics::intensity_factor(np, ftp);
+            let vi = metrics::variability_index(np, avg);
+            let pa = metrics::pa_hr(&hr, &p, hz);
+            let wpb = metrics::w_per_beat(&p, &hr);
 
-        if update {
-            // Skriv ny fasit (med fornuftige toleranser)
-            let new = Expected {
-                ftp: Some(ftp),
-                np: Some(ExpField { value: np, tol: 0.5 } ),
-                i_f: Some(ExpField { value: iff, tol: 0.05 } ),
-                vi: Some(ExpField { value: vi, tol: 0.05 } ),
-                pa_hr: Some(ExpField { value: pa, tol: 0.05 } ),
-                w_per_beat: Some(ExpField { value: wpb, tol: 0.05 } ),
-            };
-            let pretty = serde_json::to_string_pretty(&new).unwrap();
-            std::fs::write(json_path, pretty).unwrap();
-            continue;
+            if update {
+                // Skriv ny fasit (med fornuftige toleranser)
+                let new = Expected {
+                    ftp: Some(ftp),
+                    np: Some(ExpField { value: np, tol: 0.5 } ),
+                    i_f: Some(ExpField { value: iff, tol: 0.05 } ),
+                    vi: Some(ExpField { value: vi, tol: 0.05 } ),
+                    pa_hr: Some(ExpField { value: pa, tol: 0.05 } ),
+                    w_per_beat: Some(ExpField { value: wpb, tol: 0.05 } ),
+                };
+                let pretty = serde_json::to_string_pretty(&new).unwrap();
+                std::fs::write(json_path, pretty).unwrap();
+                continue;
+            }
+
+            // Sammenlign med forventet
+            let expected: Expected = serde_json::from_str(&std::fs::read_to_string(json_path).unwrap()).unwrap();
+
+            if csv_path.ends_with("sess01_streams.csv") {
+                // Override for denne filen – du har kontrollert at wpb ≈ 1.45
+                assert!(approx(wpb, 1.45, 0.05), "WpB {} vs {}±{} ({})", wpb, 1.45, 0.05, csv_path);
+            } else {
+                let f = expected.w_per_beat.as_ref().unwrap();
+                assert!(approx(wpb, f.value, f.tol), "WpB {} vs {}±{} ({})", wpb, f.value, f.tol, csv_path);
+            }
+
+            // Resten av assertions
+            let f = expected.np.as_ref().unwrap();
+            assert!(approx(np, f.value, f.tol), "NP {} vs {}±{} ({})", np, f.value, f.tol, csv_path);
+
+            let f = expected.i_f.as_ref().unwrap();
+            assert!(approx(iff, f.value, f.tol), "IF {} vs {}±{} ({})", iff, f.value, f.tol, csv_path);
+
+            let f = expected.vi.as_ref().unwrap();
+            assert!(approx(vi, f.value, f.tol), "VI {} vs {}±{} ({})", vi, f.value, f.tol, csv_path);
+
+            let f = expected.pa_hr.as_ref().unwrap();
+            assert!(approx(pa, f.value, f.tol), "PaHR {} vs {}±{} ({})", pa, f.value, f.tol, csv_path);
         }
-
-        // Sammenlign med forventet
-        let expected: Expected = serde_json::from_str(&std::fs::read_to_string(json_path).unwrap()).unwrap();
-
-        if csv_path.ends_with("sess01_streams.csv") {
-            // Override for denne filen – du har kontrollert at wpb ≈ 1.45
-            assert!(approx(wpb, 1.45, 0.05), "WpB {} vs {}±{} ({})", wpb, 1.45, 0.05, csv_path);
-        } else {
-            let f = expected.w_per_beat.as_ref().unwrap();
-            assert!(approx(wpb, f.value, f.tol), "WpB {} vs {}±{} ({})", wpb, f.value, f.tol, csv_path);
-        }
-
-        // Resten av assertions
-        let f = expected.np.as_ref().unwrap();
-        assert!(approx(np, f.value, f.tol), "NP {} vs {}±{} ({})", np, f.value, f.tol, csv_path);
-
-        let f = expected.i_f.as_ref().unwrap();
-        assert!(approx(iff, f.value, f.tol), "IF {} vs {}±{} ({})", iff, f.value, f.tol, csv_path);
-
-        let f = expected.vi.as_ref().unwrap();
-        assert!(approx(vi, f.value, f.tol), "VI {} vs {}±{} ({})", vi, f.value, f.tol, csv_path);
-
-        let f = expected.pa_hr.as_ref().unwrap();
-        assert!(approx(pa, f.value, f.tol), "PaHR {} vs {}±{} ({})", pa, f.value, f.tol, csv_path);
     }
-}
 
     #[test]
     fn perf_guard_two_hours_one_hz() {
