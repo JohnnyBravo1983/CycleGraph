@@ -7,10 +7,17 @@ description = "CycleGraph core (Rust+pyo3) for analysis metrics and CGS scoring"
 readme = "../README.md"
 
 [lib]
-crate-type = ["cdylib"]
+# Bygg både rlib (for cargo test) og cdylib (for Python wheel)
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Aktiver Python extension-modus KUN når vi bygger wheel
+python = ["pyo3/extension-module"]
+default = []
 
 [dependencies]
-pyo3 = { version = "0.20", features = ["extension-module"] }
+# Viktig: ikke ha "extension-module" her — styres av feature over
+pyo3 = { version = "0.20" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
