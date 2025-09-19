@@ -1,24 +1,23 @@
 use crate::models::Sample;
 
+/// Robust 3-punkts medianfilter for høyde.
+/// Endepunkter bruker seg selv som nabov erdi (repeteres) for å holde lengden.
 pub fn smooth_altitude(samples: &[Sample]) -> Vec<f64> {
-    let mut smoothed = Vec::with_capacity(samples.len());
+    if samples.is_empty() {
+        return Vec::new();
+    }
+    let n = samples.len();
+    let mut out = Vec::with_capacity(n);
 
-    for i in 0usize..samples.len() {
-        let mut sum = 0.0;
-        let mut count = 0;
+    for i in 0..n {
+        let a0 = if i > 0 { samples[i - 1].altitude_m } else { samples[i].altitude_m };
+        let a1 = samples[i].altitude_m;
+        let a2 = if i + 1 < n { samples[i + 1].altitude_m } else { samples[i].altitude_m };
 
-        for j in i.saturating_sub(1)..=(i + 1).min(samples.len() - 1) {
-            let dz = (samples[j].altitude_m - samples[i].altitude_m).abs();
-            let dt = (samples[j].t - samples[i].t).abs();
-            if dt > 0.0 && dz / dt < 10.0 {
-                sum += samples[j].altitude_m;
-                count += 1;
-            }
-        }
-
-        let avg = if count > 0 { sum / count as f64 } else { samples[i].altitude_m };
-        smoothed.push(avg);
+        let mut win = [a0, a1, a2];
+        win.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        out.push(win[1]); // median
     }
 
-    smoothed
+    out
 }

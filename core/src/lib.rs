@@ -1,25 +1,27 @@
-mod physics;
-
-// -------- Rust-only imports --------
-use serde_json::json;
-
-// Moduler
-pub mod metrics;
-pub mod analyzer;
-pub mod weather;
-pub use physics::compute_power;
+// ───────── Modules ─────────
+pub mod physics;
 pub mod models;
 pub mod smoothing;
+pub mod metrics;
+pub mod analyzer;
+pub mod calibration;
+pub mod weather;
 
-pub use metrics::w_per_beat;
+// ───────── Re-exports for tests/back-compat ─────────
+pub use models::{Profile, Weather, Sample};
+pub use physics::compute_power;
+pub use metrics::{w_per_beat, compute_np};
 
-// ================== PyO3 bindninger kun når --features python ==================
+
+// ───────── PyO3 (feature-gated) ─────────
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]
 use pyo3::wrap_pyfunction;
 
-// -------------------- Rust-only API --------------------
+use serde_json::json;
+
+// ───────── Rust-only API ─────────
 pub fn analyze_session_rust(
     watts: Vec<f64>,
     pulses: Vec<f64>,
@@ -32,30 +34,43 @@ pub fn analyze_session_rust(
     let no_power_stream = watts.is_empty();
     let device_watts_false = device_watts == Some(false);
 
-    let result = if no_power_stream || device_watts_false {
+    if no_power_stream || device_watts_false {
         let reason = if no_power_stream { "no_power_stream" } else { "device_watts_false" };
         let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
 
-        json!({ "mode": "hr_only", "no_power_reason": reason, "avg_pulse": avg_pulse })
-    } else {
-        let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
-        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
-        let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
-        let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
-
-        json!({
-            "effektivitet": eff,
-            "status": status,
-            "avg_watt": avg_watt,
+        return Ok(json!({
+            "mode": "hr_only",
+            "no_power_reason": reason,
             "avg_pulse": avg_pulse,
-            "mode": "normal"
-        })
-    };
+            "avg": 0.0,
+            "NP": 0.0
+        }));
+    }
 
-    Ok(result)
+    let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
+    let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+    let np = compute_np(&watts);
+    let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
+    let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
+
+    Ok(json!({
+        "mode": "normal",
+        "effektivitet": eff,
+        "status": status,
+        "avg_watt": avg_watt,
+        "avg_pulse": avg_pulse,
+        "avg": avg_watt,
+        "NP": np
+    }))
 }
 
-// -------------------- PyO3 bindings (feature-gated) --------------------
+// Gjør analyze_session tilgjengelig uansett feature
+#[cfg(feature = "python")]
+pub use analyzer::analyze_session;
+#[cfg(not(feature = "python"))]
+pub use self::analyze_session_rust as analyze_session;
+
+// ───────── PyO3 bindings (feature-gated) ─────────
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn calculate_efficiency_series(
@@ -103,47 +118,11 @@ pub fn analyze_session(
     let result = analyze_session_rust(watts, pulses, device_watts)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
     let json_str = result.to_string();
-    let py_obj = py.eval(&json_str, None, None)?;
+    let py_obj = py.eval(&json_str, None, None)?; // NB: enkel JSON-eval for demo
     Ok(py_obj.into())
 }
 
-// --------- Profile-typer for Python (feature-gated) ---------
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Profile {
-    pub total_weight: Option<f64>,
-    pub bike_type: Option<String>,
-    pub crr: Option<f64>,
-    pub estimat: bool,
-}
-
-impl Profile {
-    pub fn from_json(json: &str) -> Self {
-        let mut parsed: Profile = serde_json::from_str(json).unwrap_or_else(|_| Profile {
-            total_weight: None,
-            bike_type: None,
-            crr: None,
-            estimat: true,
-        });
-
-        let missing = parsed.total_weight.is_none()
-            || parsed.bike_type.is_none()
-            || parsed.crr.is_none();
-
-        if missing {
-            parsed.total_weight.get_or_insert(78.0);
-            parsed.bike_type.get_or_insert("road".to_string());
-            parsed.crr.get_or_insert(0.005);
-            parsed.estimat = true;
-        } else {
-            parsed.estimat = false;
-        }
-
-        parsed
-    }
-}
-
+// ───────── Profile helpers for Python (bruk models::Profile) ─────────
 #[cfg(feature = "python")]
 #[pyclass]
 #[derive(Debug, Clone)]
@@ -161,12 +140,25 @@ pub struct PyProfile {
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn profile_from_json(json: &str) -> PyProfile {
-    let profile = Profile::from_json(json);
+    // Bruk models::Profile som kilde
+    let mut parsed: models::Profile = serde_json::from_str(json).unwrap_or_else(|_| models::Profile::default());
+
+    // Fyll inn defaults og sett estimat korrekt
+    let missing = parsed.total_weight.is_none() || parsed.bike_type.is_none() || parsed.crr.is_none();
+    if missing {
+        parsed.total_weight.get_or_insert(78.0);
+        parsed.bike_type.get_or_insert("road".to_string());
+        parsed.crr.get_or_insert(0.005);
+        parsed.estimat = true;
+    } else {
+        parsed.estimat = false;
+    }
+
     PyProfile {
-        total_weight: profile.total_weight.unwrap_or(78.0),
-        bike_type: profile.bike_type.unwrap_or_else(|| "road".to_string()),
-        crr: profile.crr.unwrap_or(0.005),
-        estimat: profile.estimat,
+        total_weight: parsed.total_weight.unwrap_or(78.0),
+        bike_type: parsed.bike_type.unwrap_or_else(|| "road".to_string()),
+        crr: parsed.crr.unwrap_or(0.005),
+        estimat: parsed.estimat,
     }
 }
 
