@@ -9,12 +9,35 @@ pub struct Sample {
     pub moving: bool,
 }
 
+impl Default for Sample {
+    fn default() -> Self {
+        Self {
+            t: 0.0,
+            v_ms: 0.0,
+            altitude_m: 0.0,
+            heading_deg: 0.0,
+            moving: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Weather {
     pub wind_ms: f64,         // m/s
     pub wind_dir_deg: f64,    // grader
     pub air_temp_c: f64,      // °C
     pub air_pressure_hpa: f64 // hPa
+}
+
+impl Default for Weather {
+    fn default() -> Self {
+        Self {
+            wind_ms: 0.0,
+            wind_dir_deg: 0.0,
+            air_temp_c: 15.0,       // typisk standard
+            air_pressure_hpa: 1013.0, // standardtrykk (hPa)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
