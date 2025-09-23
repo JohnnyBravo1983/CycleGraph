@@ -1,57 +1,44 @@
-# cli/analyze.py
 # -*- coding: utf-8 -*-
 """
 CycleGraph CLI
 - Subcommand 'efficiency': dispatch via parser -> efficiency.py
 - Subcommand 'session'   : NP/IF/VI/Pa:Hr/W/beat/CGS + batch/trend + baseline
+- --calibrate: valgfri kalibrering mot powermeter
+- --weather: path til værfil (JSON) som brukes i kalibrering
 """
 
+from __future__ import annotations
+
+import argparse
 import csv
 import glob
 import json
 import os
 import re
 import sys
-
-
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
-from cli.weather_client_mock import WeatherClient
-from cli.formatters.strava_publish import PublishPieces, build_publish_texts
-from cli.strava_client import StravaClient
 
-# --------- Rust-kjerne ----------
+# Flyttet: bruker config.load_cfg for å unngå sirkulærimport
+from .config import load_cfg
+# NB: selve session-kjøringen ligger i cli/session.py (cmd_session)
+
+# (Valgfritt) andre CLI-avhengigheter
+from cli.weather_client_mock import WeatherClient  # noqa: F401  (hvis ikke brukt, kan fjernes)
+from cli.formatters.strava_publish import PublishPieces, build_publish_texts  # noqa: F401
+from cli.strava_client import StravaClient  # noqa: F401
+
+# Rust-funksjon for kalibrering (valgfri, fail-safe import)
 try:
-    from cyclegraph_core import analyze_session as rust_analyze_session
+    from cyclegraph_core import calibrate_session as rust_calibrate_session  # type: ignore
 except Exception:
-    rust_analyze_session = None
+    rust_calibrate_session = None  # kjør uten kalibrering hvis ikke eksponert
 
-def _analyze_session_bridge(samples, meta, cfg):
-    if rust_analyze_session is None:
-        raise ImportError(
-            "Ingen analyze_session i cyclegraph_core. "
-            "Bygg i core/: 'maturin develop --release'."
-        )
-
-    try:
-        valid = [
-            s for s in samples
-            if "watts" in s and "hr" in s and s["watts"] is not None and s["hr"] is not None
-        ]
-        watts = [s["watts"] for s in valid]
-        pulses = [s["hr"] for s in valid]
-    except Exception as e:
-        raise ValueError(f"Feil ved uthenting av watt/puls: {e}")
-
-    try:
-        result = rust_analyze_session(watts, pulses)
-        print(f"DEBUG: rust_analyze_session output = {result}", file=sys.stderr)
-        return result
-    except ValueError as e:
-        print("⚠️ Ingen effekt-data registrert – enkelte metrikker begrenset.", file=sys.stderr)
-        print(f"DEBUG: rust_analyze_session feilet med: {e}", file=sys.stderr)
-        avg_p = (sum(pulses) / len(pulses)) if pulses else None
-        return {"mode": "hr_only", "status": "LIMITED", "avg_pulse": avg_p}
+# Vi trenger å lese samples hvis --calibrate brukes
+try:
+    from cli.io import read_session_csv  # type: ignore
+except Exception:
+    read_session_csv = None  # pylint: disable=invalid-name
 
 # ---------- Hjelpere (session) ----------
 def infer_duration_sec(samples: List[Dict[str, Any]]) -> float:
@@ -71,14 +58,14 @@ def estimate_ftp_20min95(samples: List[Dict[str, Any]]) -> float:
     t = [s["t"] for s in S]
     w = [float(s["watts"]) if s.get("watts") is not None else 0.0 for s in S]
 
-    import math
     left = 0
     pow_sum = 0.0
     best_avg = 0.0
     for right in range(len(S)):
         pow_sum += w[right]
         while t[right] - t[left] + 1.0 > 1200.0 and left < right:
-            pow_sum -= w[left]; left += 1
+            pow_sum -= w[left]
+            left += 1
         window_sec = t[right] - t[left] + 1.0
         if window_sec >= 1195.0:
             avg = pow_sum / max(1.0, (right - left + 1))
@@ -102,42 +89,59 @@ def apply_trend_last3(reports: List[Dict[str, Any]]) -> None:
 def session_id_from_path(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
-def load_cfg(path: str) -> Dict[str, Any]:
-    if not path:
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
 def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str):
     os.makedirs(outdir, exist_ok=True)
+
+    # Berik rapporten med nye felter hvis de finnes i data
+    enriched = {
+        "session_id": report.get("session_id"),
+        "duration_min": report.get("duration_min"),
+        "duration_sec": report.get("duration_sec"),
+        "avg_power": report.get("avg_power"),
+        "avg_hr": report.get("avg_hr"),
+        "avg_watt": report.get("avg_watt"),
+        "avg_pulse": report.get("avg_pulse"),
+        "np": report.get("np"),
+        "np_watt": report.get("np_watt"),
+        "if": report.get("if"),
+        "vi": report.get("vi"),
+        "pa_hr_pct": report.get("pa_hr_pct"),
+        "w_per_beat": report.get("w_per_beat"),
+        "efficiency": report.get("efficiency"),
+        "ftp_estimate": report.get("ftp_estimate"),
+        "hr_zone_dist": report.get("hr_zone_dist"),
+        "calibrated": report.get("calibrated"),
+        "cda": report.get("cda"),
+        "crr": report.get("crr"),
+        "mae": report.get("mae"),
+        "reason": report.get("reason"),
+        "bike_type": report.get("bike_type"),
+        "weight": report.get("weight"),
+        "mode": report.get("mode"),
+        "status": report.get("status"),
+        "scores.intensity": report.get("scores", {}).get("intensity"),
+        "scores.duration": report.get("scores", {}).get("duration"),
+        "scores.quality": report.get("scores", {}).get("quality"),
+        "scores.cgs": report.get("scores", {}).get("cgs"),
+    }
+
+    # Fjern None-verdier
+    enriched = {k: v for k, v in enriched.items() if v is not None}
+
+    # Skriv JSON
     if fmt in ("json", "both"):
         p = os.path.join(outdir, f"{sid}.json")
         with open(p, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
+            json.dump(enriched, f, ensure_ascii=False, indent=2)
+
+    # Skriv CSV
     if fmt in ("csv", "both"):
         p = os.path.join(outdir, f"{sid}.csv")
-        fields = [
-            "session_id", "duration_min", "avg_power", "avg_hr", "np", "if", "vi", "pa_hr_pct",
-            "w_per_beat", "scores.intensity", "scores.duration", "scores.quality", "scores.cgs"
-        ]
-        row = {
-            "session_id": report.get("session_id"),
-            "duration_min": report.get("duration_min"),
-            "avg_power": report.get("avg_power"),
-            "avg_hr": report.get("avg_hr"),
-            "np": report.get("np"),
-            "if": report.get("if"),
-            "vi": report.get("vi"),
-            "pa_hr_pct": report.get("pa_hr_pct"),
-            "w_per_beat": report.get("w_per_beat"),
-            "scores.intensity": report.get("scores", {}).get("intensity"),
-            "scores.duration": report.get("scores", {}).get("duration"),
-            "scores.quality": report.get("scores", {}).get("quality"),
-            "scores.cgs": report.get("scores", {}).get("cgs"),
-        }
+        fields = list(enriched.keys())
         with open(p, "w", encoding="utf-8", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fields)
-            w.writeheader(); w.writerow(row)
+            w.writeheader()
+            w.writerow(enriched)
 
 def write_history_copy(history_dir: str, report: Dict[str, Any]):
     os.makedirs(history_dir, exist_ok=True)
@@ -151,6 +155,8 @@ def write_history_copy(history_dir: str, report: Dict[str, Any]):
         print(f"ADVARSEL: Klarte ikke å skrive history-fil: {path} ({e})", file=sys.stderr)
 
 def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):
+    from cli.formatters.strava_publish import PublishPieces, build_publish_texts  # local import
+    from cli.strava_client import StravaClient  # local import
     lang = (report.get("args", {}) or {}).get("lang", "no")
     try:
         res = build_publish_texts(report, lang=lang)
@@ -223,31 +229,115 @@ def load_baseline_wpb(history_dir: str, cur_sid: str, cur_dur_min: float):
             candidates.append(float(wpb))
     return median(candidates)
 
-def load_profile():
-    """Prøv å bruke eksisterende loader om den finnes, ellers fallback til tom profil med estimat."""
+# -----------------------------
+# Kalibrering helper (Python-side)
+# (Historisk – beholdt for bakoverkompatibilitet)
+# -----------------------------
+def _run_calibration_from_args(args: argparse.Namespace) -> int:
+    if rust_calibrate_session is None:
+        print("⚠️ Kalibrering ikke tilgjengelig (rust_calibrate_session ikke eksponert).")
+        return 3
+    if read_session_csv is None:
+        print("⚠️ Kan ikke lese samples (read_session_csv mangler).")
+        return 3
+
+    paths = sorted(glob.glob(args.input))
+    if not paths:
+        print(f"Ingen filer for pattern: {args.input}", file=sys.stderr)
+        return 2
+
+    # Les kun første fil for kalibrering (enkelt)
+    samples = read_session_csv(paths[0], debug=getattr(args, "debug", False))
+    if not samples:
+        print(f"ADVARSEL: {paths[0]} har ingen gyldige samples.", file=sys.stderr)
+        return 2
+
+    # Plukk ut watts/hr
+    POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr")
+    HR_KEYS    = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
+
+    def norm_keys(d: dict) -> dict:
+        return {(str(k).lower().strip() if k is not None else ""): v for k, v in d.items()}
+
+    valid = []
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+        sn = norm_keys(s)
+        pw = next((sn[k] for k in POWER_KEYS if k in sn and sn[k] not in (None, "")), None)
+        hr = next((sn[k] for k in HR_KEYS if k in sn and sn[k] not in (None, "")), None)
+        if pw is None or hr is None:
+            continue
+        try:
+            valid.append((float(pw), float(hr)))
+        except (TypeError, ValueError):
+            continue
+
+    if not valid:
+        print("⚠️ Fant ingen gyldige watt/hr-par for kalibrering.")
+        return 3
+
+    watts = [w for w, _ in valid]
+    pulses = [h for _, h in valid]
+
+    # Kjør rust-kalibrering; API kan variere – vi håndterer dict/JSON/string
+    try:
+        result = rust_calibrate_session(watts, pulses)  # type: ignore
+    except Exception as e:
+        print(f"Kalibrering feilet i Rust: {e}")
+        return 3
+
+    try:
+        data = json.loads(result) if isinstance(result, str) else result
+    except Exception:
+        data = result
+
+    mae = data.get("mae") if isinstance(data, dict) else None
+    print(f"✅ Kalibrering OK. MAE={mae}" if mae is not None else "✅ Kalibrering OK.")
+    # Her kunne vi evt. lagret til profile.json via Python-siden også
+    return 0
+
+def main() -> None:
+    # Importer parser her for å unngå sirkulær-import
+    from cli.parser import build_parser
+
+    parser = build_parser()
+
+    # ⚙️ Legg til --weather på 'session'-subparseren dersom den ikke allerede finnes
+    try:
+        for a in parser._actions:  # type: ignore[attr-defined]
+            if isinstance(a, argparse._SubParsersAction):
+                if "session" in a.choices:
+                    sp = a.choices["session"]
+                    already = any(
+                        hasattr(ac, "option_strings") and ("--weather" in ac.option_strings)
+                        for ac in getattr(sp, "_actions", [])
+                    )
+                    if not already:
+                        sp.add_argument(
+                            "--weather",
+                            type=str,
+                            help="Path to weather JSON file with wind/temp/pressure"
+                        )
+                break
+    except Exception:
+        # Ikke-kritisk; hvis vi ikke får lagt det til her, kjører resten som før
+        pass
+
+    args = parser.parse_args()
+
+    # (Valgfritt) vis enkel profilstatus
     try:
         from cli.profile import load_profile as _lp
         profile = _lp()
         profile["estimat"] = False
-        return profile
     except Exception:
-        return {
-            "bike_type": "unknown",
-            "weight": None,
-            "crr": None,
-            "estimat": True
-        }
-
-def main() -> None:
-    # Viktig: importer parser her for å unngå sirkulær import
-    from cli.parser import build_parser
-
-    parser = build_parser()
-    args = parser.parse_args()
-
-    profile = load_profile()
+        profile = {"bike_type": "unknown", "weight": None, "crr": None, "estimat": True}
     print("Profil:", profile)
 
+    # Viktig: IKKE kjør noen kalibrering her. Håndteres i cli/session.py.
+
+    # Kjør valgt subkommando (f.eks. cmd_session i cli/session.py)
     rc = args.func(args) if hasattr(args, "func") else (parser.print_help() or 2)
     sys.exit(rc)
 

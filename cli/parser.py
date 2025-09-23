@@ -6,6 +6,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="CycleGraph CLI (efficiency | session)")
     sub = p.add_subparsers(dest="command", required=True)
 
+    # efficiency
     pe = sub.add_parser("efficiency", help="Analyser watt/puls-effektivitet fra CSV (kolonner: watt,puls).")
     pe.add_argument("--file", help="Path til CSV med kolonner 'watt' og 'puls'. (påkrevd uten --dry-run)")
     # pe.add_argument("--validate", action="store_true", help="Valider RDF mot SHACL før analyse.")
@@ -13,6 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--dry-run", action="store_true", help="Run without making changes")
     pe.set_defaults(func=cmd_efficiency)
     
+    # session
     ps = sub.add_parser("session", help="Analyser treningsøkter (NP/IF/VI/Pa:Hr/WpB/CGS) fra CSV.")
     ps.add_argument("--mode", choices=["roller", "outdoor"], help="Overstyr auto-modus (roller|outdoor)")
     ps.add_argument("--input", required=True, help="Glob for CSV, f.eks. data/*.csv")
@@ -27,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--dry-run", action="store_true", help="Skriv kun til stdout (ingen filer)")
     ps.add_argument("--debug", action="store_true", help="Print diagnostikk om CSV-parsing pr. fil")
     ps.add_argument("--lang", choices=["no", "en"], default="no", help="Språk for publiseringstekster (no/en)")
+    ps.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Utfør kalibrering mot powermeter",
+    )
     ps.set_defaults(func=cmd_session)
 
     return p

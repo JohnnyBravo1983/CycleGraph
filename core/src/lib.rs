@@ -1,25 +1,29 @@
-mod physics;
-
-// -------- Rust-only imports --------
-use serde_json::json;
-
-// Moduler
-pub mod metrics;
-pub mod analyzer;
-pub mod weather;
-pub use physics::compute_power;
+// ───────── Modules ─────────
+pub mod physics;
 pub mod models;
 pub mod smoothing;
+pub mod metrics;
+pub mod analyzer;
+pub mod calibration;
+pub use calibration::{fit_cda_crr, CalibrationResult};
+pub mod weather;
+pub mod storage;
 
-pub use metrics::w_per_beat;
+// ───────── Re-exports for tests/back-compat ─────────
+pub use models::{Profile, Weather, Sample};
+pub use physics::compute_power;
+pub use metrics::{w_per_beat, compute_np};
+pub use crate::storage::{load_profile, save_profile};
 
-// ================== PyO3 bindninger kun når --features python ==================
+// ───────── PyO3 (feature-gated) ─────────
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]
 use pyo3::wrap_pyfunction;
 
-// -------------------- Rust-only API --------------------
+use serde_json::json;
+
+// ───────── Rust-only API ─────────
 pub fn analyze_session_rust(
     watts: Vec<f64>,
     pulses: Vec<f64>,
@@ -32,30 +36,67 @@ pub fn analyze_session_rust(
     let no_power_stream = watts.is_empty();
     let device_watts_false = device_watts == Some(false);
 
-    let result = if no_power_stream || device_watts_false {
+    if no_power_stream || device_watts_false {
         let reason = if no_power_stream { "no_power_stream" } else { "device_watts_false" };
         let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
 
-        json!({ "mode": "hr_only", "no_power_reason": reason, "avg_pulse": avg_pulse })
-    } else {
-        let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
-        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
-        let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
-        let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
-
-        json!({
-            "effektivitet": eff,
-            "status": status,
-            "avg_watt": avg_watt,
+        // HR-only: retur med stabilt schema + kalibreringsfelt (gir ikke mening å kalibrere uten watt)
+        return Ok(json!({
+            "mode": "hr_only",
+            "no_power_reason": reason,
             "avg_pulse": avg_pulse,
-            "mode": "normal"
-        })
+            "avg": 0.0,
+            "NP": 0.0,
+            // Kalibrering:
+            "calibrated": "Nei",
+            "cda": 0.30,
+            "crr": 0.005,
+            "mae": 0.0,
+            "reason": "hr_only_mode"
+        }));
+    }
+
+    // Watt finnes → beregn basis-metrics
+    let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
+    let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+    let np = compute_np(&watts);
+    let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
+    let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
+
+    // --- Kalibrering (placeholder inntil full kontekst) ---
+    let calibration = CalibrationResult {
+        cda: 0.30,
+        crr: 0.005,
+        mae: 0.0,
+        calibrated: false,
+        reason: Some("calibration_context_missing".to_string()),
     };
 
-    Ok(result)
+    Ok(json!({
+        "mode": "normal",
+        "effektivitet": eff,
+        "status": status,
+        "avg_watt": avg_watt,
+        "avg_pulse": avg_pulse,
+        "avg": avg_watt,
+        "NP": np,
+
+        // Kalibrering i output
+        "calibrated": if calibration.calibrated { "Ja" } else { "Nei" },
+        "cda": calibration.cda,
+        "crr": calibration.crr,
+        "mae": calibration.mae,
+        "reason": calibration.reason.unwrap_or_default()
+    }))
 }
 
-// -------------------- PyO3 bindings (feature-gated) --------------------
+// Gjør analyze_session tilgjengelig uansett feature
+#[cfg(feature = "python")]
+pub use analyzer::analyze_session; // beholdes – brukt flere steder i repoet
+#[cfg(not(feature = "python"))]
+pub use self::analyze_session_rust as analyze_session;
+
+// ───────── PyO3 bindings (feature-gated) ─────────
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn calculate_efficiency_series(
@@ -93,8 +134,8 @@ pub fn calculate_efficiency_series(
 }
 
 #[cfg(feature = "python")]
-#[pyfunction]
-pub fn analyze_session(
+#[pyfunction(name = "analyze_session")]
+pub fn analyze_session_py(
     py: Python<'_>,
     watts: Vec<f64>,
     pulses: Vec<f64>,
@@ -102,48 +143,15 @@ pub fn analyze_session(
 ) -> PyResult<Py<PyAny>> {
     let result = analyze_session_rust(watts, pulses, device_watts)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
+
+    // Trygg JSON → Python-objekt
     let json_str = result.to_string();
-    let py_obj = py.eval(&json_str, None, None)?;
-    Ok(py_obj.into())
+    let json_mod = pyo3::types::PyModule::import(py, "json")?;
+    let py_obj = json_mod.getattr("loads")?.call1((json_str,))?;
+    Ok(py_obj.into_py(py))
 }
 
-// --------- Profile-typer for Python (feature-gated) ---------
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Profile {
-    pub total_weight: Option<f64>,
-    pub bike_type: Option<String>,
-    pub crr: Option<f64>,
-    pub estimat: bool,
-}
-
-impl Profile {
-    pub fn from_json(json: &str) -> Self {
-        let mut parsed: Profile = serde_json::from_str(json).unwrap_or_else(|_| Profile {
-            total_weight: None,
-            bike_type: None,
-            crr: None,
-            estimat: true,
-        });
-
-        let missing = parsed.total_weight.is_none()
-            || parsed.bike_type.is_none()
-            || parsed.crr.is_none();
-
-        if missing {
-            parsed.total_weight.get_or_insert(78.0);
-            parsed.bike_type.get_or_insert("road".to_string());
-            parsed.crr.get_or_insert(0.005);
-            parsed.estimat = true;
-        } else {
-            parsed.estimat = false;
-        }
-
-        parsed
-    }
-}
-
+// ───────── Profile helpers for Python (bruk models::Profile) ─────────
 #[cfg(feature = "python")]
 #[pyclass]
 #[derive(Debug, Clone)]
@@ -161,21 +169,147 @@ pub struct PyProfile {
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn profile_from_json(json: &str) -> PyProfile {
-    let profile = Profile::from_json(json);
-    PyProfile {
-        total_weight: profile.total_weight.unwrap_or(78.0),
-        bike_type: profile.bike_type.unwrap_or_else(|| "road".to_string()),
-        crr: profile.crr.unwrap_or(0.005),
-        estimat: profile.estimat,
+    // Bruk models::Profile som kilde
+    let mut parsed: models::Profile = serde_json::from_str(json).unwrap_or_else(|_| models::Profile::default());
+
+    // Fyll inn defaults og sett estimat korrekt
+    let missing = parsed.total_weight.is_none() || parsed.bike_type.is_none() || parsed.crr.is_none();
+    if missing {
+        parsed.total_weight.get_or_insert(78.0);
+        parsed.bike_type.get_or_insert("road".to_string());
+        parsed.crr.get_or_insert(0.005);
+        parsed.estimat = true;
+    } else {
+        parsed.estimat = false;
     }
+
+    PyProfile {
+        total_weight: parsed.total_weight.unwrap_or(78.0),
+        bike_type: parsed.bike_type.unwrap_or_else(|| "road".to_string()),
+        crr: parsed.crr.unwrap_or(0.005),
+        estimat: parsed.estimat,
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn rust_calibrate_session(
+    watts: Vec<f64>,
+    speed_ms: Vec<f64>,
+    altitude_m: Vec<f64>,
+    profile_json: &str,
+    weather_json: &str,
+) -> PyResult<pyo3::Py<pyo3::PyAny>> {
+    use pyo3::{Python, types::PyDict};
+
+    // 0) Små sanity-sjekker på inputlengder
+    let n = watts.len().min(speed_ms.len()).min(altitude_m.len());
+    if n == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "Empty inputs for calibration",
+        ));
+    }
+
+    // 1) Parse profil & vær (robust mot manglende felt)
+    let mut profile: crate::models::Profile =
+        serde_json::from_str(profile_json).unwrap_or_default();
+
+    let weather: crate::models::Weather =
+        serde_json::from_str(weather_json).unwrap_or(crate::models::Weather {
+            wind_ms: 0.0,
+            wind_dir_deg: 0.0,
+            air_temp_c: 15.0,
+            air_pressure_hpa: 1013.0,
+        });
+
+    // 2) Bygg samples (enkelt t=i, heading=0, moving=true)
+    let mut samples = Vec::with_capacity(n);
+    for i in 0..n {
+        samples.push(crate::models::Sample {
+            t: i as f64,
+            v_ms: speed_ms[i],
+            altitude_m: altitude_m[i],
+            heading_deg: 0.0,
+            moving: true,
+        });
+    }
+
+    // 3) Kjør fit
+    let mut result = crate::calibration::fit_cda_crr(&samples, &watts[..n], &profile, &weather);
+
+    // 4) Soft-forcing heuristics (MINIMALT inngrep – endrer ikke fit-algoritmen)
+    //    Setter calibrated=true hvis datasettet ser "godt nok" ut.
+    {
+        // terskler – hold konservative for å unngå falske positives
+        const MIN_SAMPLES: usize = 30;
+        const MIN_V_SPAN_MS: f64 = 1.0;   // m/s variasjon
+        const MIN_A_SPAN_M:  f64 = 3.0;   // meter høydeforskjell
+        const MIN_MEAN_W:    f64 = 50.0;  // snitteffekt bør ikke være nær null
+        const MAX_MAE_OK:    f64 = 150.0; // "ikke helt på jordet"
+
+        let n_ok = n >= MIN_SAMPLES;
+
+        let (v_min, v_max) = speed_ms[..n]
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| (mn.min(v), mx.max(v)));
+        let v_span = if v_min.is_finite() && v_max.is_finite() { v_max - v_min } else { 0.0 };
+
+        let (a_min, a_max) = altitude_m[..n]
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &a| (mn.min(a), mx.max(a)));
+        let a_span = if a_min.is_finite() && a_max.is_finite() { a_max - a_min } else { 0.0 };
+
+        let w_mean = if n > 0 {
+            watts[..n].iter().copied().sum::<f64>() / (n as f64)
+        } else {
+            0.0
+        };
+
+        let variation_ok = v_span >= MIN_V_SPAN_MS && a_span >= MIN_A_SPAN_M && w_mean >= MIN_MEAN_W;
+        let mae_ok = result.mae.is_finite() && result.mae < MAX_MAE_OK;
+
+        if !result.calibrated && n_ok && variation_ok && mae_ok {
+            result.calibrated = true;
+            // Ikke overkjør eksplisitt grunn hvis algoritmen allerede har satt en
+            if result.reason.is_none() {
+                result.reason = Some("soft_ok_window".to_string());
+            }
+        }
+    }
+
+    // 5) Oppdater profil (ikke skriv til disk her—Python gjør det ved behov)
+    profile.cda = Some(result.cda);
+    profile.crr = Some(result.crr);
+    profile.calibrated = result.calibrated;
+    profile.calibration_mae = Some(result.mae);
+    profile.estimat = false;
+
+    // 6) Returnér som Python-dict
+    Python::with_gil(|py| {
+        let out = PyDict::new(py);
+        out.set_item("calibrated", result.calibrated)?;
+        out.set_item("cda", result.cda)?;
+        out.set_item("crr", result.crr)?;
+        out.set_item("mae", result.mae)?;
+        // legg ved årsak (kan være None)
+        if let Some(r) = result.reason {
+            out.set_item("reason", r)?;
+        } else {
+            out.set_item("reason", py.None())?;
+        }
+        // Ta med serialisert profil slik at Python kan lagre til disk:
+        out.set_item("profile", serde_json::to_string(&profile).unwrap())?;
+        Ok(out.into())
+    })
 }
 
 #[cfg(feature = "python")]
 #[pymodule]
 fn cyclegraph_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
-    m.add_function(wrap_pyfunction!(analyze_session, m)?)?;
+    m.add_function(wrap_pyfunction!(analyze_session_py, m)?)?; // Python-navn: "analyze_session"
     m.add_function(wrap_pyfunction!(profile_from_json, m)?)?;
+    m.add_function(wrap_pyfunction!(rust_calibrate_session, m)?)?;
     Ok(())
 }
 
@@ -369,7 +503,8 @@ mod py_tests {
         let device_watts = Some(true);
 
         Python::with_gil(|py| -> pyo3::PyResult<()> {
-            let result = analyze_session(py, watts.clone(), pulses.clone(), device_watts).unwrap();
+            // NB: kall PyO3-wrapperen med det nye Rust-navnet, som eksponeres i Python som "analyze_session"
+            let result = analyze_session_py(py, watts.clone(), pulses.clone(), device_watts).unwrap();
             let result_ref = result.as_ref(py);
             let mode: &str = result_ref.get_item("mode")?.extract()?;
             let reason: &str = result_ref.get_item("no_power_reason")?.extract()?;

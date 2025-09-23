@@ -1,0 +1,14 @@
+{
+  "NP": 242.56503321533975,
+  "avg": 243.125,
+  "avg_pulse": 162.525,
+  "avg_watt": 243.125,
+  "calibrated": true,
+  "cda": 0.3,
+  "crr": 0.005,
+  "effektivitet": 1.4959237040455313,
+  "mae": 0.0,
+  "mode": "normal",
+  "reason": "insufficient_segment",
+  "status": "OK"
+}

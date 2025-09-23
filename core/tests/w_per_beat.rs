@@ -1,4 +1,4 @@
-use crate::metrics::w_per_beat;
+use cyclegraph_core::metrics::w_per_beat;
 
 #[test]
 fn test_empty_arrays() {

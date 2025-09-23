@@ -1,142 +1,188 @@
+# cli/io.py
+from __future__ import annotations
+
 import csv
-from typing import List, Dict, Any
+import os
+import sys
+from typing import Any, Dict, List, Optional, Tuple
 
-def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
-    """
-    Robust CSV-leser for session-analysen.
-    Støtter comma/semicolon, mange alias for kolonner, hh:mm:ss og ISO-tid.
-    Krever i praksis HR eller Watts (begge best). Tid avledes fleksibelt.
-    """
-    from datetime import datetime
+# ----------------------------
+# Delimiter & utils
+# ----------------------------
+def _detect_delimiter(sample: str) -> str:
+    # enkel heuristikk før Sniffer (som kan feile på små filer)
+    if ";" in sample and "," not in sample:
+        return ";"
+    if "," in sample and ";" not in sample:
+        return ","
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=";,")
+        return dialect.delimiter
+    except Exception:
+        return ","
 
-    def sniff_delim_and_lines(p: str):
-        with open(p, "rb") as fb:
-            raw = fb.read()
-        text = raw.decode("utf-8-sig", errors="ignore")
-        first = text.splitlines()[0] if text else ""
-        delim = "," if first.count(",") >= first.count(";") else ";"
-        return delim, text.splitlines()
-
-    def to_float(x):
-        try:
-            return float(str(x).strip().replace(",", "."))
-        except Exception:
-            return None
-
-    def parse_hms(x: str) -> float | None:
-        try:
-            parts = [int(p) for p in x.strip().split(":")]
-            if len(parts) == 3:
-                h, m, s = parts
-                return float(h*3600 + m*60 + s)
-            if len(parts) == 2:
-                m, s = parts
-                return float(m*60 + s)
-            return None
-        except Exception:
-            return None
-
-    def parse_iso(x: str) -> float | None:
-        try:
-            dt = datetime.fromisoformat(x.replace("Z", "+00:00"))
-            return dt.timestamp()
-        except Exception:
-            return None
-
-    delim, lines = sniff_delim_and_lines(path)
-    if not lines:
-        if debug: print(f"DEBUG: {path} er tom.", file=sys.stderr)
-        return []
-
-    reader = csv.reader(lines, delimiter=delim)
-    rows = list(reader)
-    if not rows:
-        if debug: print(f"DEBUG: {path} har ingen rader.", file=sys.stderr)
-        return []
-
-    headers = [h.strip().lower() for h in rows[0]]
-    data_rows = rows[1:]
-
-    if debug:
-        print(f"DEBUG: {path} delimiter='{delim}'", file=sys.stderr)
-        print(f"DEBUG: headers={headers}", file=sys.stderr)
-        if data_rows:
-            print(f"DEBUG: first_row={data_rows[0]}", file=sys.stderr)
-
-    def col(*names: str) -> int | None:
-        for n in names:
-            if n in headers:
-                return headers.index(n)
+def _to_float(x) -> Optional[float]:
+    if x is None or x == "":
+        return None
+    try:
+        return float(str(x).replace(",", "."))
+    except Exception:
         return None
 
-    ix_time = col("time", "t", "seconds", "elapsed", "elapsed_time", "timer_s", "sec", "tid")
-    ix_hr   = col("hr", "heart_rate", "puls", "pulse", "bpm")
-    ix_w    = col("watts", "power", "watt")
-    ix_ts   = col("timestamp", "date", "datetime", "start_time", "time_utc")
-    ix_alt  = col("altitude", "elev", "elevation", "hoyde", "høyde", "højde")
+def _norm_headers(fieldnames: Optional[List[str]]) -> Dict[str, str]:
+    return {(h or "").lower().strip(): h for h in (fieldnames or [])}
 
-    out: List[Dict[str, Any]] = []
-    t0_abs = None  # for ISO‑tid
+def _pick(row: Dict[str, Any], field_map: Dict[str, str], keys: tuple[str, ...]):
+    for k in keys:
+        if k in field_map:
+            v = row.get(field_map[k])
+            if v is not None and v != "":
+                return v
+    return None
 
-    for i, row in enumerate(data_rows):
-        if not row or all((c or "").strip() == "" for c in row):
-            continue
-
-        hr = to_float(row[ix_hr]) if ix_hr is not None and ix_hr < len(row) else None
-        w  = to_float(row[ix_w])  if ix_w  is not None and ix_w  < len(row) else None
-
-        t = None
-        if ix_time is not None and ix_time < len(row):
-            t = to_float(row[ix_time])
-            if t is None:
-                t = parse_hms(row[ix_time])
-        if t is None and ix_ts is not None and ix_ts < len(row):
-            ts = parse_iso(row[ix_ts])
-            if ts is not None:
-                if t0_abs is None:
-                    t0_abs = ts
-                t = ts - t0_abs
-        if t is None:
-            t = float(i)  # fallback
-
-        alt = to_float(row[ix_alt]) if ix_alt is not None and ix_alt < len(row) else None
-        moving = True
-        out.append({"t": t, "hr": hr, "watts": w, "moving": moving, "altitude": alt})
-
-    if not any(s["hr"] is not None for s in out) and not any(s["watts"] is not None for s in out):
-        if debug: print(f"DEBUG: {path} har verken HR eller Watts i data.", file=sys.stderr)
+# ----------------------------
+# Session CSV (for analyze session)
+# ----------------------------
+def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
+    """
+    Leser CSV og returnerer liste av dict med normaliserte nøkler:
+      - 't' (sekunder eller timestamp-string)
+      - 'watts' (float eller None)
+      - 'hr' (float eller None)
+    Godtar typiske alias for kraft/puls/tid.
+    """
+    if not os.path.exists(path):
+        if debug:
+            print(f"DEBUG: {path} finnes ikke", file=sys.stderr)
         return []
-    return out
 
-def read_efficiency_csv(file_path: str):
-    watts, pulses = [], []
-    with open(file_path, newline="", encoding="utf-8-sig") as csvfile:
-        reader = csv.DictReader(csvfile)
-        reader.fieldnames = [h.strip().lower() for h in (reader.fieldnames or [])]
+    with open(path, "r", encoding="utf-8") as f:
+        head = f.read(2048)
+    delim = _detect_delimiter(head)
+    if debug:
+        print(f"DEBUG: {path} delimiter='{delim}'", file=sys.stderr)
 
-        def pick(row, *keys):
-            for k in keys:
-                if k in row and row[k] not in ("", None):
-                    return row[k]
-            return None
+    rows: List[Dict[str, Any]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter=delim)
+        field_map = _norm_headers(reader.fieldnames)
+        if debug:
+            print(f"DEBUG: headers_norm={list(field_map.keys())}", file=sys.stderr)
 
-        for row in reader:
-            row = {(k.strip().lower() if isinstance(k, str) else k): v for k, v in row.items()}
-            w = pick(row, "watt", "watts", "power")
-            p = pick(row, "puls", "pulse", "hr", "heart_rate")
-            if w is None or p is None:
-                continue
-            try:
-                watts.append(float(str(w).replace(",", ".")))
-                pulses.append(float(str(p).replace(",", ".")))
-            except ValueError:
-                continue
+        time_keys = ("t", "time", "timestamp", "date", "datetime")
+        power_keys = ("watts", "watt", "power", "power_w", "pwr")
+        hr_keys = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
 
-    if not watts or not pulses:
-        raise ValueError(
-            "Fant ikke gyldige kolonner/verdier for watt/puls. "
-            "Sjekk at CSV har kolonner som 'watt'/'watts' og 'puls'/'hr'."
+        idx = 0
+        for raw in reader:
+            t_val = _pick(raw, field_map, time_keys)
+            if t_val is None:
+                t = idx
+            else:
+                try:
+                    t = float(t_val)
+                except Exception:
+                    t = str(t_val)
+
+            pw = _to_float(_pick(raw, field_map, power_keys))
+            hr = _to_float(_pick(raw, field_map, hr_keys))
+
+            rows.append({"t": t, "watts": pw, "hr": hr})
+            idx += 1
+
+    if debug:
+        total = len(rows)
+        have_pw = sum(1 for r in rows if isinstance(r.get("watts"), (int, float)))
+        have_hr = sum(1 for r in rows if isinstance(r.get("hr"), (int, float)))
+        both = sum(1 for r in rows if isinstance(r.get("watts"), (int, float)) and isinstance(r.get("hr"), (int, float)))
+        print(
+            f"DEBUG: read {total} rows from {path}; with_watts={have_pw} with_hr={have_hr} with_both={both}",
+            file=sys.stderr
         )
-    return watts, pulses
+        if rows:
+            print(f"DEBUG: first_row_norm={rows[0]}", file=sys.stderr)
 
+    return rows
 
+# ----------------------------
+# Efficiency CSV (for efficiency subcommand)
+# Gir power[], hr[], hz
+# ----------------------------
+def read_efficiency_csv(path: str, debug: bool = False) -> Tuple[List[float], List[float], float]:
+    """
+    Leser en CSV med minst (time|timestamp|t), (watt|watts|power|pwr), (hr|heartrate|heart_rate|bpm|pulse).
+    Returnerer (power_list, hr_list, hz).
+    hz anslås fra tidsstempler (sekunder) – fallback 1.0.
+    """
+    if not os.path.exists(path):
+        if debug:
+            print(f"DEBUG: {path} finnes ikke", file=sys.stderr)
+        return [], [], 1.0
+
+    with open(path, "r", encoding="utf-8") as f:
+        head = f.read(2048)
+    delim = _detect_delimiter(head)
+    if debug:
+        print(f"DEBUG[eff]: {path} delimiter='{delim}'", file=sys.stderr)
+
+    times: List[float] = []
+    power: List[float] = []
+    hr: List[float] = []
+
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter=delim)
+        field_map = _norm_headers(reader.fieldnames)
+        if debug:
+            print(f"DEBUG[eff]: headers_norm={list(field_map.keys())}", file=sys.stderr)
+
+        time_keys = ("t", "time", "timestamp", "sec", "seconds")
+        power_keys = ("watts", "watt", "power", "power_w", "pwr")
+        hr_keys = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
+
+        idx = 0
+        for raw in reader:
+            t_val = _pick(raw, field_map, time_keys)
+            if t_val is None:
+                t = float(idx)
+            else:
+                try:
+                    t = float(str(t_val).replace(",", "."))
+                except Exception:
+                    # forsøk å parse ISO-timestamp → la som indeks hvis ikke
+                    t = float(idx)
+
+            pw = _to_float(_pick(raw, field_map, power_keys))
+            h = _to_float(_pick(raw, field_map, hr_keys))
+
+            if pw is None or h is None:
+                idx += 1
+                continue
+
+            times.append(t)
+            power.append(float(pw))
+            hr.append(float(h))
+            idx += 1
+
+    # estimer hz fra tidsdifferanser (sekunder)
+    hz = 1.0
+    if len(times) >= 3:
+        diffs = []
+        for i in range(1, len(times)):
+            dt = times[i] - times[i-1]
+            if dt > 0:
+                diffs.append(dt)
+        if diffs:
+            diffs_sorted = sorted(diffs)
+            mid = len(diffs_sorted)//2
+            med_dt = diffs_sorted[mid] if len(diffs_sorted) % 2 == 1 else (diffs_sorted[mid-1] + diffs_sorted[mid]) / 2.0
+            if med_dt > 0:
+                hz = float(round(1.0 / med_dt, 3))
+
+    if debug:
+        print(
+            f"DEBUG[eff]: rows={len(power)} hz≈{hz} sample0="
+            f"{ {'t': times[0], 'watts': power[0], 'hr': hr[0]} if power and hr else None }",
+            file=sys.stderr
+        )
+
+    return power, hr, hz

@@ -83,13 +83,39 @@ pub fn weather_cache_miss_total(metrics: &Metrics) -> &IntCounter {
 pub static SESSIONS_NO_POWER_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 pub static SESSIONS_DEVICE_WATTS_FALSE_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 
-/// 🔢 Normalized Power (NP) – her bare gjennomsnittseffekt for enkelhet
+/// 🔢 Normalized Power (NP) – **f32-variant** (placeholder: enkel gjennomsnitt)
 pub fn np(p: &[f32], _hz: f32) -> f32 {
     if p.is_empty() {
         0.0
     } else {
         p.iter().copied().sum::<f32>() / p.len() as f32
     }
+}
+
+/// 🔢 Normalized Power (NP) – **f64-variant** brukt av tester:
+/// Rullende 30s snitt → 4. potens → gjennomsnitt → ^0.25.
+/// Hvis input er kortere enn 30 samples brukes tilgjengelig lengde.
+pub fn compute_np(power: &[f64]) -> f64 {
+    if power.is_empty() {
+        return 0.0;
+    }
+    let window = 30usize.min(power.len());
+    let mut rolling: Vec<f64> = Vec::with_capacity(power.len());
+    let mut sum = 0.0;
+    for i in 0..power.len() {
+        sum += power[i];
+        if i >= window {
+            sum -= power[i - window];
+        }
+        let avg = if i + 1 >= window {
+            sum / window as f64
+        } else {
+            sum / (i + 1) as f64
+        };
+        rolling.push(avg);
+    }
+    let m4 = rolling.iter().map(|x| x.powi(4)).sum::<f64>() / rolling.len() as f64;
+    m4.powf(0.25)
 }
 
 /// Intensity Factor (IF) = NP / FTP
@@ -152,6 +178,13 @@ mod tests {
     fn test_np_basic() {
         let result = np(&[100.0, 200.0], 1.0);
         assert_eq!(result, 150.0);
+    }
+
+    #[test]
+    fn test_compute_np_smoke() {
+        let power = vec![200.0f64; 60];
+        let np = compute_np(&power);
+        assert!(np.is_finite());
     }
 
     #[test]
