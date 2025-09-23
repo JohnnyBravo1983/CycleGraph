@@ -21,3 +21,23 @@ pub fn smooth_altitude(samples: &[Sample]) -> Vec<f64> {
 
     out
 }
+
+// core/src/storage.rs
+use crate::models::Profile;
+use std::path::Path;
+
+pub fn load_profile(path: &str) -> Result<Profile, Box<dyn std::error::Error>> {
+    // Hvis filen ikke finnes: returner en default profil
+    if !Path::new(path).exists() {
+        return Ok(Profile::default());
+    }
+    let contents = std::fs::read_to_string(path)?;
+    let profile: Profile = serde_json::from_str(&contents)?;
+    Ok(profile)
+}
+
+pub fn save_profile(profile: &Profile, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let json = serde_json::to_string_pretty(profile)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}

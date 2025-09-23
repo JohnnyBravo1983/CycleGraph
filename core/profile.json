@@ -1,0 +1,9 @@
+{
+  "total_weight": 78.0,
+  "bike_type": "gravel",
+  "crr": 0.003,
+  "cda": 0.3,
+  "calibrated": false,
+  "calibration_mae": 199.22538083923595,
+  "estimat": false
+}
