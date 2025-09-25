@@ -21,6 +21,7 @@ fn make_samples(n: usize) -> Vec<Sample> {
             altitude_m: 100.0 + i as f64 * 0.5,
             heading_deg: 0.0,
             moving: true,
+            ..Default::default() // fyller device_watts=None, latitude=None, longitude=None
         })
         .collect()
 }

@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # Aktiver Python extension-modus KUN når vi bygger wheel
-python = ["pyo3/extension-module"]
+python = ["pyo3/extension-module","pyo3/abi3-py39"]
 default = []
 
 [dependencies]

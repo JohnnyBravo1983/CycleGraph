@@ -15,7 +15,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 - **M6** – Strava-integrasjon (API & import) (**Ferdig**)  
 - **M7** – Analysefunksjoner (effektivitet, treningsscore) (**Ferdig**)  
 - **M7.5** – Backend-forfining (CGS v1.1, explain, tester) (**Ferdig**)  
-- **M7.6** – Watt-engine v1 (værdata, sykkeltype, perf-tests) (**Planlagt**)  
+- **M7.6** – Watt-engine v1 (værdata, sykkeltype, perf-tests) (**Påbegynt**) 
 - **M8** – Demo/MVP med verdi (**Planlagt**)  
 - **M9** – MVP-forberedelse & skyoppsett (Azure/Kubernetes, CI/CD) (**Ikke startet**)  
 - **M10** – Feedback-innsamling & justeringer (**Ikke startet**)  
@@ -44,13 +44,16 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-09-09 | M7.5 | Forebyggende tester                    | Ferdig   | Pytest ValueError for `_analyze_session_bridge`, Rust golden-test for `w_per_beat` (NaN/null/mismatch). Alle tester grønne. |
 | 2025-09-09 | M7.5 | GitHub Actions (basic CI)              | Ferdig   | Minimal workflow: `pytest -q` og `cargo test --tests -q` kjøres på push/PR. |---
 | 2025-09-10 | M7.6 | Strava Fetch & modusdeteksjon (S1)     | Ferdig   | Auto-modus med trainer/sport_type/device_watts, CLI-flag --mode, JSON-ruting. |
-|  2025-09-12| M7.6 | No-watt fallback & policy (S1B) | Ferdig | Fallback til hr_only implementert, structured WARN, metrics lagt inn, tester grønne.
+| 2025-09-12 | M7.6 | No-watt fallback & policy (S1B)        | Ferdig   | Fallback til hr_only implementert, structured WARN, metrics lagt inn, tester grønne.
+| 2025-09-16 | S2   | Vær & profiler                         | Ferdig   | Værklient med caching/validering (vind, temp, trykk), profilsettings og CLI-integrasjon med justert effektivitet. Tester grønne, fallback og debug-modus sikrer robusthet.
+| 2025-09-19 | S3   | Fysikkmotor                            | Ferdig   | Kraftmodell (gravitasjon, rulling, aero, akselerasjon, drivverkstap), smoothing/outlier-kutt, NP/avg/glatting i CLI. Golden test integrert i CI (±1–2W stabilt). Alle tester grønne. |
+| 2025-09-23 | S4   | Kalibrering                            | Ferdig   | CdA/Crr-fit med MAE ≤10 %, lagring av profil (profile.json), CLI-integrasjon med flagg --calibrate. Tester grønne i cargo/pytest. |
+| 2025-09-25 | S5   | Indoor pipeline + GPS/Wind integrasjon | Ferdig   | Vindkorrigert fysikkmotor koblet på indoor/outdoor-pipeline. CLI-output viser watts, wind_rel, v_rel, calibrated, status. Bonus: backend-API `analyze_session()` for frontend (M8). Tester grønne i cargo/pytest. |
 
 
+## Milepælsrapporter Status Pr 23.09.2025
 
-## Milepælsrapporter
-
-### M6 – Strava-integrasjon (API & import) – status per 2025-08-12
+### M6 – Strava-integrasjon (API & import) – status per 2025-08-12 Ferdig
 - ✅ OAuth & tokens på plass (redirect/scopes, .env).  
 - ✅ Refresh + lagring av rotert refresh_token.  
 - ✅ Aktiviteter med paging + --since + inkrementell state.  
@@ -58,7 +61,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 - ✅ Robust feilhåndtering (401/403/429/5xx).  
 - ✅ Analyze kjørt på ≥3 ekte Ride-økter; rapporter skrevet.  
 
-### M7 – Analysefunksjoner – status per 2025-08-21
+### M7 – Analysefunksjoner – status per 2025-08-21 Ferdig
 - ✅ Formatter (strava_publish.py) med språkvalg, trimming, fallbacks.  
 - ✅ CLI-integrasjon (--publish-to-strava, --dry-run, --lang).  
 - ✅ Baseline (28d, ±25 % varighet) + badges.  
@@ -67,7 +70,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 - ✅ Tester (pytest) grønne.  
 - ⚠️ Kjent: enkelte data/streams/*.csv mangler gyldige samples (påvirker ikke publisering).  
 
- ### M7.5 – Backend-forfining (CGS v1.1, explain) – status per 2025-09-09
+ ### M7.5 – Backend-forfining (CGS v1.1, explain) – status per 2025-09-09 Ferdig
 - ✅ Systemtest grønn (0–7), perf (kald start) ~0.73s.  
 - ⏭️ SHACL/Strava-mock hoppet (ingen .ttl / ingen Pulled:).  
 - ✅ Forebyggende tester:  
@@ -75,13 +78,13 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
   - Rust golden for `w_per_beat()` (NaN/null/mismatch).  
   - Alle tester grønne (pytest + cargo test).  
 
-### M7.5 – GitHub Actions (basic CI) – status per 2025-09-09
+### M7.5 – GitHub Actions (basic CI) – status per 2025-09-09 Ferdig
 - ✅ Minimal workflow konfigurert i `.github/workflows/ci.yml`.  
 - ✅ Kjører `pytest -q` og `cargo test --tests -q` på push/PR.  
 - ✅ Første kjøring verifisert grønn på GitHub.  
 - ⏭️ Kan utvides senere med systemtest og golden-sjekker.
 
-### M7.6 – Watt-engine v1 & Precision Watt – status per 2025-09-10
+### M7.6 – Watt-engine v1 & Precision Watt – status per 2025-09-10 Ferdig
 - ✅ Sprint S1 – Strava Fetch & modusdeteksjon ferdig:
   - Auto-modus basert på `trainer`, `sport_type`, `device_watts`.
   - CLI-flag `--mode roller|outdoor` overstyrer auto.
@@ -92,8 +95,6 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
   - Backend: rute til `hr_only` pipeline, structured WARN-logg.
   - Frontend (senere): varsel “Ingen effekt-data registrert”.
   - Metrics: `sessions_no_power_total`, `sessions_device_watts_false_total`.
-
-### M7.6 – No-watt fallback & policy – status per 2025-09-11
 - ✅ Backend: ruter økter uten watt eller device_watts=False til hr_only pipeline.
 - ✅ Logging: structured WARN med no_power_reason.
 - ✅ Metrics: sessions_no_power_total og sessions_device_watts_false_total.
@@ -101,6 +102,53 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 - ✅ Git hygiene: eksempelfiler lagt til, secrets/state ignorert.
 - ⏭️ Frontend-varsel kommer i M8.
 
+“CI-lærdom: abi3 fjernet libpython-avhengighet; korrigert core/ wd; la til debug-step for linker.”
+
+M7.6 – Sprint 2 – Vær & profiler – status per 2025-09-16 Ferdig
+✅ Værklient: vind, temp, trykk med validering og caching per (lat,lon,timestamp). Fallback via probe-forecast aktivert.
+✅ Profilsettings: total vekt, sykkeltype og Crr-preset med defaults og estimat=true. Persist i enkel JSON/kv-store.
+✅ CLI-integrasjon: justert effektivitetsanalyse basert på værkontekst. Moduler splittet til efficiency.py og parser.py.
+✅ Tester: pytest grønne. cargo test stabile tall (±1–2 W). DoD oppfylt: ≥95 % cache-hit ved rekjøring av samme økt.
+🔎 Observasjoner: Open-Meteo archive feiler for fremtidige datoer; fallback + debug-modus gir robusthet og transparens.
+🧩 CI: sanity-test (test_strava_client.py) hoppes over når publiseringsflyt ikke er berørt.
+📝 Endringer: cli/find_valid_weather.py, cli/fetch_weather.py, cli/weather_client_mock.py, cli/weather_metrics.py, cli/diagnose_data.py,
+ tools/find_valid_weather.py, tools/filter_valid_rows.py, data/session_2025-09-16_weather.json, samt modul-splitt.
+ℹ️ Notater: cache-metrics i metrics.rs foreløpig kommentert. abi3-py38 fjernet pga linking; vurderes ved wheel-distribusjon.
+
+S3 – Fysikkmotor – status per 2025-09-19 Ferdig
+✅ Kraftmodell implementert: gravitasjon, rulling (Crr), aero (CdA), akselerasjon og drivverkstap.
+✅ Høyde-smoothing flyttet til egen modul (smoothing.rs) med outlier-kutt for stopp/sving.
+✅ Metrics: sample-watt, 5 s glatting, NP og avg beregnes og vises i CLI.
+✅ Golden test på syntetisk segment (flat, bakke, varierende vind) inkludert i CI, stabil output ±1–2 W, NP/avg ±1 W.
+✅ Tester: cargo test dekker alle kraftkomponenter, pytest verifiserer CLI-integrasjon; begge grønne.
+🔎 Observasjoner: struktur ryddigere med egen smoothing-modul; edge-case tester gir bedre dekning; lokal Pylance-feil måtte fikses manuelt.
+📝 Endringer: core/src/physics.rs, core/src/lib.rs, core/src/metrics.rs, core/src/smoothing.rs, cli/analyze.py, tests/test_analyze_session.py, tests/test_physics.rs, .github/workflows/ci.yml.
+ℹ️ Notater: deterministisk output etablert som baseline; golden-toleranser (±1–2 W) nå en del av dynamisk DoD.
+
+
+S4 – Kalibrering – status per 2025-09-23 Ferdig
+✅ Kalibreringsprosedyre etablert: segment 5–8 min, stigning 3–6 %.  
+✅ Algoritme: fit_cda_crr med grid-search på Crr, CdA foreløpig konstant (0.30).  
+✅ Output: MAE ≤10 % mot powermeter på testsegmenter, flagg “calibrated: Ja/Nei” i CLI.  
+✅ Persistens: profile.json oppdateres med cda, crr, calibrated, calibration_mae.  
+✅ CLI-integrasjon: nytt flagg `--calibrate`, kjøring returnerer kalibreringsresultat og oppdatert profil.  
+✅ Tester: cargo test (syntetiske segmenter, profilpersistens) og pytest (CLI dry-run) grønne.  
+🔎 Observasjoner: CdA foreløpig statisk, planlagt dynamisk fit senere. Input-validering gir robuste feilmeldinger ved mismatch.  
+📝 Endringer: core/src/calibration.rs (ny), core/src/storage.rs, core/src/lib.rs, cli/analyze.py, tests/test_calibration.rs, tests/test_calib_storage.rs.  
+ℹ️ Notater: smoothing aktivert for reproduserbarhet; golden-tester viser stabil output. CLI håndterer mislykket fit uten crash (reason=“fit_failed”).  
+
+
+5 – Indoor pipeline + GPS/Wind integrasjon – status per 2025-09-25 Ferdig
+✅ Vindkorrigert fysikkmotor koblet til indoor/outdoor-pipeline (CLI ruter automatisk).
+✅ CLI-output utvidet med `watts`, `wind_rel`, `v_rel`, `calibrated`, `status`.
+✅ Indoor-modus: bruker `device_watts` direkte når tilgjengelig.
+✅ Outdoor-modus: bruker GPS-posisjon + heading og værdata for vindkorrigering.
+✅ Robust fallback: CSV-lesing normaliserer samples hvis input er ufullstendig.
+✅ Tester: `cargo test` og `pytest` grønne (inkl. golden-test med syntetisk GPS+vind).
+✅ Bonus: Nytt Python-API `analyze_session()` (cli/session_api.py) eksponert for frontend (M8).
+🔎 Observasjoner: små inkonsistenser (reason vs calibrated, status=LIMITED) ryddet opp i CLI etter kalibrering.
+📝 Endringer: core/src/physics.rs, core/src/lib.rs, core/src/models.rs, core/src/calibration.rs, cli/session.py, cli/analyze.py, cli/session_api.py, tests/test_api.py, tests/test_golden.py, tests/test_cli.py.
+ℹ️ Notater: API gjør frontend-integrasjon enklere i Sprint 8 (UI scaffolding), da backend kan kalles direkte.
 
 
 

@@ -7,13 +7,15 @@ use cyclegraph_core::{
 #[test]
 fn calib_updates_and_saves_profile_json() {
     // 1) Syntetiske samples (≈5 min @1Hz, 4% stigning)
-    let samples: Vec<Sample> = (0..300).map(|i| Sample {
+    let samples: Vec<Sample> = (0..300)
+    .map(|i| Sample {
         t: i as f64,
         v_ms: 6.0 + (i as f64 * 0.01),
-        altitude_m: 100.0 + i as f64 * 0.5,
-        heading_deg: 0.0,
+        altitude_m: 100.0 + i as f64 * 0.2,
         moving: true,
-    }).collect();
+        ..Default::default() // setter heading_deg=0.0, device_watts=None, osv.
+    })
+    .collect();
 
     // 2) “Målt” effekt (dummy)
     let measured_power_w: Vec<f64> = vec![250.0; samples.len()];
@@ -48,7 +50,7 @@ fn calib_updates_and_saves_profile_json() {
     assert!(loaded.calibration_mae.unwrap_or(1.0) >= 0.0);
 }
 
-use cyclegraph_core::{Profile, save_profile, load_profile};
+
 use std::fs;
 
 #[test]

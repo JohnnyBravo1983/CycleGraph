@@ -1,19 +1,18 @@
-// ───────── Modules ─────────
 pub mod physics;
 pub mod models;
 pub mod smoothing;
 pub mod metrics;
 pub mod analyzer;
 pub mod calibration;
-pub use calibration::{fit_cda_crr, CalibrationResult};
 pub mod weather;
 pub mod storage;
 
 // ───────── Re-exports for tests/back-compat ─────────
-pub use models::{Profile, Weather, Sample};
-pub use physics::compute_power;
-pub use metrics::{w_per_beat, compute_np};
+pub use crate::models::{Profile, Weather, Sample};
+pub use crate::physics::{compute_power, compute_indoor_power, compute_power_with_wind, PowerOutputs};
+pub use crate::metrics::{w_per_beat, compute_np};
 pub use crate::storage::{load_profile, save_profile};
+pub use crate::calibration::{fit_cda_crr, CalibrationResult};
 
 // ───────── PyO3 (feature-gated) ─────────
 #[cfg(feature = "python")]
@@ -22,6 +21,27 @@ use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
 use serde_json::json;
+
+/// JSON-helper for CLI (Rust-only API)
+/// {
+///   "watts":    [f64],
+///   "wind_rel": [f64],
+///   "v_rel":    [f64]
+/// }
+pub fn compute_power_with_wind_json(
+    samples: &[Sample],
+    profile: &Profile,
+    weather: &Weather,
+) -> String {
+    let out = physics::compute_power_with_wind(samples, profile, weather);
+    serde_json::json!({
+        "watts": out.power,
+        "wind_rel": out.wind_rel,
+        "v_rel": out.v_rel,
+        "calibrated": profile.calibrated,
+    })
+    .to_string()
+}
 
 // ───────── Rust-only API ─────────
 pub fn analyze_session_rust(
@@ -222,30 +242,29 @@ pub fn rust_calibrate_session(
             air_pressure_hpa: 1013.0,
         });
 
-    // 2) Bygg samples (enkelt t=i, heading=0, moving=true)
     let mut samples = Vec::with_capacity(n);
     for i in 0..n {
-        samples.push(crate::models::Sample {
-            t: i as f64,
-            v_ms: speed_ms[i],
-            altitude_m: altitude_m[i],
-            heading_deg: 0.0,
-            moving: true,
-        });
-    }
+    samples.push(crate::models::Sample {
+        t: i as f64,
+        v_ms: speed_ms[i],
+        altitude_m: altitude_m[i],
+        heading_deg: 0.0,
+        moving: true,
+        device_watts: Some(watts[i]),
+        ..Default::default() // fyller latitude/longitude = None osv.
+    });
+}
 
     // 3) Kjør fit
     let mut result = crate::calibration::fit_cda_crr(&samples, &watts[..n], &profile, &weather);
 
     // 4) Soft-forcing heuristics (MINIMALT inngrep – endrer ikke fit-algoritmen)
-    //    Setter calibrated=true hvis datasettet ser "godt nok" ut.
     {
-        // terskler – hold konservative for å unngå falske positives
         const MIN_SAMPLES: usize = 30;
-        const MIN_V_SPAN_MS: f64 = 1.0;   // m/s variasjon
-        const MIN_A_SPAN_M:  f64 = 3.0;   // meter høydeforskjell
-        const MIN_MEAN_W:    f64 = 50.0;  // snitteffekt bør ikke være nær null
-        const MAX_MAE_OK:    f64 = 150.0; // "ikke helt på jordet"
+        const MIN_V_SPAN_MS: f64 = 1.0;
+        const MIN_A_SPAN_M:  f64 = 3.0;
+        const MIN_MEAN_W:    f64 = 50.0;
+        const MAX_MAE_OK:    f64 = 150.0;
 
         let n_ok = n >= MIN_SAMPLES;
 
@@ -270,14 +289,13 @@ pub fn rust_calibrate_session(
 
         if !result.calibrated && n_ok && variation_ok && mae_ok {
             result.calibrated = true;
-            // Ikke overkjør eksplisitt grunn hvis algoritmen allerede har satt en
             if result.reason.is_none() {
                 result.reason = Some("soft_ok_window".to_string());
             }
         }
     }
 
-    // 5) Oppdater profil (ikke skriv til disk her—Python gjør det ved behov)
+    // 5) Oppdater profil
     profile.cda = Some(result.cda);
     profile.crr = Some(result.crr);
     profile.calibrated = result.calibrated;
@@ -291,26 +309,66 @@ pub fn rust_calibrate_session(
         out.set_item("cda", result.cda)?;
         out.set_item("crr", result.crr)?;
         out.set_item("mae", result.mae)?;
-        // legg ved årsak (kan være None)
         if let Some(r) = result.reason {
             out.set_item("reason", r)?;
         } else {
             out.set_item("reason", py.None())?;
         }
-        // Ta med serialisert profil slik at Python kan lagre til disk:
         out.set_item("profile", serde_json::to_string(&profile).unwrap())?;
         Ok(out.into())
     })
 }
 
+// ───────── PyO3 (kun når feature "python" er aktiv) ─────────
 #[cfg(feature = "python")]
-#[pymodule]
-fn cyclegraph_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(calculate_efficiency_series, m)?)?;
-    m.add_function(wrap_pyfunction!(analyze_session_py, m)?)?; // Python-navn: "analyze_session"
-    m.add_function(wrap_pyfunction!(profile_from_json, m)?)?;
-    m.add_function(wrap_pyfunction!(rust_calibrate_session, m)?)?;
-    Ok(())
+mod py_api {
+    use pyo3::prelude::*;
+    use pyo3::wrap_pyfunction;
+    use serde_json::json;
+
+    // Trekk inn moduler/typer fra kjerne
+    use crate::physics;
+    use crate::models::{Sample, Profile, Weather};
+
+    // Py-variant: tar JSON-strenger inn/ut
+    #[pyfunction]
+    fn compute_power_with_wind_json(
+        samples_json: &str,
+        profile_json: &str,
+        weather_json: &str,
+    ) -> PyResult<String> {
+        use pyo3::exceptions::PyValueError;
+
+        let samples: Vec<Sample> = serde_json::from_str(samples_json)
+            .map_err(|e| PyValueError::new_err(format!("samples parse error: {e}")))?;
+        let profile: Profile = serde_json::from_str(profile_json)
+            .map_err(|e| PyValueError::new_err(format!("profile parse error: {e}")))?;
+        let weather: Weather = serde_json::from_str(weather_json)
+            .map_err(|e| PyValueError::new_err(format!("weather parse error: {e}")))?;
+
+        let out = physics::compute_power_with_wind(&samples, &profile, &weather);
+        let s = serde_json::to_string(&json!({
+            "watts": out.power,
+            "wind_rel": out.wind_rel,
+            "v_rel": out.v_rel,
+        }))
+        .map_err(|e| PyValueError::new_err(format!("serialize error: {e}")))?;
+        Ok(s)
+    }
+
+    // ÉN modul-registrering for hele Python-APIet
+    #[pymodule]
+    fn cyclegraph_core(_py: Python, m: &PyModule) -> PyResult<()> {
+        // Lokale (i denne modulen)
+        m.add_function(wrap_pyfunction!(compute_power_with_wind_json, m)?)?;
+
+        // Toppnivå-funksjoner
+        m.add_function(wrap_pyfunction!(super::calculate_efficiency_series, m)?)?;
+        m.add_function(wrap_pyfunction!(super::analyze_session_py, m)?)?;
+        m.add_function(wrap_pyfunction!(super::profile_from_json, m)?)?;
+        m.add_function(wrap_pyfunction!(super::rust_calibrate_session, m)?)?;
+        Ok(())
+    }
 }
 
 // ================== TESTS (Rust-only) ==================
@@ -503,7 +561,6 @@ mod py_tests {
         let device_watts = Some(true);
 
         Python::with_gil(|py| -> pyo3::PyResult<()> {
-            // NB: kall PyO3-wrapperen med det nye Rust-navnet, som eksponeres i Python som "analyze_session"
             let result = analyze_session_py(py, watts.clone(), pulses.clone(), device_watts).unwrap();
             let result_ref = result.as_ref(py);
             let mode: &str = result_ref.get_item("mode")?.extract()?;
