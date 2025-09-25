@@ -348,6 +348,40 @@ Sprint 5 bygger videre på S4 og leverer full integrasjon av indoor/outdoor-pipe
 Frontend-API gir et klart fortrinn for videre Sprint 8 (observabilitet/rapporter).
 Løsningen er robust både uten og med GPS, og output er deterministisk og testbar.
 
+✅ Sprint: S6 – Rapportfelt og observabilitet Branch: feature/s6-reports-observability
+
+Commits: a45a44a – Sprint 6: fullført rapportfelt, observabilitet, metrikker og dokumentasjon
+
+Endrede filer:
+
+plaintext
+cli/analyze.py  
+cli/session.py  
+core/src/metrics.rs  
+docs/CGS_v1.md  
+docs/How it works.md  
+docs/known_limits.md  
+tests/test_reports.py  
+tests/test_fallback_and_limited.py  
+tests/test_logger.py  
+tests/test_metric_no_power.py  
+Sprinter/m6/* (slettet)  
+Sprinter/m7/* (slettet)  
+Sprinter/m8/* (slettet)
+Tester:
+
+plaintext
+✅ pytest -q: alle tester grønt  
+✅ cargo test: alle tester grønt
+Observasjoner:
+CLI genererer deterministisk rapport med NP, VI, Pa:Hr, W/beat, PrecisionWatt
+Fallback-modus (hr_only) fungerer ved manglende wattdata
+Strukturert logging med level, step, component, cache_hit
+Metrikk sessions_no_power_total logges eksplisitt
+Dokumentasjon oppdatert med rapportlogikk og begrensninger
+CGS v1 utvidet med observabilitet og PrecisionWatt
+Status: ✅ Ferdig
+
 Status:
 ✅ Ferdig (alle DoD bestått, sprintmål oppnådd)
 
@@ -395,3 +429,7 @@ Indoor/outdoor-pipeline koblet til fysikkmotor med vindkorrigering. CLI-output i
 ✅ cargo/pytest alle tester grønne, output stabil ±1–2W.
 Observasjoner: indoor pipeline fungerer uten GPS, outdoor justerer mot vind/heading. Unicode-bug i CLI fikset.
 Status: Ferdig.
+
+
+
+

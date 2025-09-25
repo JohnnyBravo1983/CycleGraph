@@ -83,14 +83,29 @@ pub fn weather_cache_miss_total(metrics: &Metrics) -> &IntCounter {
 pub static SESSIONS_NO_POWER_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 pub static SESSIONS_DEVICE_WATTS_FALSE_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 
+/// ─────────────────────────────────────────────────────────
+/// Små helpers
+/// ─────────────────────────────────────────────────────────
+#[inline]
+fn mean(xs: &[f32]) -> f32 {
+    if xs.is_empty() { 0.0 } else { xs.iter().copied().sum::<f32>() / xs.len() as f32 }
+}
+
+fn median_f32(xs: &mut Vec<f32>) -> f32 {
+    if xs.is_empty() { return 0.0; }
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = xs.len();
+    if n % 2 == 1 {
+        xs[n / 2]
+    } else {
+        0.5 * (xs[n / 2 - 1] + xs[n / 2])
+    }
+}
+
 /// 🔢 Average Power (gjennomsnittseffekt)
 #[inline]
 pub fn avg_power(p: &[f32]) -> f32 {
-    if p.is_empty() {
-        0.0
-    } else {
-        p.iter().copied().sum::<f32>() / p.len() as f32
-    }
+    mean(p)
 }
 
 /// 🔢 Normalized Power (NP) – **f32-variant**
@@ -172,15 +187,46 @@ pub fn variability_index(np: f32, avg_power: f32) -> f32 {
     }
 }
 
-/// Pa:Hr – forholdet mellom gjennomsnittlig effekt og gjennomsnittlig HR (bpm).
-/// Returnerer 0.0 hvis manglende data eller avg HR == 0.
+/// Pa:Hr – **dimensjonsløs** ratio.
+/// Definisjon: (sesjonens W/beat) normalisert mot **medianen** av per-sample W/beat.
+/// Gir ~1.0 for monotone/”rimelige” økter. Returnerer 0.0 ved manglende data.
 pub fn pa_hr(hr: &[f32], power: &[f32], _hz: f32) -> f32 {
     if hr.is_empty() || power.is_empty() {
         return 0.0;
     }
+
+    let avg_hr = mean(hr);
+    if avg_hr <= 0.0 {
+        return 0.0;
+    }
+
+    // Sesjons-W/beat (W per bpm)
     let avg_p = avg_power(power);
-    let avg_hr = hr.iter().copied().sum::<f32>() / hr.len() as f32;
-    if avg_hr > 0.0 { avg_p / avg_hr } else { 0.0 }
+    let w_per_beat_session = avg_p / avg_hr;
+
+    // Per-sample W/beat-serie og median-baseline
+    let n = hr.len().min(power.len());
+    let mut wpb_series: Vec<f32> = Vec::with_capacity(n);
+    for i in 0..n {
+        let h = hr[i];
+        let p = power[i];
+        if h > 0.0 && p.is_finite() {
+            wpb_series.push(p / h);
+        }
+    }
+
+    let baseline = if !wpb_series.is_empty() {
+        median_f32(&mut wpb_series)
+    } else {
+        // Fallback: bruk sesjonsverdien som baseline ⇒ pa_hr = 1.0
+        w_per_beat_session
+    };
+
+    if baseline > 0.0 {
+        w_per_beat_session / baseline
+    } else {
+        0.0
+    }
 }
 
 /// Watt per hjerteslag – definert som gjennomsnittlig watt delt på gjennomsnittlig puls (bpm).
@@ -192,7 +238,7 @@ pub fn w_per_beat(power: &[f32], hr: &[f32]) -> f32 {
     }
 
     let avg_p = avg_power(power);
-    let avg_hr = hr.iter().copied().sum::<f32>() / hr.len() as f32;
+    let avg_hr = mean(hr);
 
     if avg_hr > 0.0 {
         avg_p / avg_hr
@@ -296,6 +342,7 @@ mod tests {
 
     #[test]
     fn test_w_per_beat_valid() {
+        // avg_power = 150, avg_hr = 150 => w_per_beat = 1.0 W/bpm
         let result = w_per_beat(&[100.0, 200.0], &[150.0, 150.0]);
         let expected = 150.0 / 150.0;
         assert!((result - expected).abs() < 0.01);
@@ -339,11 +386,16 @@ mod tests {
 
     #[test]
     fn test_pa_hr() {
-        // Avg power = 155, Avg HR = 150 => Pa:Hr ~= 1.0333
+        // Pa:Hr = (sesjons-W/beat) / median(per-sample W/beat)
+        // hr = [150,150,150], power = [100,200,165]
+        // per-sample wpb = [0.6667, 1.3333, 1.1] -> median = 1.1
+        // sesjons-wpb = (avg_power/avg_hr) = (155/150) ≈ 1.033333
+        // Pa:Hr = 1.033333 / 1.1 ≈ 0.939393
         let hr = [150.0, 150.0, 150.0];
         let p = [100.0, 200.0, 165.0];
         let v = pa_hr(&hr, &p, 1.0);
-        assert!((v - (155.0 / 150.0)).abs() < 1e-6);
+        let expected = (155.0 / 150.0) / 1.1;
+        assert!((v - expected).abs() < 1e-6, "pa_hr={} expected={}", v, expected);
     }
 
     #[test]
