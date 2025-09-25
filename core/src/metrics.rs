@@ -83,13 +83,47 @@ pub fn weather_cache_miss_total(metrics: &Metrics) -> &IntCounter {
 pub static SESSIONS_NO_POWER_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 pub static SESSIONS_DEVICE_WATTS_FALSE_TOTAL: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
 
-/// 🔢 Normalized Power (NP) – **f32-variant** (placeholder: enkel gjennomsnitt)
-pub fn np(p: &[f32], _hz: f32) -> f32 {
+/// 🔢 Average Power (gjennomsnittseffekt)
+#[inline]
+pub fn avg_power(p: &[f32]) -> f32 {
     if p.is_empty() {
         0.0
     } else {
         p.iter().copied().sum::<f32>() / p.len() as f32
     }
+}
+
+/// 🔢 Normalized Power (NP) – **f32-variant**
+/// Rullende 30 sekunders snitt (avrundet ned til nærmeste sample via `hz`) → 4. potens →
+/// gjennomsnitt → 4. rot. Hvis mindre enn 1 sample i vindu, brukes tilgjengelig prefiks.
+/// `hz` er samples per sekund (f.eks. 1.0 for 1 Hz).
+pub fn np(p: &[f32], hz: f32) -> f32 {
+    if p.is_empty() {
+        return 0.0;
+    }
+    let hz = if hz.is_finite() && hz > 0.0 { hz } else { 1.0 };
+    let win = (30.0 * hz).floor() as usize;
+    let window = win.max(1).min(p.len());
+
+    // Rullende gjennomsnitt
+    let mut rolling: Vec<f64> = Vec::with_capacity(p.len());
+    let mut sum: f64 = 0.0;
+    for i in 0..p.len() {
+        sum += p[i] as f64;
+        if i >= window {
+            sum -= p[i - window] as f64;
+        }
+        let avg = if i + 1 >= window {
+            sum / window as f64
+        } else {
+            sum / (i + 1) as f64
+        };
+        rolling.push(avg);
+    }
+
+    // ^4 → mean → ^0.25
+    let m4 = rolling.iter().map(|x| x.powi(4)).sum::<f64>() / rolling.len() as f64;
+    (m4.powf(0.25)) as f32
 }
 
 /// 🔢 Normalized Power (NP) – **f64-variant** brukt av tester:
@@ -119,6 +153,7 @@ pub fn compute_np(power: &[f64]) -> f64 {
 }
 
 /// Intensity Factor (IF) = NP / FTP
+#[inline]
 pub fn intensity_factor(np: f32, ftp: f32) -> f32 {
     if ftp > 0.0 {
         np / ftp
@@ -128,6 +163,7 @@ pub fn intensity_factor(np: f32, ftp: f32) -> f32 {
 }
 
 /// Variability Index (VI) = NP / gjennomsnittseffekt
+#[inline]
 pub fn variability_index(np: f32, avg_power: f32) -> f32 {
     if avg_power > 0.0 {
         np / avg_power
@@ -136,19 +172,26 @@ pub fn variability_index(np: f32, avg_power: f32) -> f32 {
     }
 }
 
-/// Pa:Hr – placeholder som returnerer 1.0
-pub fn pa_hr(_hr: &[f32], _power: &[f32], _hz: f32) -> f32 {
-    1.0
+/// Pa:Hr – forholdet mellom gjennomsnittlig effekt og gjennomsnittlig HR (bpm).
+/// Returnerer 0.0 hvis manglende data eller avg HR == 0.
+pub fn pa_hr(hr: &[f32], power: &[f32], _hz: f32) -> f32 {
+    if hr.is_empty() || power.is_empty() {
+        return 0.0;
+    }
+    let avg_p = avg_power(power);
+    let avg_hr = hr.iter().copied().sum::<f32>() / hr.len() as f32;
+    if avg_hr > 0.0 { avg_p / avg_hr } else { 0.0 }
 }
 
-/// Watt per hjerteslag – gjennomsnittlig watt delt på gjennomsnittlig puls.
+/// Watt per hjerteslag – definert som gjennomsnittlig watt delt på gjennomsnittlig puls (bpm).
 /// Returnerer 0.0 hvis input er tom eller gjennomsnittlig puls er null.
+/// (Beholder denne definisjonen for bakoverkompatibilitet i pipeline/CLI.)
 pub fn w_per_beat(power: &[f32], hr: &[f32]) -> f32 {
     if power.is_empty() || hr.is_empty() {
         return 0.0;
     }
 
-    let avg_p = power.iter().copied().sum::<f32>() / power.len() as f32;
+    let avg_p = avg_power(power);
     let avg_hr = hr.iter().copied().sum::<f32>() / hr.len() as f32;
 
     if avg_hr > 0.0 {
@@ -156,6 +199,90 @@ pub fn w_per_beat(power: &[f32], hr: &[f32]) -> f32 {
     } else {
         0.0
     }
+}
+
+/// ─────────────────────────────────────────────────────────
+/// PrecisionWatt: datadrevet ±-usikkerhet i watt
+///
+/// Idé:
+/// 1) 30s glidende snitt (samme som NP-vindu) via `hz`
+/// 2) residualer = power - rolling_avg
+/// 3) robust spredning: IQR → σ ≈ IQR / 1.349
+/// 4) effektiv usikkerhet per sample: σ / sqrt(window)
+///
+/// Typisk verdi ~1–2 W for jevne dataserier.
+/// Returnerer en f32 som kan formatteres til "±x.x W".
+/// ─────────────────────────────────────────────────────────
+pub fn precision_watt(power: &[f32], hz: f32) -> f32 {
+    if power.is_empty() {
+        return 0.0;
+    }
+    let hz = if hz.is_finite() && hz > 0.0 { hz } else { 1.0 };
+    let win = (30.0 * hz).floor() as usize;
+    let window = win.max(1).min(power.len());
+
+    // rullende gjennomsnitt
+    let mut rolling: Vec<f32> = Vec::with_capacity(power.len());
+    let mut sum: f64 = 0.0;
+    for i in 0..power.len() {
+        sum += power[i] as f64;
+        if i >= window {
+            sum -= power[i - window] as f64;
+        }
+        let avg = if i + 1 >= window {
+            sum / window as f64
+        } else {
+            sum / (i + 1) as f64
+        };
+        rolling.push(avg as f32);
+    }
+
+    // residualer
+    let mut resid: Vec<f32> = power
+        .iter()
+        .zip(rolling.iter())
+        .map(|(p, m)| *p - *m)
+        .collect();
+
+    if resid.is_empty() {
+        return 0.0;
+    }
+
+    // robust sigma fra IQR
+    resid.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let q = |v: &Vec<f32>, q: f32| -> f32 {
+        if v.is_empty() { return 0.0; }
+        let n = v.len() as f32;
+        let idx = (q * (n - 1.0)).clamp(0.0, n - 1.0);
+        let lo = idx.floor() as usize;
+        let hi = idx.ceil() as usize;
+        if lo == hi {
+            v[lo]
+        } else {
+            let w = idx - lo as f32;
+            v[lo] * (1.0 - w) + v[hi] * w
+        }
+    };
+
+    let q1 = q(&resid, 0.25);
+    let q3 = q(&resid, 0.75);
+    let iqr = (q3 - q1).abs();
+    let sigma = if iqr > 0.0 { iqr / 1.349 } else { 0.0 };
+
+    // skaler etter effektivt vindu
+    let eff = if window > 0 { sigma / (window as f32).sqrt() } else { sigma };
+
+    // Rundefor determinisme i presentasjon (én desimal lages i formatteren)
+    eff
+}
+
+/// Formatter "±x.x W" fra verdi (f32)
+pub fn format_precision_watt(pw: f32) -> String {
+    if !pw.is_finite() {
+        return "±0.0 W".to_string();
+    }
+    format!("±{:.1} W", pw.max(0.0))
 }
 
 #[cfg(test)]
@@ -175,16 +302,27 @@ mod tests {
     }
 
     #[test]
-    fn test_np_basic() {
-        let result = np(&[100.0, 200.0], 1.0);
-        assert_eq!(result, 150.0);
+    fn test_avg_power_basic() {
+        let result = avg_power(&[100.0, 200.0, 300.0]);
+        assert!((result - 200.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_np_basic_matches_compute_np_for_1hz() {
+        // For 1 Hz skal f32-varianten være konsistent med f64-referansen
+        let p32 = [100.0f32, 200.0f32];
+        let p64 = [100.0f64, 200.0f64];
+        let np_f32 = np(&p32, 1.0);
+        let np_f64 = compute_np(&p64) as f32;
+        assert!((np_f32 - np_f64).abs() < 1e-4, "np_f32={}, np_f64={}", np_f32, np_f64);
     }
 
     #[test]
     fn test_compute_np_smoke() {
         let power = vec![200.0f64; 60];
-        let np = compute_np(&power);
-        assert!(np.is_finite());
+        let npv = compute_np(&power);
+        assert!(npv.is_finite());
+        assert!((npv - 200.0).abs() < 1e-6);
     }
 
     #[test]
@@ -195,14 +333,17 @@ mod tests {
 
     #[test]
     fn test_variability_index() {
-        let result = variability_index(200.0, 100.0);
-        assert_eq!(result, 2.0);
+        let vi = variability_index(200.0, 100.0);
+        assert_eq!(vi, 2.0);
     }
 
     #[test]
-    fn test_pa_hr_constant() {
-        let result = pa_hr(&[120.0, 125.0], &[150.0, 160.0], 1.0);
-        assert_eq!(result, 1.0);
+    fn test_pa_hr() {
+        // Avg power = 155, Avg HR = 150 => Pa:Hr ~= 1.0333
+        let hr = [150.0, 150.0, 150.0];
+        let p = [100.0, 200.0, 165.0];
+        let v = pa_hr(&hr, &p, 1.0);
+        assert!((v - (155.0 / 150.0)).abs() < 1e-6);
     }
 
     #[test]
@@ -241,5 +382,29 @@ mod tests {
         let adj = w_per_beat_adjusted(&power, &hr, &weather);
         // Siden faktor = 1.0, forventer vi at adj == base
         assert!((adj - base).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_precision_watt_constant_series() {
+        // Helt jevnt signal → usikkerhet ~ 0
+        let p = vec![200.0f32; 120];
+        let pw = precision_watt(&p, 1.0);
+        assert!(pw >= 0.0 && pw < 0.01, "expected ~0, got {}", pw);
+        let s = format_precision_watt(pw);
+        assert_eq!(s, "±0.0 W");
+    }
+
+    #[test]
+    fn test_precision_watt_small_variation() {
+        // Deterministisk liten variasjon rundt 200W
+        let mut p: Vec<f32> = Vec::with_capacity(120);
+        for i in 0..120 {
+            let delta = if i % 4 == 0 { 2.0 } else { -2.0 };
+            p.push(200.0 + delta);
+        }
+        let pw = precision_watt(&p, 1.0);
+        assert!(pw.is_finite() && pw > 0.0);
+        // Bør være "liten", typ < 5W
+        assert!(pw < 5.0, "precision seems too large: {}", pw);
     }
 }

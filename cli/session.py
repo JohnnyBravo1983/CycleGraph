@@ -1,13 +1,97 @@
 # cli/session.py
 from __future__ import annotations
 
+import argparse
+import glob
+import sys
+import json
+import os
+import re
+import math
+import time
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Any, Tuple, Optional
+from contextlib import contextmanager
+
+# ── Strukturerte logger (TRINN 3) ─────────────────────────────────────────────
+
+_LEVELS = {"debug": 10, "info": 20, "warning": 30}
+def _norm_level(s: Optional[str]) -> str:
+    if not s:
+        return "info"
+    s2 = str(s).strip().lower()
+    return s2 if s2 in _LEVELS else "info"
+
+class JsonLogger:
+    """Minimal JSON-logger på stderr med nivå-filter."""
+    def __init__(self, level: str = "info") -> None:
+        self.level_name = _norm_level(level)
+        self.level = _LEVELS[self.level_name]
+
+    def _emit(self, lvl_name: str, **fields: Any) -> None:
+        if _LEVELS[lvl_name] < self.level:
+            return
+        record = {
+            "level": lvl_name.upper(),
+        }
+        # Ikke-None felt, og enkle typer for determinisme
+        for k, v in fields.items():
+            if v is None:
+                continue
+            try:
+                json.dumps(v)
+                record[k] = v
+            except Exception:
+                record[k] = str(v)
+        print(json.dumps(record, ensure_ascii=False), file=sys.stderr)
+
+    def debug(self, step: str, duration_ms: Optional[int] = None, cache_hit: Optional[bool] = None, **kw: Any) -> None:
+        self._emit("debug", step=step, duration_ms=duration_ms, cache_hit=cache_hit, **kw)
+
+    def info(self, step: str, duration_ms: Optional[int] = None, cache_hit: Optional[bool] = None, **kw: Any) -> None:
+        self._emit("info", step=step, duration_ms=duration_ms, cache_hit=cache_hit, **kw)
+
+    def warning(self, step: str, msg: str, **kw: Any) -> None:
+        self._emit("warning", step=step, message=msg, **kw)
+
+# Global init per kjøring (settes i cmd_session)
+_LOG: Optional[JsonLogger] = None
+
+def _init_logger(args: argparse.Namespace) -> JsonLogger:
+    # Prioritet: CLI-flagget (--log-level) > miljøvariabel (LOG_LEVEL) > default ("info")
+    cli_lvl = getattr(args, "log_level", None)
+    env_lvl = os.environ.get("LOG_LEVEL")
+    level = _norm_level(cli_lvl) if cli_lvl else (_norm_level(env_lvl) if env_lvl else "info")
+    logger = JsonLogger(level=level)
+    return logger
+
+@contextmanager
+def _timed(step: str, cache_hit: Optional[bool] = None):
+    """Context manager som logger DEBUG med duration_ms og cache_hit."""
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        dur_ms = int((time.perf_counter() - t0) * 1000.0)
+        if _LOG:
+            _LOG.debug(step=step, duration_ms=dur_ms, cache_hit=cache_hit)
+
+def _log_warn(step: str, msg: str) -> None:
+    if _LOG:
+        _LOG.warning(step=step, msg=msg)
+
+def _log_info(step: str, **kw: Any) -> None:
+    if _LOG:
+        _LOG.info(step=step, **kw)
+
+# ── Eksisterende kode ─────────────────────────────────────────────────────────
+
 def _ensure_cli_fields(d: dict) -> dict:
     """Garanter at watts/wind_rel finnes, map calibrated til Ja/Nei, og sett status."""
     if not isinstance(d, dict):
         return d
     r = dict(d)
 
-    # watts / wind_rel (hent fra samples hvis mulig)
     if "watts" not in r:
         if isinstance(r.get("samples"), list):
             r["watts"] = [s.get("watts") for s in r["samples"]]
@@ -45,15 +129,6 @@ def _ensure_cli_fields(d: dict) -> dict:
             r["status"] = "OK"
 
     return r
-
-import argparse
-import glob
-import sys
-import json
-import os
-import re
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Tuple
 
 # ── Konstanter ────────────────────────────────────────────────────────────────
 MIN_SAMPLES_FOR_CAL = 15          # min. antall punkter for å prøve kalibrering
@@ -156,6 +231,165 @@ def estimate_ftp_20min95(samples: List[Dict[str, Any]]) -> float:
             if avg > best_avg:
                 best_avg = avg
     return float(best_avg * 0.95)
+
+# ── METRICS-HELPERS (NP/Avg/VI/Pa:Hr/W/beat + PrecisionWatt) ──────────────────
+_POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr", "device_watts")
+_HR_KEYS    = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
+
+def _pick_first(d: dict, keys: tuple[str, ...]):
+    for k in keys:
+        if k in d and d[k] is not None and d[k] != "":
+            return d[k]
+    return None
+
+def _extract_power_hr(samples: List[Dict[str, Any]]) -> tuple[list[float], list[float]]:
+    watts: list[float] = []
+    hr: list[float] = []
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+        pw = _pick_first(s, _POWER_KEYS)
+        hh = _pick_first(s, _HR_KEYS)
+        try:
+            pwf = float(pw) if pw is not None else None
+            hrf = float(hh) if hh is not None else None
+        except (TypeError, ValueError):
+            pwf = None; hrf = None
+        if pwf is not None and hrf is not None:
+            watts.append(float(pwf))
+            hr.append(float(hrf))
+    return watts, hr
+
+def _has_power_in_samples(samples: List[Dict[str, Any]]) -> bool:
+    """Returnerer True hvis *device* watt finnes i input-samples (før eventuell beregning)."""
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+        if _pick_first(s, _POWER_KEYS) is not None:
+            return True
+    return False
+
+def _mean(a: List[float]) -> float:
+    return sum(a) / len(a) if a else 0.0
+
+def _estimate_hz(n_samples: int, duration_sec: float) -> float:
+    if duration_sec and duration_sec > 0:
+        hz = n_samples / duration_sec
+        if math.isfinite(hz) and hz > 0:
+            return float(hz)
+    return 1.0
+
+def _np_py(power: List[float], hz: float) -> float:
+    """30s rullende → ^4 → mean → ^0.25."""
+    if not power:
+        return 0.0
+    win = max(1, int(math.floor(30.0 * max(hz, 1e-9))))
+    win = min(win, len(power))
+    rolling: List[float] = []
+    s = 0.0
+    for i, v in enumerate(power):
+        s += v
+        if i >= win:
+            s -= power[i - win]
+        avg = s / (win if i + 1 >= win else (i + 1))
+        rolling.append(avg)
+    m4 = sum((x ** 4.0) for x in rolling) / len(rolling)
+    return float(m4 ** 0.25)
+
+def _iqr_sigma(vals: List[float]) -> float:
+    """Robust sigma estimert fra IQR (σ ≈ IQR / 1.349)."""
+    if not vals:
+        return 0.0
+    v = sorted(vals)
+    n = len(v)
+    if n == 1:
+        return 0.0
+    def q(p: float) -> float:
+        idx = max(0.0, min(p * (n - 1), n - 1.0))
+        lo = int(math.floor(idx)); hi = int(math.ceil(idx))
+        if lo == hi:
+            return v[lo]
+        w = idx - lo
+        return v[lo] * (1.0 - w) + v[hi] * w
+    iqr = abs(q(0.75) - q(0.25))
+    return (iqr / 1.349) if iqr > 0 else 0.0
+
+def _precision_watt_py(power: List[float], hz: float) -> float:
+    """
+    PrecisionWatt (±W): 30s rullende snitt → residualer → σ_IQR → σ_eff = σ / sqrt(window).
+    Returnerer en *absolutt* watt-usikkerhet (f.eks. 1.8 for ±1.8 W).
+    """
+    if not power:
+        return 0.0
+    hz = float(hz) if (isinstance(hz, (int, float)) and hz > 0 and math.isfinite(hz)) else 1.0
+    win = max(1, int(math.floor(30.0 * hz)))
+    win = min(win, len(power))
+    # rullende snitt
+    rolling: List[float] = []
+    s = 0.0
+    for i, v in enumerate(power):
+        s += v
+        if i >= win:
+            s -= power[i - win]
+        avg = s / (win if i + 1 >= win else (i + 1))
+        rolling.append(avg)
+    # residualer og robust sigma
+    resid = [p - m for p, m in zip(power, rolling)]
+    sigma = _iqr_sigma(resid)
+    eff = sigma / math.sqrt(win) if win > 0 else sigma
+    return float(eff)
+
+def _format_precision_watt(pw: float) -> str:
+    """Format som '±1.8 W' med én desimal, ikke-negativ og deterministisk."""
+    if not isinstance(pw, (int, float)) or not math.isfinite(pw) or pw < 0:
+        pw = 0.0
+    return f"±{pw:.1f} W"
+
+def _compute_report_metrics_inline(report: Dict[str, Any], samples: List[Dict[str, Any]]) -> None:
+    """Fyller inn avg_power, avg_hr, np, vi, pa_hr, w_per_beat, PrecisionWatt i report."""
+    # Foretrukne kilder: arrays fra power-pipelinen hvis tilstede
+    watts_arr = None
+    hr_arr = None
+
+    if isinstance(report.get("watts"), list) and report["watts"]:
+        try:
+            watts_arr = [float(x) if x is not None else 0.0 for x in report["watts"]]
+        except Exception:
+            watts_arr = None
+
+    # HR-array finnes sjelden i report; trekk ut fra samples
+    _, hr_arr = _extract_power_hr(samples)
+    if watts_arr is None:
+        watts_arr, _ = _extract_power_hr(samples)
+
+    # Avg
+    avg_p = _mean(watts_arr) if watts_arr else float(report.get("avg_power") or 0.0)
+    avg_h = _mean(hr_arr) if hr_arr else float(report.get("avg_hr") or report.get("avg_pulse") or 0.0)
+
+    # np/vi
+    duration_sec = float(report.get("duration_sec") or infer_duration_sec(samples))
+    hz = _estimate_hz(len(watts_arr) if watts_arr else 0, duration_sec)
+    np_val = _np_py(watts_arr, hz) if watts_arr else 0.0
+    vi = (np_val / avg_p) if avg_p > 0 else 0.0
+
+    # pa:hr og w/beat (samme definisjon som i core: avgW/avgHR)
+    pa_hr = (avg_p / avg_h) if avg_h > 0 else 0.0
+    w_per_beat = pa_hr
+
+    # PrecisionWatt ±usikkerhet
+    pw_val = _precision_watt_py(watts_arr, hz) if watts_arr else 0.0
+    pw_str = _format_precision_watt(pw_val)
+
+    # Rounding for determinisme i CLI
+    def r2(x): return None if x is None else round(float(x), 2)
+    report["avg_power"]  = r2(avg_p)
+    report["avg_hr"]     = r2(avg_h) if avg_h > 0 else report.get("avg_hr", None)
+    report["np"]         = r2(np_val)
+    report["vi"]         = r2(vi)
+    report["pa_hr"]      = r2(pa_hr)
+    report["pa_hr_pct"]  = r2(pa_hr * 100.0) if pa_hr > 0 else None
+    report["w_per_beat"] = r2(w_per_beat)
+    report["PrecisionWatt"] = pw_str
 
 # ── NYE HELPERE (TRINN D) – plasseres her ─────────────────────────────────────
 def _parse_time_to_seconds(x) -> float | None:
@@ -690,34 +924,53 @@ def _load_weather_for_cal(args: argparse.Namespace) -> Dict[str, float]:
 # Kommandofunksjonen
 # ─────────────────────────────────────────────────────────────
 def cmd_session(args: argparse.Namespace) -> int:
-    cfg = load_cfg(getattr(args, "cfg", None))
+    global _LOG
+    _LOG = _init_logger(args)
+    _log_info("startup", config="session", log_level=_LOG.level_name)
+
+    with _timed("load_cfg"):
+        cfg = load_cfg(getattr(args, "cfg", None))
+
     history_dir = cfg.get("history_dir", "history")
     outdir = getattr(args, "out", "output")
     fmt = getattr(args, "format", "json")
     lang = getattr(args, "lang", "no")
 
-    paths = sorted(glob.glob(args.input))
+    with _timed("parse_input_glob"):
+        paths = sorted(glob.glob(args.input))
+
     if getattr(args, "debug", False):
         print("DEBUG: input filer:", paths, file=sys.stderr)
     if not paths:
+        _log_warn("parse_input_glob", f"Ingen filer for pattern: {args.input}")
         print(f"Ingen filer for pattern: {args.input}", file=sys.stderr)
         return 2
 
     reports: List[Dict[str, Any]] = []
 
     for path in paths:
-        samples = read_session_csv(path, debug=getattr(args, "debug", False))
+        # Les og parse CSV til samples
+        with _timed("read_session_csv"):
+            samples = read_session_csv(path, debug=getattr(args, "debug", False))
+
         if getattr(args, "debug", False):
             print(f"DEBUG: {path} -> {len(samples)} samples", file=sys.stderr)
         if not samples:
+            _log_warn("read_session_csv", f"{path} har ingen gyldige samples.")
             print(f"ADVARSEL: {path} har ingen gyldige samples.", file=sys.stderr)
             continue
 
+        # — NEW: flagg for “mangler device-wattdata” (før beregnet watt legges til)
+        no_device_power = not _has_power_in_samples(samples)
+
         sid = session_id_from_path(path)
-        duration_sec = infer_duration_sec(samples)
+        with _timed("infer_duration"):
+            duration_sec = infer_duration_sec(samples)
+
         meta: Dict[str, Any] = {
             "session_id": sid,
             "duration_sec": duration_sec,
+            "duration_min": round(duration_sec / 60.0, 2) if duration_sec else None,
             "ftp": None,
             "hr_max": cfg.get("hr_max"),
             "start_time_utc": None,
@@ -730,27 +983,48 @@ def cmd_session(args: argparse.Namespace) -> int:
             print("Ingen overstyring – modus settes automatisk senere hvis relevant.")
 
         # FTP
-        if getattr(args, "set_ftp", None) is not None:
-            meta["ftp"] = float(args.set_ftp)
-        elif getattr(args, "auto_ftp", False):
-            ftp_est = estimate_ftp_20min95(samples)
-            if ftp_est > 0:
-                meta["ftp"] = round(ftp_est, 1)
-        elif "ftp" in cfg:
-            meta["ftp"] = cfg.get("ftp")
+        with _timed("resolve_ftp"):
+            if getattr(args, "set_ftp", None) is not None:
+                meta["ftp"] = float(args.set_ftp)
+            elif getattr(args, "auto_ftp", False):
+                ftp_est = estimate_ftp_20min95(samples)
+                if ftp_est > 0:
+                    meta["ftp"] = round(ftp_est, 1)
+            elif "ftp" in cfg:
+                meta["ftp"] = cfg.get("ftp")
 
         # Kjør analyse via Rust-broen
-        report_raw = _analyze_session_bridge(samples, meta, cfg)
+        with _timed("analyze_session", cache_hit=False):
+            report_raw = _analyze_session_bridge(samples, meta, cfg)
 
         if isinstance(report_raw, str) and report_raw.strip() == "":
+            _log_warn("analyze_session", f"_analyze_session_bridge returnerte tom streng for {path}")
             print(f"ADVARSEL: _analyze_session_bridge returnerte tom streng for {path}", file=sys.stderr)
             continue
 
         try:
-            report = json.loads(report_raw) if isinstance(report_raw, str) else report_raw
+            with _timed("parse_analyze_json"):
+                report = json.loads(report_raw) if isinstance(report_raw, str) else report_raw
         except json.JSONDecodeError as e:
+            _log_warn("parse_analyze_json", f"Klarte ikke å parse JSON for {path}: {e}")
             print(f"ADVARSEL: Klarte ikke å parse JSON for {path}: {e}", file=sys.stderr)
             continue
+
+        # Sett basisfelter om de mangler
+        report.setdefault("session_id", sid)
+        report.setdefault("duration_sec", duration_sec)
+        report.setdefault("duration_min", round(duration_sec / 60.0, 2) if duration_sec else None)
+
+        # — NEW: eksplisitt metrikklinje for “sessions_no_power_total”
+        mode = str(report.get("mode") or "").lower()
+        if no_device_power or mode == "hr_only":
+            _log_info(
+                "metric",
+                metric="sessions_no_power_total",
+                value=1,
+                session_id=sid,
+                component="cli/session"
+            )
 
         # --- Vind/kraft fra kjernen (PowerOutputs) ---
         try:
@@ -760,7 +1034,8 @@ def cmd_session(args: argparse.Namespace) -> int:
 
         if rs_power_json is not None:
             # Normaliser fra read_session_csv
-            core_samples = [_normalize_sample_for_core(s) for s in samples]
+            with _timed("normalize_core_samples"):
+                core_samples = [_normalize_sample_for_core(s) for s in samples]
 
             # Hvis normaliseringen ga "tomme" data → bruk CSV-fallback (les direkte fra inputfilen)
             def _looks_empty(core: list[dict]) -> bool:
@@ -773,7 +1048,8 @@ def cmd_session(args: argparse.Namespace) -> int:
             if _looks_empty(core_samples):
                 if getattr(args, "debug", False):
                     print("DEBUG CORE: normalized samples look empty -> using CSV fallback", file=sys.stderr)
-                core_samples = _read_csv_for_core_samples(path, debug=getattr(args, "debug", False))
+                with _timed("csv_fallback_normalize"):
+                    core_samples = _read_csv_for_core_samples(path, debug=getattr(args, "debug", False))
 
             if getattr(args, "debug", False):
                 print(f"DEBUG CORE: n_samples={len(core_samples)}", file=sys.stderr)
@@ -795,12 +1071,22 @@ def cmd_session(args: argparse.Namespace) -> int:
                 print(f"DEBUG CORE: profile_for_core={profile_for_core}", file=sys.stderr)
                 print(f"DEBUG CORE: weather_for_core={weather_for_core}", file=sys.stderr)
 
-            power_json = rs_power_json(
-                json.dumps(core_samples, ensure_ascii=False),
-                json.dumps(profile_for_core, ensure_ascii=False),
-                json.dumps(weather_for_core, ensure_ascii=False),
-            )
+            # compute_power_with_wind_json (kan i noen impls cache)
+            with _timed("compute_power_with_wind"):
+                power_json = rs_power_json(
+                    json.dumps(core_samples, ensure_ascii=False),
+                    json.dumps(profile_for_core, ensure_ascii=False),
+                    json.dumps(weather_for_core, ensure_ascii=False),
+                )
             power_obj = json.loads(power_json) if isinstance(power_json, str) else power_json
+
+            # Logg med mulig cache-hit hvis eksponert fra kjernen
+            cache_hit = False
+            try:
+                cache_hit = bool(power_obj.get("cache_hit", False))
+            except Exception:
+                cache_hit = False
+            _log_info("compute_power_with_wind", cache_hit=cache_hit)
 
             if getattr(args, "debug", False):
                 print(f"DEBUG CORE: keys={list(power_obj.keys())}", file=sys.stderr)
@@ -813,183 +1099,245 @@ def cmd_session(args: argparse.Namespace) -> int:
                 if v is not None:
                     report[k] = v
 
+        # ── BEREGN RAPPORTFELT (NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt) ────
+        with _timed("compute_metrics"):
+            _compute_report_metrics_inline(report, samples)
+
         # ── KALIBRERING (kun hvis --calibrate) ────────────────────────────────
         if getattr(args, "calibrate", False):
-            POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr")
-            SPEED_KEYS = ("v_ms", "speed_ms", "speed", "velocity")
-            ALTI_KEYS  = ("altitude_m", "altitude", "elev", "elevation")
-            GRAD_KEYS  = ("gradient", "grade", "slope", "incline", "gradient_pct")
-            TIME_KEYS  = ("t", "time_s", "time", "sec", "seconds", "timestamp")
+            with _timed("calibrate", cache_hit=False):
+                POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr")
+                SPEED_KEYS = ("v_ms", "speed_ms", "speed", "velocity")
+                ALTI_KEYS  = ("altitude_m", "altitude", "elev", "elevation")
+                GRAD_KEYS  = ("gradient", "grade", "slope", "incline", "gradient_pct")
+                TIME_KEYS  = ("t", "time_s", "time", "sec", "seconds", "timestamp")
 
-            watts_arr: List[float] = []
-            speed_arr: List[float] = []
-            alti_arr:  List[float] = []
+                watts_arr: List[float] = []
+                speed_arr: List[float] = []
+                alti_arr:  List[float] = []
 
-            prev_t = None
-            cur_alt = 0.0
+                prev_t = None
+                cur_alt = 0.0
 
-            for s in samples:
-                if not isinstance(s, dict):
-                    continue
-                sn = { (str(k).lower().strip() if k is not None else ""): v for k, v in s.items() }
+                for s in samples:
+                    if not isinstance(s, dict):
+                        continue
+                    sn = { (str(k).lower().strip() if k is not None else ""): v for k, v in s.items() }
 
-                def pick_val(keys: tuple[str, ...]):
-                    for k in keys:
-                        if k in sn and sn[k] is not None and sn[k] != "":
-                            return sn[k]
-                    return None
+                    def pick_val(keys: tuple[str, ...]):
+                        for k in keys:
+                            if k in sn and sn[k] is not None and sn[k] != "":
+                                return sn[k]
+                        return None
 
-                w_raw = pick_val(POWER_KEYS)
-                v_raw = pick_val(SPEED_KEYS)
-                a_raw = pick_val(ALTI_KEYS)
-                g_raw = pick_val(GRAD_KEYS)
-                t_raw = pick_val(TIME_KEYS)
+                    w_raw = pick_val(POWER_KEYS)
+                    v_raw = pick_val(SPEED_KEYS)
+                    a_raw = pick_val(ALTI_KEYS)
+                    g_raw = pick_val(GRAD_KEYS)
+                    t_raw = pick_val(TIME_KEYS)
 
-                w, _ = _parse_float_loose(w_raw)
-                v, _ = _parse_float_loose(v_raw)
-                a, _ = _parse_float_loose(a_raw)
-                g, g_is_pct = _parse_float_loose(g_raw)
-                t, _ = _parse_float_loose(t_raw)
+                    w, _ = _parse_float_loose(w_raw)
+                    v, _ = _parse_float_loose(v_raw)
+                    a, _ = _parse_float_loose(a_raw)
+                    g, g_is_pct = _parse_float_loose(g_raw)
+                    t, _ = _parse_float_loose(t_raw)
 
-                if v is not None and v > 50:  # trolig km/t
-                    v = v / 3.6
+                    if v is not None and v > 50:  # trolig km/t
+                        v = v / 3.6
 
-                # hvis altitude mangler men gradient+tid+fart finnes → integrér
-                if a is None and g is not None and v is not None:
-                    if g_is_pct or abs(g) <= 30.0:
-                        slope = g / 100.0
-                    else:
-                        slope = g
-                    dt = None
-                    if isinstance(t, (int, float)) and prev_t is not None:
-                        dt = max(0.0, float(t) - float(prev_t))
-                    if dt is None or dt == 0.0:
-                        dt = 1.0
-                    cur_alt += slope * float(v) * dt
-                    a = cur_alt
-                elif a is not None:
-                    cur_alt = float(a)
+                    # hvis altitude mangler men gradient+tid+fart finnes → integrér
+                    if a is None and g is not None and v is not None:
+                        if g_is_pct or abs(g) <= 30.0:
+                            slope = g / 100.0
+                        else:
+                            slope = g
+                        dt = None
+                        if isinstance(t, (int, float)) and prev_t is not None:
+                            dt = max(0.0, float(t) - float(prev_t))
+                        if dt is None or dt == 0.0:
+                            dt = 1.0
+                        cur_alt += slope * float(v) * dt
+                        a = cur_alt
+                    elif a is not None:
+                        cur_alt = float(a)
 
-                prev_t = t if isinstance(t, (int, float)) else prev_t
+                    prev_t = t if isinstance(t, (int, float)) else prev_t
 
-                if w is not None and v is not None and a is not None:
-                    watts_arr.append(float(w)); speed_arr.append(float(v)); alti_arr.append(float(a))
+                    if w is not None and v is not None and a is not None:
+                        watts_arr.append(float(w)); speed_arr.append(float(v)); alti_arr.append(float(a))
 
-            # Fallback: bruk CSV direkte hvis arrays er utilstrekkelige (< MIN_SAMPLES_FOR_CAL)
-            if (len(watts_arr) < MIN_SAMPLES_FOR_CAL) or (len(speed_arr) < MIN_SAMPLES_FOR_CAL) or (len(alti_arr) < MIN_SAMPLES_FOR_CAL):
-                fw, fv, fa = _fallback_extract_for_calibration(path)
-                if len(fw) >= MIN_SAMPLES_FOR_CAL and len(fv) >= MIN_SAMPLES_FOR_CAL and len(fa) >= MIN_SAMPLES_FOR_CAL:
-                   watts_arr, speed_arr, alti_arr = fw, fv, fa
-                   if getattr(args, "debug", False):
-                      print(f"DEBUG CAL: using CSV fallback arrays n={len(watts_arr)}", file=sys.stderr)
+                # Fallback: bruk CSV direkte hvis arrays er utilstrekkelige (< MIN_SAMPLES_FOR_CAL)
+                if (len(watts_arr) < MIN_SAMPLES_FOR_CAL) or (len(speed_arr) < MIN_SAMPLES_FOR_CAL) or (len(alti_arr) < MIN_SAMPLES_FOR_CAL):
+                    with _timed("csv_fallback_arrays"):
+                        fw, fv, fa = _fallback_extract_for_calibration(path)
+                    if len(fw) >= MIN_SAMPLES_FOR_CAL and len(fv) >= MIN_SAMPLES_FOR_CAL and len(fa) >= MIN_SAMPLES_FOR_CAL:
+                       watts_arr, speed_arr, alti_arr = fw, fv, fa
+                       if getattr(args, "debug", False):
+                          print(f"DEBUG CAL: using CSV fallback arrays n={len(watts_arr)}", file=sys.stderr)
 
-            if not watts_arr or not speed_arr or not alti_arr or not (len(watts_arr) == len(speed_arr) == len(alti_arr)):
-                print("⚠️ Kalibrering hoppes over: mangler speed/altitude/watts med like lengder.", file=sys.stderr)
-                if getattr(args, "debug", False):
-                    print(f"DEBUG CAL: lens -> watts={len(watts_arr)} speed={len(speed_arr)} alti={len(alti_arr)}", file=sys.stderr)
-            elif len(watts_arr) < MIN_SAMPLES_FOR_CAL:
-                if getattr(args, "debug", False):
-                    print(f"DEBUG CAL: too few samples for calibration (have {len(watts_arr)}, need >= {MIN_SAMPLES_FOR_CAL})", file=sys.stderr)
-                report["calibrated"] = False
-                report["reason"] = f"insufficient_segment(min_samples={MIN_SAMPLES_FOR_CAL}, have={len(watts_arr)})"
-            else:
-                # Variasjons-sjekk før kall til Rust
-                try:
-                    v_spread = (max(speed_arr) - min(speed_arr)) if speed_arr else 0.0
-                    alt_span = (max(alti_arr) - min(alti_arr)) if alti_arr else 0.0
-                except Exception:
-                    v_spread, alt_span = 0.0, 0.0
-                if v_spread < MIN_SPEED_SPREAD_MS and alt_span < MIN_ALT_SPAN_M:
+                if not watts_arr or not speed_arr or not alti_arr or not (len(watts_arr) == len(speed_arr) == len(alti_arr)):
+                    _log_warn("calibrate", "Kalibrering hoppes over: mangler speed/altitude/watts med like lengder.")
+                    if getattr(args, "debug", False):
+                        print(f"DEBUG CAL: lens -> watts={len(watts_arr)} speed={len(speed_arr)} alti={len(alti_arr)}", file=sys.stderr)
+                elif len(watts_arr) < MIN_SAMPLES_FOR_CAL:
+                    if getattr(args, "debug", False):
+                        print(f"DEBUG CAL: too few samples for calibration (have {len(watts_arr)}, need >= {MIN_SAMPLES_FOR_CAL})", file=sys.stderr)
                     report["calibrated"] = False
-                    report["reason"] = f"insufficient_variation(speed_spread={v_spread:.2f} m/s, alt_span={alt_span:.1f} m)"
-                    if getattr(args, "debug", False):
-                        print(f"DEBUG CAL: insufficient variation → v_spread={v_spread:.2f} m/s, alt_span={alt_span:.1f} m", file=sys.stderr)
+                    report["reason"] = f"insufficient_segment(min_samples={MIN_SAMPLES_FOR_CAL}, have={len(watts_arr)})"
                 else:
-                    # Robust import av Rust-binding
+                    # Variasjons-sjekk før kall til Rust
                     try:
-                        from .rust_bindings import calibrate_session as rs_cal
+                        v_spread = (max(speed_arr) - min(speed_arr)) if speed_arr else 0.0
+                        alt_span = (max(alti_arr) - min(alti_arr)) if alti_arr else 0.0
                     except Exception:
-                        from cli.rust_bindings import calibrate_session as rs_cal  # type: ignore
-
-                    profile_for_cal = _build_profile_for_cal(report, cfg, args)
-                    weather_for_cal = _load_weather_for_cal(args)
-
-                    # ekstra kvalitets-logging
-                    if getattr(args, "debug", False):
+                        v_spread, alt_span = 0.0, 0.0
+                    if v_spread < MIN_SPEED_SPREAD_MS and alt_span < MIN_ALT_SPAN_M:
+                        report["calibrated"] = False
+                        report["reason"] = f"insufficient_variation(speed_spread={v_spread:.2f} m/s, alt_span={alt_span:.1f} m)"
+                        if getattr(args, "debug", False):
+                            print(f"DEBUG CAL: insufficient variation → v_spread={v_spread:.2f} m/s, alt_span={alt_span:.1f} m", file=sys.stderr)
+                    else:
+                        # Robust import av Rust-binding
                         try:
-                            vmin, vmax = min(speed_arr), max(speed_arr)
-                            wmin, wmax = min(watts_arr), max(watts_arr)
-                            alt_span_dbg = (alti_arr[-1] - alti_arr[0]) if alti_arr else 0.0
-                            print(f"DEBUG CAL: n={len(watts_arr)} v=[{vmin:.2f},{vmax:.2f}] m/s "
-                                  f"watts=[{wmin:.1f},{wmax:.1f}] alt_span={alt_span_dbg:.1f} m", file=sys.stderr)
+                            from .rust_bindings import calibrate_session as rs_cal
                         except Exception:
-                            pass
+                            from cli.rust_bindings import calibrate_session as rs_cal  # type: ignore
 
-                    try:
-                        cal = rs_cal(watts_arr, speed_arr, alti_arr, profile_for_cal, weather_for_cal)
+                        profile_for_cal = _build_profile_for_cal(report, cfg, args)
+                        weather_for_cal = _load_weather_for_cal(args)
 
-                                     # slå cal-resultater inn i report
-                        for k in ("calibrated", "cda", "crr", "mae"):
-                            if cal.get(k) is not None:
-                                report[k] = cal[k]
-                        # overskriv alltid reason, selv om None (rydder tidligere placeholder)
-                        report["reason"] = cal.get("reason")
+                        # ekstra kvalitets-logging
+                        if getattr(args, "debug", False):
+                            try:
+                                vmin, vmax = min(speed_arr), max(speed_arr)
+                                wmin, wmax = min(watts_arr), max(watts_arr)
+                                alt_span_dbg = (alti_arr[-1] - alti_arr[0]) if alti_arr else 0.0
+                                print(f"DEBUG CAL: n={len(watts_arr)} v=[{vmin:.2f},{vmax:.2f}] m/s "
+                                      f"watts=[{wmin:.1f},{wmax:.1f}] alt_span={alt_span_dbg:.1f} m", file=sys.stderr)
+                            except Exception:
+                                pass
 
-                        # --- Små oppryddinger etter kalibrering ---
-                        # 1) Hvis kalibrering lykkes, null ut reason
-                        if isinstance(report.get("calibrated"), bool) and report["calibrated"]:
-                            report["reason"] = None
-                            # Hvis vi tidligere havnet i hr_only-modus, sett modus til outdoor
-                            if report.get("mode") == "hr_only":
+                        try:
+                            cal = rs_cal(watts_arr, speed_arr, alti_arr, profile_for_cal, weather_for_cal)
+
+                            # slå cal-resultater inn i report
+                            for k in ("calibrated", "cda", "crr", "mae"):
+                                if cal.get(k) is not None:
+                                    report[k] = cal[k]
+                            # overskriv alltid reason, selv om None (rydder tidligere placeholder)
+                            report["reason"] = cal.get("reason")
+
+                            # --- Små oppryddinger etter kalibrering ---
+                            if isinstance(report.get("calibrated"), bool) and report["calibrated"]:
+                                report["reason"] = None
+                                if report.get("mode") == "hr_only":
+                                    report["mode"] = "outdoor"
+
+                            if not report.get("mode"):
                                 report["mode"] = "outdoor"
 
-                        # 2) Sett modus til 'outdoor' når vi faktisk bruker GPS/vind pipeline
-                        if not report.get("mode"):
-                            report["mode"] = "outdoor"
+                            if report.get("status") in (None, "LIMITED"):
+                                hr = report.get("avg_hr") or report.get("avg_pulse")
+                                if isinstance(hr, (int, float)):
+                                    report["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
 
-                        # 3) Sett status fra puls hvis mulig; ellers behold 'LIMITED'
-                        if report.get("status") in (None, "LIMITED"):
-                            hr = report.get("avg_hr") or report.get("avg_pulse")
-                            if isinstance(hr, (int, float)):
-                                report["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
-
-                        # (Valgfritt) lagre profil.json hvis medfulgt
-                        if cal.get("profile"):
-                            try:
-                                os.makedirs(outdir, exist_ok=True)
-                                with open(os.path.join(outdir, "profile.json"), "w", encoding="utf-8") as f:
-                                    f.write(cal["profile"])
-                                print("✅ Lagret oppdatert profile.json fra kalibrering.", file=sys.stderr)
-                            except Exception as e:
-                                print(f"⚠️ Klarte ikke å lagre profile.json: {e}", file=sys.stderr)
-                    except Exception as e:
-                        print(f"⚠️ Kalibrering feilet: {e}", file=sys.stderr)
+                            if cal.get("profile"):
+                                try:
+                                    os.makedirs(outdir, exist_ok=True)
+                                    with open(os.path.join(outdir, "profile.json"), "w", encoding="utf-8") as f:
+                                        f.write(cal["profile"])
+                                    print("✅ Lagret oppdatert profile.json fra kalibrering.", file=sys.stderr)
+                                except Exception as e:
+                                    print(f"⚠️ Klarte ikke å lagre profile.json: {e}", file=sys.stderr)
+                        except Exception as e:
+                            _log_warn("calibrate", f"Kalibrering feilet: {e}")
+                            print(f"⚠️ Kalibrering feilet: {e}", file=sys.stderr)
 
         # Baseline/badge/skriving
-        baseline = load_baseline_wpb(history_dir, sid, report.get("duration_min", 0.0))
+        with _timed("baseline_lookup"):
+            baseline = load_baseline_wpb(history_dir, sid, report.get("duration_min", 0.0))
         if baseline is not None:
             report["w_per_beat_baseline"] = round(baseline, 4)
 
-        maybe_apply_big_engine_badge(report)
+        with _timed("apply_badges"):
+            maybe_apply_big_engine_badge(report)
         reports.append(report)
 
         # Ikke-batch
         if not getattr(args, "batch", False):
             if getattr(args, "dry_run", False):
-                print(json.dumps(_ensure_cli_fields(report), ensure_ascii=False, indent=2))
-                try:
-                    pieces = build_publish_texts(report, lang=lang)
-                    print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                    print(f"[DRY-RUN] DESC: {pieces.desc_header}")
-                except Exception as e:
-                    print(f"[DRY-RUN] build_publish_texts feilet: {e}")
+                with _timed("report_generation", cache_hit=False):
+                    # JSON-output
+                    print(json.dumps(_ensure_cli_fields(report), ensure_ascii=False, indent=2))
+                    # Dry-run kommentar: inkluder metrikker inkl. PrecisionWatt
+                    try:
+                        pieces = build_publish_texts(report, lang=lang)
+                        print(f"[DRY-RUN] COMMENT: {pieces.comment}")
+                        print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                    except Exception as e:
+                        print(f"[DRY-RUN] build_publish_texts feilet: {e}")
+                    # Alltid vis en metrikklinje deterministisk:
+                    print(
+                        "[DRY-RUN] METRICS: "
+                        f"NP={report.get('np')} Avg={report.get('avg_power')} "
+                        f"VI={report.get('vi')} Pa:Hr={report.get('pa_hr')} "
+                        f"W/beat={report.get('w_per_beat')} {report.get('PrecisionWatt')}"
+                    )
             else:
-                write_report(outdir, sid, report, fmt)
-                write_history_copy(history_dir, report)
+                with _timed("write_report", cache_hit=False):
+                    write_report(outdir, sid, report, fmt)
+                    write_history_copy(history_dir, report)
 
             if getattr(args, "publish_to_strava", False):
+                with _timed("publish_to_strava", cache_hit=False):
+                    try:
+                        pieces = build_publish_texts(report, lang=lang)
+                        aid, status = StravaClient(lang=lang).publish_to_strava(
+                            pieces, dry_run=getattr(args, "dry_run", False)
+                        )
+                        print(f"[STRAVA] activity_id={aid} status={status}")
+                    except Exception as e:
+                        print(f"[STRAVA] publisering feilet: {e}")
+
+    # Batch
+    if getattr(args, "batch", False) and reports:
+        if getattr(args, "with_trend", False):
+            with _timed("apply_trend_last3"):
+                apply_trend_last3(reports)
+
+        for r in reports:
+            sid = r.get("session_id", "session")
+            with _timed("baseline_lookup"):
+                baseline = load_baseline_wpb(history_dir, sid, r.get("duration_min", 0.0))
+            if baseline is not None:
+                r["w_per_beat_baseline"] = round(baseline, 4)
+            with _timed("apply_badges"):
+                maybe_apply_big_engine_badge(r)
+
+            if getattr(args, "dry_run", False):
+                with _timed("report_generation", cache_hit=False):
+                    print(json.dumps(_ensure_cli_fields(r), ensure_ascii=False, indent=2))
+                    try:
+                        pieces = build_publish_texts(r, lang=lang)
+                        print(f"[DRY-RUN] COMMENT: {pieces.comment}")
+                        print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                    except Exception as e:
+                        print(f"[DRY-RUN] build_publish_texts feilet: {e}")
+                    print(
+                        "[DRY-RUN] METRICS: "
+                        f"NP={r.get('np')} Avg={r.get('avg_power')} "
+                        f"VI={r.get('vi')} Pa:Hr={r.get('pa_hr')} "
+                        f"W/beat={r.get('w_per_beat')} {r.get('PrecisionWatt')}"
+                    )
+            else:
+                with _timed("write_report", cache_hit=False):
+                    write_report(outdir, sid, r, fmt)
+                    write_history_copy(history_dir, r)
+
+        if getattr(args, "publish_to_strava", False):
+            with _timed("publish_to_strava", cache_hit=False):
                 try:
-                    pieces = build_publish_texts(report, lang=lang)
+                    pieces = build_publish_texts(reports[-1], lang=lang)
                     aid, status = StravaClient(lang=lang).publish_to_strava(
                         pieces, dry_run=getattr(args, "dry_run", False)
                     )
@@ -997,38 +1345,5 @@ def cmd_session(args: argparse.Namespace) -> int:
                 except Exception as e:
                     print(f"[STRAVA] publisering feilet: {e}")
 
-    # Batch
-    if getattr(args, "batch", False) and reports:
-        if getattr(args, "with_trend", False):
-            apply_trend_last3(reports)
-
-        for r in reports:
-            sid = r.get("session_id", "session")
-            baseline = load_baseline_wpb(history_dir, sid, r.get("duration_min", 0.0))
-            if baseline is not None:
-                r["w_per_beat_baseline"] = round(baseline, 4)
-            maybe_apply_big_engine_badge(r)
-
-            if getattr(args, "dry_run", False):
-                print(json.dumps(_ensure_cli_fields(r), ensure_ascii=False, indent=2))
-                try:
-                    pieces = build_publish_texts(r, lang=lang)
-                    print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                    print(f"[DRY-RUN] DESC: {pieces.desc_header}")
-                except Exception as e:
-                    print(f"[DRY-RUN] build_publish_texts feilet: {e}")
-            else:
-                write_report(outdir, sid, r, fmt)
-                write_history_copy(history_dir, r)
-
-        if getattr(args, "publish_to_strava", False):
-            try:
-                pieces = build_publish_texts(reports[-1], lang=lang)
-                aid, status = StravaClient(lang=lang).publish_to_strava(
-                    pieces, dry_run=getattr(args, "dry_run", False)
-                )
-                print(f"[STRAVA] activity_id={aid} status={status}")
-            except Exception as e:
-                print(f"[STRAVA] publisering feilet: {e}")
-
+    _log_info("done")
     return 0

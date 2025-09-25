@@ -6,6 +6,10 @@ CycleGraph CLI
 - --calibrate: valgfri kalibrering mot powermeter
 - --weather: path til værfil (JSON) som brukes i kalibrering
 - --indoor : kjør indoor pipeline uten GPS (device_watts-policy)
+
+TRINN 3 (Sprint 6): Strukturerte JSON-logger
+- Logger som JSON på stderr med felter: level, step, duration_ms (+ev. extras)
+- Nivåstyring via --log-level (debug/info/warning) eller miljøvariabel LOG_LEVEL
 """
 
 from __future__ import annotations
@@ -17,8 +21,10 @@ import json
 import os
 import re
 import sys
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Flyttet: bruker config.load_cfg for å unngå sirkulærimport
 from .config import load_cfg  # noqa: F401
@@ -40,6 +46,72 @@ try:
     from cli.io import read_session_csv  # type: ignore
 except Exception:
     read_session_csv = None  # pylint: disable=invalid-name
+
+
+# ─────────────────────────────────────────────────────────────
+# TRINN 3: Strukturerte logger (enkelt JSON-logger på stderr)
+# ─────────────────────────────────────────────────────────────
+_LEVELS = {"debug": 10, "info": 20, "warning": 30}
+
+def _norm_level(s: Optional[str]) -> str:
+    if not s:
+        return "info"
+    s2 = str(s).strip().lower()
+    return s2 if s2 in _LEVELS else "info"
+
+class JsonLogger:
+    def __init__(self, level: str = "info") -> None:
+        self.level_name = _norm_level(level)
+        self.level = _LEVELS[self.level_name]
+
+    def _emit(self, lvl_name: str, **fields: Any) -> None:
+        if _LEVELS[lvl_name] < self.level:
+            return
+        rec = {"level": lvl_name.upper()}
+        for k, v in fields.items():
+            if v is None:
+                continue
+            try:
+                json.dumps(v)
+                rec[k] = v
+            except Exception:
+                rec[k] = str(v)
+        print(json.dumps(rec, ensure_ascii=False), file=sys.stderr)
+
+    def debug(self, step: str, duration_ms: Optional[int] = None, **kw: Any) -> None:
+        self._emit("debug", step=step, duration_ms=duration_ms, **kw)
+
+    def info(self, step: str, duration_ms: Optional[int] = None, **kw: Any) -> None:
+        self._emit("info", step=step, duration_ms=duration_ms, **kw)
+
+    def warning(self, step: str, msg: str, **kw: Any) -> None:
+        self._emit("warning", step=step, message=msg, **kw)
+
+_LOG: Optional[JsonLogger] = None
+
+def _init_logger_from_args_env(args: argparse.Namespace) -> JsonLogger:
+    cli_lvl = getattr(args, "log_level", None)
+    env_lvl = os.environ.get("LOG_LEVEL")
+    level = _norm_level(cli_lvl) if cli_lvl else (_norm_level(env_lvl) if env_lvl else "info")
+    return JsonLogger(level=level)
+
+@contextmanager
+def _timed(step: str):
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        dur_ms = int((time.perf_counter() - t0) * 1000.0)
+        if _LOG:
+            _LOG.debug(step=step, duration_ms=dur_ms)
+
+def _log_warn(step: str, msg: str) -> None:
+    if _LOG:
+        _LOG.warning(step=step, msg=msg)
+
+def _log_info(step: str, **kw: Any) -> None:
+    if _LOG:
+        _LOG.info(step=step, **kw)
 
 
 # ---------- Hjelpere (session) ----------
@@ -346,58 +418,77 @@ def _run_calibration_from_args(args: argparse.Namespace) -> int:
 
 def main() -> None:
     # Importer parser her for å unngå sirkulær-import
-    from cli.parser import build_parser
+    with _timed("build_parser"):
+        from cli.parser import build_parser
+        parser = build_parser()
 
-    parser = build_parser()
+    # ⚙️ Legg til --weather, --indoor og --log-level på 'session'-subparseren dersom de ikke finnes
+    with _timed("ensure_session_flags"):
+        try:
+            for a in parser._actions:  # type: ignore[attr-defined]
+                if isinstance(a, argparse._SubParsersAction):
+                    if "session" in a.choices:
+                        sp = a.choices["session"]
 
-    # ⚙️ Legg til --weather og --indoor på 'session'-subparseren dersom de ikke allerede finnes
-    try:
-        for a in parser._actions:  # type: ignore[attr-defined]
-            if isinstance(a, argparse._SubParsersAction):
-                if "session" in a.choices:
-                    sp = a.choices["session"]
+                        def _ensure_flag(flag: str, **kwargs):
+                            already = any(
+                                hasattr(ac, "option_strings") and (flag in getattr(ac, "option_strings", []))
+                                for ac in getattr(sp, "_actions", [])
+                            )
+                            if not already:
+                                sp.add_argument(flag, **kwargs)
 
-                    def _ensure_flag(flag: str, **kwargs):
-                        already = any(
-                            hasattr(ac, "option_strings") and (flag in getattr(ac, "option_strings", []))
-                            for ac in getattr(sp, "_actions", [])
+                        # --weather PATH
+                        _ensure_flag(
+                            "--weather",
+                            type=str,
+                            help="Path to weather JSON file with wind/temp/pressure",
                         )
-                        if not already:
-                            sp.add_argument(flag, **kwargs)
 
-                    # --weather PATH
-                    _ensure_flag(
-                        "--weather",
-                        type=str,
-                        help="Path to weather JSON file with wind/temp/pressure",
-                    )
+                        # --indoor (bool flag)
+                        _ensure_flag(
+                            "--indoor",
+                            action="store_true",
+                            help="Run indoor pipeline without GPS (device_watts policy)",
+                        )
 
-                    # --indoor (bool flag)
-                    _ensure_flag(
-                        "--indoor",
-                        action="store_true",
-                        help="Run indoor pipeline without GPS (device_watts policy)",
-                    )
-                break
-    except Exception:
-        # Ikke-kritisk; hvis vi ikke får lagt det til her, kjører resten som før
-        pass
+                        # --log-level (debug/info/warning) -> brukes også i cli/session.py
+                        _ensure_flag(
+                            "--log-level",
+                            type=str,
+                            choices=["debug", "info", "warning"],
+                            help="Structured log level (overrides LOG_LEVEL env).",
+                        )
+                    break
+        except Exception:
+            # Ikke-kritisk; hvis vi ikke får lagt til her, kjører resten som før
+            pass
 
-    args = parser.parse_args()
+    with _timed("parse_args"):
+        args = parser.parse_args()
 
-    # (Valgfritt) vis enkel profilstatus
-    try:
-        from cli.profile import load_profile as _lp
-        profile = _lp()
-        profile["estimat"] = False
-    except Exception:
-        profile = {"bike_type": "unknown", "weight": None, "crr": None, "estimat": True}
+    # Init logger (bruk CLI > env > default)
+    global _LOG
+    _LOG = _init_logger_from_args_env(args)
+    _log_info("startup", component="analyze.py", subcommand=getattr(args, "command", None), log_level=_LOG.level_name)
+
+    # (Valgfritt) vis enkel profilstatus (beholdt fra tidligere)
+    with _timed("load_profile"):
+        try:
+            from cli.profile import load_profile as _lp
+            profile = _lp()
+            profile["estimat"] = False
+        except Exception:
+            profile = {"bike_type": "unknown", "weight": None, "crr": None, "estimat": True}
     print("Profil:", profile)
 
     # Viktig: IKKE kjør noen kalibrering her. Håndteres i cli/session.py.
 
     # Kjør valgt subkommando (f.eks. cmd_session i cli/session.py)
-    rc = args.func(args) if hasattr(args, "func") else (parser.print_help() or 2)
+    with _timed("dispatch_subcommand"):
+        rc = args.func(args) if hasattr(args, "func") else (parser.print_help() or 2)
+
+    _log_info("done", rc=rc)
     sys.exit(rc)
 
 
