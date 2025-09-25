@@ -1,157 +1,186 @@
-# Definition of Done — Frontlog
-*Samlet oversikt over hva som er ferdig, påbegynt og planlagt. Ikke-sensitive, høynivå punkter.*
+Definition of Done — Frontlog
 
-Sist oppdatert: 2025-09-12
+Samlet oversikt over hva som er ferdig, påbegynt og planlagt. Ikke-sensitive, høynivå punkter.
+Sist oppdatert: 2025-09-25
 
----
+✅ FERDIG
+M1 — Prosjektstruktur & repo
+Standard repo-oppsett: core/, cli/, docs/, data/, shapes/, tests/.
+Init GitHub-repo (README, lisens, .gitignore).
+Bygg/kjørbare grunnkommandoer dokumentert i README (Rust/Python).
+CI eller lokal “quick check”: cargo check og enkel Python-kall fungerer.
 
-## ✅ FERDIG
+M2 — Rust-core med PyO3
+Cargo.toml satt opp med PyO3 av riktig versjon.
+Minst én eksponert Rust-funksjon bundet til Python (importerbar i Python).
+cargo test (grunnleggende) og “import i Python” fungerer lokalt.
+Kodekommentarer: hvor core-API lever og hvordan bygge.
 
-### M1 — Prosjektstruktur & repo
-- Standard repo-oppsett: `core/`, `cli/`, `docs/`, `data/`, `shapes/`, `tests/`.
-- Init GitHub-repo (README, lisens, .gitignore).
-- Bygg/kjørbare grunnkommandoer dokumentert i README (Rust/Python).
-- CI eller lokal “quick check”: `cargo check` og enkel Python-kall fungerer.
+M3 — CLI-oppsett & dataflyt
+cli/analyze.py kjører ende-til-ende mot core (Rust) med argparse-flagg.
+I/O-kontrakt: leser CSV/streams, skriver rapport/JSON til output/.
+Grunnleggende feilhåndtering (fil mangler, feil format) med tydelige feilmeldinger.
+“Happy path” demonstrert på sample data.
 
-### M2 — Rust-core med PyO3
-- Cargo.toml satt opp med PyO3 av riktig versjon.
-- Minst én eksponert Rust-funksjon bundet til Python (importerbar i Python).
-- `cargo test` (grunnleggende) og “import i Python” fungerer lokalt.
-- Kodekommentarer: hvor core-API lever og hvordan bygge.
+M4 — Dummydata & testkjøring
+Dummy/samples tilgjengelig i repo (ikke sensitive).
+Kjøreeksempel dokumentert: python -m cli.analyze … produserer forutsigbar rapport.
+Sanity-sjekk: verdier i rapport er konsistente og uten exceptions.
+Enkle tester/skript verifiserer flyten.
 
-### M3 — CLI-oppsett & dataflyt
-- `cli/analyze.py` kjører ende-til-ende mot core (Rust) med argparse-flagg.
-- I/O-kontrakt: leser CSV/streams, skriver rapport/JSON til `output/`.
-- Grunnleggende feilhåndtering (fil mangler, feil format) med tydelige feilmeldinger.
-- “Happy path” demonstrert på sample data.
+M5 — SHACL-validering
+SHACL-shapes for RDF definert i shapes/.
+Valideringsscript i Python: kjørbar via CLI-flag eller separat kommando.
+Eksempelfiler validerer OK; feil rapporteres forståelig.
+Kort bruksdokumentasjon i docs/ (hva, hvordan, hvor output havner).
 
-### M4 — Dummydata & testkjøring
-- Dummy/samples tilgjengelig i repo (ikke sensitive).
-- Kjøreeksempel dokumentert: `python -m cli.analyze ...` produserer forutsigbar rapport.
-- Sanity-sjekk: verdier i rapport er konsistente og uten exceptions.
-- Enkle tester/skript verifiserer flyten.
+M6 — Strava-integrasjon (API & import)
+OAuth-flyt verifisert; tokens lagres sikkert lokalt (ingen hemmeligheter i repo).
+Henting av aktiviteter med paging og tidsfilter (--since) fungerer.
+Streams → CSV (minst time,hr,watts), robust håndtering av 401/403/429/5xx.
+Inkrementell state (ingen duplikater), og grunnlogg over kjøringer.
+End-to-end “import → analyze” fungerer på ≥3 reelle økter (lokalt verifisert).
 
-### M5 — SHACL-validering
-- SHACL-shapes for RDF definert i `shapes/`.
-- Valideringsscript i Python: kjørbar via CLI-flag eller separat kommando.
-- Eksempelfiler validerer OK; feil rapporteres forståelig.
-- Kort bruksdokumentasjon i `docs/` (hva, hvordan, hvor output havner).
+M7 — Analysefunksjoner (effektivitet, treningsscore)
+CGS v1 etablert: IF/NP/VI/Pa:Hr/WpB + 28d baseline (±25 %), tydelige fallbacks.
+Badges: Big Engine (+6 %, ≥30 min) og Metronome (VI≤1.05, Pa:Hr≤1.05).
+Python: Strava publish-formatter m/ språk, trimming og fallbacks + tester grønne.
+Rust: unit + golden + perf-guard (2h@1Hz ≤200 ms) grønne.
+Strava-klient: auto-refresh, header-fix, comment→description-fallback, verifisert live.
+Docs: CGS_v1, CLI usage, Strava publish oppdatert.
 
-### M6 — Strava-integrasjon (API & import)
-- OAuth-flyt verifisert; tokens lagres sikkert lokalt (ingen hemmeligheter i repo).
-- Henting av aktiviteter med paging og tidsfilter (`--since`) fungerer.
-- Streams → CSV (minst `time,hr,watts`), robust håndtering av 401/403/429/5xx.
-- Inkrementell state (ingen duplikater), og grunnlogg over kjøringer.
-- End-to-end “import → analyze” fungerer på ≥3 reelle økter (lokalt verifisert).
+M7.5 — Backend-forfining (CGS v1.1, explain)
+Systemtest grønn på steg 0–7: PyO3-import, CLI-hjelp, E2E med sample, idempotens, feilhåndtering, Rust/golden, perf-smoke (~0.73s).
+SHACL- og Strava-mock-test kan hoppes når ingen .ttl eller mock-data er tilgjengelig.
+Fikser gjort: ryddet cmd_session, fikset continue-feil, lagt til mod metrics; i lib.rs (løste E0432), output verifisert deterministisk.
 
-### M7 — Analysefunksjoner (effektivitet, treningsscore)
-- CGS v1 etablert: IF/NP/VI/Pa:Hr/WpB + 28d baseline (±25 %), tydelige fallbacks.
-- Badges: Big Engine (+6 %, ≥30 min) og Metronome (VI≤1.05, Pa:Hr≤1.05).
-- Python: Strava publish-formatter m/ språk, trimming og fallbacks + tester grønne.
-- Rust: unit + golden + perf-guard (2h@1Hz ≤200 ms) grønne.
-- Strava-klient: auto-refresh, header-fix, comment→description-fallback, verifisert live.
-- Docs: CGS_v1, CLI usage, Strava publish oppdatert.
+M7.5 — Forebyggende tester
+Pytest: _analyze_session_bridge() kaster ValueError ved tomme arrays.
+Rust golden-test for w_per_beat() med edge-case input (NaN/null/mismatch).
+Branch: feature/m7.5-preventive-tests
+Tester grønne: pytest + cargo test (inkl. golden).
+Observasjoner: w_per_beat() håndterer NaN/mismatch robust; logging/Result kan vurderes senere.
 
-### M7.5 — Backend-forfining (CGS v1.1, explain)
-- Systemtest grønn på steg 0–7: PyO3-import, CLI-hjelp, E2E med sample, idempotens, feilhåndtering, Rust/golden, perf-smoke (~0.73s).
-- SHACL- og Strava-mock-test kan hoppes når ingen `.ttl` eller mock-data er tilgjengelig.
-- Fikser gjort: ryddet `cmd_session`, fikset `continue`-feil, lagt til `mod metrics;` i `lib.rs` (løste E0432), output verifisert deterministisk.
+M7.5 — GitHub Actions (basic CI)
+Minimal workflow satt opp: kjører pytest -q og cargo test --tests -q på push/PR.
+Branch: feature/m7.5-ci-basic
+Tester grønne: workflow verifisert OK på GitHub.
+Observasjon: base klar for utvidelse med systemtest senere.
 
-### M7.5 — Forebyggende tester
-- Pytest: `_analyze_session_bridge()` kaster `ValueError` ved tomme arrays.
-- Rust golden-test for `w_per_beat()` med edge-case input (NaN/null/mismatch).
-- Branch: `feature/m7.5-preventive-tests`
-- Tester grønne: `pytest` + `cargo test` (inkl. golden).
-- Observasjoner: `w_per_beat()` håndterer NaN/mismatch robust; logging/Result kan vurderes senere.
+M7.6 — Strava Fetch & Modusdeteksjon (S1)
+Auto-modus basert på trainer, sport_type og device_watts.
+CLI-flag --mode roller|outdoor som overstyrer auto.
+JSON-output rutes til riktig pipeline (indoor/outdoor).
+Tester: pytest + cargo test grønne (CLI-parsing, efficiency calc, JSON).
+Observasjoner: enkelte Strava-økter uten watt (device_watts=False) → policy må avklares.
+Branch: feature/strava-fetch-mode
 
-### M7.5 — GitHub Actions (basic CI)
-- Minimal workflow satt opp: kjører `pytest -q` og `cargo test --tests -q` på push/PR.
-- Branch: `feature/m7.5-ci-basic`
-- Tester grønne: workflow verifisert OK på GitHub.
-- Observasjon: base klar for utvidelse med systemtest senere.
+M7.6B — No-watt policy & fallback (S1B)
+Backend: rute økter uten watt eller device_watts=False til hr_only pipeline.
+Frontend (senere i M8): vise varsel “Ingen effekt-data registrert – enkelte metrikker begrenset.”
+Logging: structured WARN med no_power_reason.
+Observability: metrics sessions_no_power_total, sessions_device_watts_false_total.
+Tester: pytest fixture for device_watts=False og Rust analyzer test (ingen panic, JSON mode="hr_only").
+Varsel vises i publish (dry-run).
+Branch: feature/no-watt-policy
 
-### M7.6 — Strava Fetch & Modusdeteksjon (S1)
-- Auto-modus basert på `trainer`, `sport_type` og `device_watts`.
-- CLI-flag `--mode roller|outdoor` som overstyrer auto.
-- JSON-output rutes til riktig pipeline (indoor/outdoor).
-- Tester: pytest + cargo test grønne (CLI-parsing, efficiency calc, JSON).
-- Observasjoner: enkelte Strava-økter uten watt (`device_watts=False`) → policy må avklares.
-- Branch: `feature/strava-fetch-mode`
-- Commits: a3f9c12, c7b1e88, f2d4a91
+S2 — Vær & profiler (🌤️)
+Værklient (vind/temp/trykk) med caching per (lat,lon,timestamp).
+Profilsettings (total vekt, sykkeltype, Crr-preset) + validering/defaults (estimat=true).
+CLI integrasjon: justert effektivitet basert på værkontekst.
+DoD: ≥95 % cache-hit ved rekjøring; sanity-test hoppes over når publiseringsflyt ikke berøres.
+Status: ✅ Ferdig (pytest + cargo grønne, stabile tall ±1–2 W).
 
-### M7.6B — No-watt policy & fallback (S1B) Ferdig
-- Backend: rute økter uten watt eller device_watts=False til hr_only pipeline.
-- Frontend (senere i M8): vise varsel “Ingen effekt-data registrert – enkelte metrikker begrenset.”
-- Logging: structured WARN med no_power_reason.
-- Observability: metrics sessions_no_power_total, sessions_device_watts_false_total.
-- Tester: pytest fixture for device_watts=False og Rust analyzer test (ingen panic, JSON mode="hr_only").
-- Varsel vises i publish (dry-run).
-- Backend: rute økter uten watt eller device_watts=False til hr_only-pipeline.
-- Frontend (i M8): varsel “Ingen effekt-data registrert – enkelte metrikker begrenset.”
-- Logging: structured WARN med no_power_reason.
-- Observability: metrics sessions_no_power_total, sessions_device_watts_false_total.
----
+S3 — Fysikkmotor (🚴)
+Kraftmodell: gravitasjon, rulling (Crr), aero (CdA), akselerasjon + drivverkstap.
+Høyde-smoothing i egen modul + outlier-kutt (stopp/sving).
+Sample-watt + 5 s glatting + NP/avg i CLI.
+DoD: Golden test i CI (±1–2 W; NP/avg ±1 W) oppnådd; pytest/cargo grønn; deterministisk output.
+Status: ✅ Ferdig
 
-## 🟡 PÅBEGYNT
-🔜 PLANLAGT (IKKE STARTET) FrontLog
-M7.6 — Watt-engine v1 (backend klar) (S2)
-- Implementere wattberegning v1 med værdata og sykkeltype som input.
-- Utvide Rust-funksjonene, teste med golden tests + live økter.
-- Perf-sjekk (idempotens, kaldstart < 3s).
-- DoD-punkt: oppdater CGS score til v1.1 når implementasjonen fungerer og er testet.
-- “Repo-rydding planlagt: .gitignore for secrets/state + eksempelfiler for tokens/state.”).
+S4 — Kalibrering (CdA/Crr-fit) (🎯)
+Kalibreringsprosedyre (5–8 min, 3–6 % bakke). Fit CdA/Crr fra data (uten powermeter).
+Lagre pr sykkel/profil; bruk globalt i beregninger.
+DoD: Reproducible fit på testdata; MAE ≤10 % mot powermeter på kalibreringssegment; flagg “Kalibrert: Ja/Nei”.
+Status: ✅ Ferdig
 
-S2 — Vær & profiler (🌤️) Værklient (vind/temp/trykk) m/ caching per (lat,lon,timestamp).
-Profilsettings (total vekt, sykkeltype, Crr-preset) + validering/defaults (estimat=true). 
-Metrics: weather_cache_hit_total, weather_cache_miss_total. DoD: ≥95 % cache-hit ved rekjøring
-av samme økt. 🆕 CI-strategi: Sanity-tester (test_strava_client.py) kjøres kun hvis publiseringsflyt
-berøres. Git hygiene: .gitignore skjuler secrets/state; sample-filer i repo uten sensitive data.
-S3 — Fysikkmotor (🚴) Kraftmodell: gravitasjon, rulling (Crr), aero (CdA), akselerasjon. Høyde-smoothing 
-(DEM/kalman/savgol), outlier-kutt (stopp/sving). Sample-vis watt + 3–5s glatting + NP/avg. DoD: golden 
-test på syntetisk segment (flat, bakke, varierende vind); cargo test viser stabile tall (±1–2W).
-🆕 Golden tests inkluderes i CI for stabilitet. Git hygiene: som over.
-S4 — Kalibrering (CdA/Crr-fit) (🎯) Kalibreringsprosedyre (5–8 min, 3–6 % bakke). Fit CdA/Crr fra data
-(uten powermeter). Lagre pr sykkel/profil; bruk globalt i beregninger. DoD: reproducible fit på testdata;
-MAE ≤10 % mot powermeter på kalibreringssegment; flagget “Kalibrert: Ja/Nei” i output. 🆕 Testavhengighet 
-følger datastrøm fra S2 → S3 → S4. Git hygiene: som over.
-S5 — Indoor-pipeline (🧪) Rulle/powermeter: bruk device_watts direkte. Indoor-estimat-modus når watt mangler
-(marker tydelig). Idempotens- og perf-tester. DoD: 3 like kjøringer ⇒ identisk output; kaldstart <3s. 
-Git hygiene: som over.
-S6 — CLI/Reports & observabilitet (📈) Rapportfelt: NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ±usikkerhet.
-Strukturerte logger (level, tidsbruk, cache hits). Metrics for no-watt (sessions_no_power_total).
-Docs: “How it works” + “Known limits”. DoD: python -m cli.analyze … genererer deterministisk rapport;
-loggnivå styrbart via flagg/env. Git hygiene: som over.
-S7 — QA & hardening (🛡️) Edge-cases: manglende vær, GPS-drift, null HR, kort økt. Golden på ekte ride
-uten powermeter + plausibilitet mot HR/trend. Oppdatér CGS v1.1 kobling. DoD: alle tester grønne
-(pytest + cargo); CGS konsumerer nye felter uten regress. 🆕 Refaktorér testsetup med helpers (conftest.py, test_utils.py)
-for mindre mocking-knot. Git hygiene: som over.
-S8 — Scaffold & dataadapter (🧩) React/Tailwind scaffold, routing, state. Adapter mot backend/CLI-output (mock først).
-DoD: viser én økt (mock) i UI; bytte mock→live via .env. Git hygiene: som over.
-S9 — Økt-kort & nøkkelmetrikker (📊) Øktvisning: NP, IF, VI, Pa:Hr, W/slag, CGS, PrecisionWatt. 
-Indoor/outdoor-chip + “Kalibrert: Ja/Nei”. Varsel-banner for no-watt-økter. DoD: enhetstester for formattere; 
-visuell smoke på mobile/desktop. Git hygiene: som over.
-S10 — Precision Watt UI (±-bånd) (🎛️) Graf/komponent som viser watt + usikkerhetsbånd. Tooltip: datakilde
-(powermeter/estimat), værbruk, profil. DoD: render uten jank med 1Hz data (2h økt); skjermbilder/gullstandard
-i tests. Git hygiene: som over.
-S11 — Trender & liste (🗂️) Liste over økter, enkel filter/sort. Trendgraf (NP/PrecisionWatt over tid). 
-DoD: 30+ økter fungerer uten merkbar lagg; tom-state og feil-state håndteres. Git hygiene: som over.
-S12 — Kalibreringsguide (🧭) Onboarding-kort for første outdoor-økt. “Kjør kalibreringsbakke” stegvis modal.
-Info for brukere uten wattmåler (forklare fallback). DoD: “Ferdig kalibrert” trigger backend-flag; guide kan hoppes over.
-Git hygiene: som over.
-S13 — QA, polish & CI (✅) Hurtig tilgjengelighet (kontraster, tastatur). Liten CI (lint, build, vitest hvis brukt).
-Docs: “Using Precision Watt”. DoD: Lighthouse pass (perf>80, a11y>90); build grønn i Actions. 🆕 CI inkluderer relevante
-tester per sprint; sanity-test kjøres kun ved publiseringsendringer. Git hygiene: som over.
+S5 — Indoor pipeline + GPS/Wind integrasjon (🧪)
 
+Indoor/outdoor-pipeline koblet til fysikkmotor m/ vindkorrigering.
+CLI-output: watts, wind_rel, v_rel, calibrated, status.
+Bonus: Eksponert backend-API for frontend — cli/session_api.py: analyze_session() (+ tests/test_api.py), deterministisk JSON for enkel integrasjon i M8.
+Golden test med syntetisk GPS+vindfelt etablert.
+Unicode-bug i CLI løst.
+Tester: ✅ cargo/pytest grønne, output stabil ±1–2W.
 
+Status: ✅ Ferdig
+🔧 Dynamisk DoD (må alltid være oppfylt)
+Robust CLI: Alle subcommands (session, efficiency) kjører uten runtime-feil på gyldige inputfiler.
+Profiler: profile.json lagres/lastes; felt calibrated, cda, crr, calibration_mae oppdateres ved kalibrering.
 
-DoD:
-- Lighthouse pass (perf>80, a11y>90).
-- Build grønn i Actions.
+Kalibrering:
+MAE ≤ 10 % på kalibreringssegment mot powermeter.
+Output markerer calibrated: Ja/Nei + reason (nulles ut ved suksess).
+Fysikk: Bruker physics-output som baseline (NP/avg, smoothing).
+Determinisme: Samme input gir samme output (±1–2 W).
+Tester: cargo test + pytest må være grønne i CI.
+Observabilitet: CLI og API viser nøkkelfelter (effektivitet, NP, IF, VI, Pa:Hr, W/beat, kalibrering).
+Integrasjon: Rust-kjerne eksponert til Python via PyO3 (analyze_session, rust_calibrate_session).
 
-### Notater
-- Sensitive nøkler, ekte tokens og personlige data holdes utenfor repoet.
-- Denne DoD-listen er bevisst sanert og høynivå for offentlig deling.
-- Strukturen “Ferdig / Påbegynt / Planlagt” gir både frontlog og backlog i ett.
+Nytt (A): Konsistensregler i output
+Hvis calibrated=True → reason=None.
+Når GPS/vind brukes → mode="outdoor".
+status avledes fra HR når mulig (ellers behold LIMITED).
 
+🔜 PLANLAGT (IKKE STARTET) – Frontlog
+S6 — CLI/Reports & observabilitet (📈)
+Rapportfelt: NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ±usikkerhet.
+Strukturerte logger (level, tidsbruk, cache hits).
 
+Metrics for no-watt (sessions_no_power_total).
+Generere rapporter (CSV/JSON) med trender.
+Historikk over kalibrering og WPB baseline.
+Docs: “How it works” + “Known limits”.
+DoD: deterministisk rapport; loggnivå styrbart via flagg/env.
 
+S7 — QA & hardening (🛡️)
+Edge-cases: manglende vær, GPS-drift, null HR, kort økt.
+Flere golden-tester med variasjon i vær/terreng.
+Golden på ekte ride uten powermeter + plausibilitet mot HR/trend.
+Oppdatér CGS v1.1-kobling.
+Nytt (B): Refaktorér testoppsett (conftest.py, test_utils.py) for mindre mocking-knot.
+DoD: alle tester grønne; CGS konsumerer nye felter uten regress.
+
+S8 — Scaffold & dataadapter (🧩)
+React/Tailwind scaffold, routing, state.
+Nytt (B): Bruk eksisterende Python-API analyze_session() som backend-adapter (forenkler integrasjon).
+DoD: viser én økt (mock) i UI; bytte mock→live via .env.
+
+S9 — Økt-kort & nøkkelmetrikker (📊)
+Øktvisning: NP, IF, VI, Pa:Hr, W/slag, CGS, PrecisionWatt.
+Indoor/outdoor-chip + “Kalibrert: Ja/Nei”.
+Varsel-banner for no-watt-økter.
+DoD: enhetstester for formattere; visuell smoke på mobile/desktop.
+
+S10 — Precision Watt UI (🎛️)
+Graf/komponent: watt + usikkerhetsbånd.
+Tooltip: datakilde (powermeter/estimat), værbruk, profil.
+DoD: render uten jank med 1 Hz data (2 h økt).
+
+S11 — Trender & liste (🗂️)
+Liste over økter, enkel filter/sort.
+Trendgraf (NP/PrecisionWatt over tid).
+DoD: 30+ økter fungerer uten lagg; tom-state og feil-state håndteres.
+
+S12 — Kalibreringsguide (🧭)
+Onboarding-kort for første outdoor-økt.
+Stegvis modal for kalibreringsbakke.
+Info for brukere uten wattmåler (forklare fallback).
+DoD: “Ferdig kalibrert” trigger backend-flagg; guide kan hoppes.
+
+S13 — QA, polish & CI (✅)
+Tilgjengelighet (kontraster, tastatur).
+Liten CI (lint, build, vitest hvis brukt).
+Docs: “Using Precision Watt”.
+DoD: Lighthouse pass (perf>80, a11y>90); build grønn i Actions.
+CI inkluderer relevante tester per sprint; sanity-test kun ved publisering.

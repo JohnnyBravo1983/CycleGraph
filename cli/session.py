@@ -1,17 +1,62 @@
 # cli/session.py
 from __future__ import annotations
 
+def _ensure_cli_fields(d: dict) -> dict:
+    """Garanter at watts/wind_rel finnes, map calibrated til Ja/Nei, og sett status."""
+    if not isinstance(d, dict):
+        return d
+    r = dict(d)
+
+    # watts / wind_rel (hent fra samples hvis mulig)
+    if "watts" not in r:
+        if isinstance(r.get("samples"), list):
+            r["watts"] = [s.get("watts") for s in r["samples"]]
+        else:
+            r["watts"] = []
+    if "wind_rel" not in r:
+        if isinstance(r.get("samples"), list):
+            r["wind_rel"] = [s.get("wind_rel") for s in r["samples"]]
+        else:
+            r["wind_rel"] = []
+
+    # v_rel (valgfritt)
+    if "v_rel" not in r and isinstance(r.get("samples"), list):
+        r["v_rel"] = [s.get("v_rel") for s in r["samples"]]
+
+    # calibrated: bool -> "Ja"/"Nei" (default "Nei" hvis mangler/ukjent)
+    cal_val = r.get("calibrated")
+    if isinstance(cal_val, bool):
+        r["calibrated"] = "Ja" if cal_val else "Nei"
+    elif isinstance(cal_val, str):
+        pass
+    else:
+        prof = r.get("profile")
+        if isinstance(prof, dict) and isinstance(prof.get("calibrated"), bool):
+            r["calibrated"] = "Ja" if prof["calibrated"] else "Nei"
+        else:
+            r["calibrated"] = "Nei"
+
+    # status fra puls (default "OK" hvis vi ikke har puls)
+    if "status" not in r:
+        hr = r.get("avg_hr", r.get("avg_pulse"))
+        if isinstance(hr, (int, float)):
+            r["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
+        else:
+            r["status"] = "OK"
+
+    return r
+
 import argparse
 import glob
 import sys
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Tuple
 
 # ── Konstanter ────────────────────────────────────────────────────────────────
-MIN_SAMPLES_FOR_CAL = 30          # min. antall punkter for å prøve kalibrering
+MIN_SAMPLES_FOR_CAL = 15          # min. antall punkter for å prøve kalibrering
 MIN_SPEED_SPREAD_MS = 0.8         # krever litt variasjon i fart
 MIN_ALT_SPAN_M      = 3.0         # eller litt høydeforskjell
 
@@ -28,6 +73,11 @@ try:
 except Exception:
     def maybe_apply_big_engine_badge(_report: Dict[str, Any]) -> None:
         return
+
+try:
+    from cyclegraph_core import compute_power_with_wind_json as rs_power_json
+except Exception:
+    rs_power_json = None
 
 # Strava-klient kan mangle → trygg fallback-stub
 try:
@@ -67,7 +117,6 @@ def infer_duration_sec(samples: List[Dict[str, Any]]) -> float:
         pass
 
     # 2) Prøv ISO8601 timestamps
-    from datetime import datetime
     def _parse_iso(x: str):
         x = str(x).strip().replace("Z", "+00:00")
         try:
@@ -107,6 +156,166 @@ def estimate_ftp_20min95(samples: List[Dict[str, Any]]) -> float:
             if avg > best_avg:
                 best_avg = avg
     return float(best_avg * 0.95)
+
+# ── NYE HELPERE (TRINN D) – plasseres her ─────────────────────────────────────
+def _parse_time_to_seconds(x) -> float | None:
+    """ISO8601 ('2023-09-01T12:00:00Z') eller tall → sekunder (float)."""
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x).strip()
+    try:
+        s2 = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s2)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        pass
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+def _normalize_sample_for_core(s: dict) -> dict:
+    """Map CSV-sample til kjernens Sample-format."""
+    t = _parse_time_to_seconds(s.get("t") or s.get("time") or s.get("timestamp"))
+
+    v = s.get("v_ms")
+    if v is None:
+        v = s.get("speed") or s.get("speed_ms") or s.get("velocity")
+    try:
+        v = float(v) if v is not None else 0.0
+    except Exception:
+        v = 0.0
+    if v > 50.0:  # km/t → m/s
+        v = v / 3.6
+
+    alt = s.get("altitude_m")
+    if alt is None:
+        alt = s.get("altitude") or s.get("elev") or s.get("elevation")
+    try:
+        alt = float(alt) if alt is not None else 0.0
+    except Exception:
+        alt = 0.0
+
+    lat = s.get("latitude")
+    lon = s.get("longitude")
+    try:
+        lat = float(lat) if lat is not None else None
+    except Exception:
+        lat = None
+    try:
+        lon = float(lon) if lon is not None else None
+    except Exception:
+        lon = None
+
+    dw = s.get("device_watts")
+    try:
+        dw = float(dw) if dw is not None else None
+    except Exception:
+        dw = None
+
+    return {
+        "t": float(t) if t is not None else 0.0,
+        "v_ms": max(0.0, v),
+        "altitude_m": alt,
+        "heading_deg": float(s.get("heading_deg") or 0.0),
+        "moving": bool(v > 0.1),
+        "device_watts": dw,
+        "latitude": lat,
+        "longitude": lon,
+    }
+
+def _read_csv_for_core_samples(csv_path: str, debug: bool = False) -> list[dict]:
+    """Les CSV direkte og bygg core-samples med v_ms/altitude_m/lat/lon/device_watts."""
+    import csv
+
+    def _to_float(v):
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except Exception:
+            s = str(v).strip().replace(",", ".")
+            try:
+                return float(s)
+            except Exception:
+                return None
+
+    def _t_to_sec(x):
+        if x is None:
+            return None
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip()
+        try:
+            s2 = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s2)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            pass
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    with open(csv_path, "r", encoding="utf-8") as f:
+        head = f.read(2048)
+        f.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(head)
+            rdr = csv.reader(f, dialect)
+        except Exception:
+            rdr = csv.reader(f)
+        rows = list(rdr)
+
+    if not rows:
+        return []
+
+    header = [str(h).strip().lower() for h in rows[0]]
+    idx = {h: i for i, h in enumerate(header)}
+
+    def pick(row, *keys):
+        for k in keys:
+            if k in idx and idx[k] < len(row):
+                return row[idx[k]]
+        return None
+
+    samples: list[dict] = []
+    for r in rows[1:]:
+        t_raw  = pick(r, "timestamp", "t", "time", "time_s", "sec", "seconds")
+        lat    = _to_float(pick(r, "latitude", "lat"))
+        lon    = _to_float(pick(r, "longitude", "lon", "lng"))
+        speed  = _to_float(pick(r, "speed", "v_ms", "speed_ms", "velocity"))
+        alt    = _to_float(pick(r, "altitude", "altitude_m", "elev", "elevation"))
+        dw     = _to_float(pick(r, "device_watts", "watts", "power", "pwr"))
+
+        if speed is not None and speed > 50.0:  # km/t → m/s
+            speed = speed / 3.6
+
+        t_sec = _t_to_sec(t_raw)
+        s = {
+            "t": float(t_sec) if t_sec is not None else 0.0,
+            "v_ms": float(speed) if speed is not None else 0.0,
+            "altitude_m": float(alt) if alt is not None else 0.0,
+            "heading_deg": 0.0,
+            "moving": bool((speed or 0.0) > 0.1),
+            "device_watts": float(dw) if dw is not None else None,
+            "latitude": float(lat) if lat is not None else None,
+            "longitude": float(lon) if lon is not None else None,
+        }
+        samples.append(s)
+
+    if debug:
+        print(f"DEBUG CSV-FALLBACK: built {len(samples)} core samples", file=sys.stderr)
+        if samples:
+            print(f"DEBUG CSV-FALLBACK: first={samples[0]}", file=sys.stderr)
+    return samples
+# ── SLUTT: nye helpere ────────────────────────────────────────────────────────
 
 DATE_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})")
 
@@ -228,7 +437,7 @@ def _analyze_session_bridge(samples, meta, cfg):
         )
 
     # Aksepter synonymer (lowercase + strip)
-    POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr")
+    POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr", "device_watts")
     HR_KEYS    = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
 
     def norm_keys(d: dict) -> dict:
@@ -370,33 +579,50 @@ def _fallback_extract_for_calibration(csv_path: str) -> Tuple[List[float], List[
         if i_w is not None and i_w < len(r): w, _ = _parse_float_loose(r[i_w])
         if i_v is not None and i_v < len(r): v, _ = _parse_float_loose(r[i_v])
         if i_a is not None and i_a < len(r): a, _ = _parse_float_loose(r[i_a])
-        if i_g is not None and i_g < len(r): g, g_pct = _parse_float_loose(r[i_g])
-        else: g_pct = False
+        if i_g is not None and i_g < len(r): g, g_is_pct = _parse_float_loose(r[i_g])
+        else: g_is_pct = False
         if i_t is not None and i_t < len(r): t, _ = _parse_float_loose(r[i_t])
 
-        if v is not None and v > 50:  # km/t → m/s
+        if v is not None and v > 50:  # trolig km/t → m/s
             v = v / 3.6
 
-        # synth altitude via gradient hvis nødvendig
-        if a is None and g is not None and v is not None:
-            if g_pct or abs(g) <= 30.0:
-                slope = g / 100.0
+        # 1) Altitude: integrér hvis vi har gradient, ellers 'carry forward' siste høyde
+        if a is None:
+            if g is not None and v is not None:
+                # Integrer gradient → ny høyde
+                if g_is_pct or abs(g) <= 30.0:
+                    slope = g / 100.0
+                else:
+                    slope = g
+                dt = None
+                if isinstance(t, (int, float)) and prev_t is not None:
+                    dt = max(0.0, float(t) - float(prev_t))
+                if dt is None or dt == 0.0:
+                    dt = 1.0
+                cur_alt += slope * float(v) * dt
+                a = cur_alt
             else:
-                slope = g
-            dt = None
-            if isinstance(t, (int, float)) and prev_t is not None:
-                dt = max(0.0, float(t) - float(prev_t))
-            if dt is None or dt == 0.0:
-                dt = 1.0
-            cur_alt += slope * float(v) * dt
-            a = cur_alt
-        elif a is not None:
+                # Ingen altitude og ingen gradient → bruk forrige høyde (flat antakelse)
+                a = cur_alt
+        else:
             cur_alt = float(a)
 
         prev_t = t if isinstance(t, (int, float)) else prev_t
 
-        if w is not None and v is not None and a is not None:
-            watts_arr.append(float(w)); speed_arr.append(float(v)); alti_arr.append(float(a))
+        # 2) Watts: hvis mangler, fyll inn et forsiktig estimat basert på fart (for å unngå dropp)
+        if w is None and v is not None:
+            rho = 1.225
+            cda = 0.30
+            crr = 0.005
+            mass = 78.0
+            w_est = 0.5 * rho * cda * float(v) ** 3 + mass * 9.80665 * crr * float(v)
+            w = w_est
+
+        # 3) Append når vi har de tre (etter utfylling)
+        if (w is not None) and (v is not None) and (a is not None):
+            watts_arr.append(float(w))
+            speed_arr.append(float(v))
+            alti_arr.append(float(a))
 
     return watts_arr, speed_arr, alti_arr
 
@@ -501,7 +727,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             print(f"🎛️ Overstyrt modus: {args.mode}")
             meta["mode"] = args.mode
         else:
-            print("🔍 Ingen overstyring – modus settes automatisk senere hvis relevant.")
+            print("Ingen overstyring – modus settes automatisk senere hvis relevant.")
 
         # FTP
         if getattr(args, "set_ftp", None) is not None:
@@ -525,6 +751,67 @@ def cmd_session(args: argparse.Namespace) -> int:
         except json.JSONDecodeError as e:
             print(f"ADVARSEL: Klarte ikke å parse JSON for {path}: {e}", file=sys.stderr)
             continue
+
+        # --- Vind/kraft fra kjernen (PowerOutputs) ---
+        try:
+            from cyclegraph_core import compute_power_with_wind_json as rs_power_json
+        except Exception:
+            rs_power_json = None
+
+        if rs_power_json is not None:
+            # Normaliser fra read_session_csv
+            core_samples = [_normalize_sample_for_core(s) for s in samples]
+
+            # Hvis normaliseringen ga "tomme" data → bruk CSV-fallback (les direkte fra inputfilen)
+            def _looks_empty(core: list[dict]) -> bool:
+                if not core:
+                    return True
+                pos_ok = any((c.get("latitude") is not None and c.get("longitude") is not None) for c in core)
+                speed_ok = sum(1 for c in core if (c.get("v_ms") or 0.0) > 0.2) >= max(1, len(core)//4)
+                return (not pos_ok) or (not speed_ok)
+
+            if _looks_empty(core_samples):
+                if getattr(args, "debug", False):
+                    print("DEBUG CORE: normalized samples look empty -> using CSV fallback", file=sys.stderr)
+                core_samples = _read_csv_for_core_samples(path, debug=getattr(args, "debug", False))
+
+            if getattr(args, "debug", False):
+                print(f"DEBUG CORE: n_samples={len(core_samples)}", file=sys.stderr)
+                if core_samples:
+                    print(f"DEBUG CORE: first_sample={core_samples[0]}", file=sys.stderr)
+
+            profile_for_core = {
+                "total_weight": report.get("weight") or cfg.get("total_weight") or cfg.get("weight") or 78.0,
+                "bike_type": report.get("bike_type") or cfg.get("bike_type") or "road",
+                "crr": report.get("crr") or cfg.get("crr") or 0.005,
+                "cda": report.get("cda") or cfg.get("cda") or None,
+                "calibrated": bool(report.get("calibrated")) if isinstance(report.get("calibrated"), bool) else False,
+                "calibration_mae": report.get("mae"),
+                "estimat": True,
+            }
+            weather_for_core = _load_weather_for_cal(args)
+
+            if getattr(args, "debug", False):
+                print(f"DEBUG CORE: profile_for_core={profile_for_core}", file=sys.stderr)
+                print(f"DEBUG CORE: weather_for_core={weather_for_core}", file=sys.stderr)
+
+            power_json = rs_power_json(
+                json.dumps(core_samples, ensure_ascii=False),
+                json.dumps(profile_for_core, ensure_ascii=False),
+                json.dumps(weather_for_core, ensure_ascii=False),
+            )
+            power_obj = json.loads(power_json) if isinstance(power_json, str) else power_json
+
+            if getattr(args, "debug", False):
+                print(f"DEBUG CORE: keys={list(power_obj.keys())}", file=sys.stderr)
+                print(f"DEBUG CORE: watts_head={power_obj.get('watts', [])[:3]}", file=sys.stderr)
+                print(f"DEBUG CORE: wind_head={power_obj.get('wind_rel', [])[:3]}", file=sys.stderr)
+                print(f"DEBUG CORE: vrel_head={power_obj.get('v_rel', [])[:3]}", file=sys.stderr)
+
+            for k in ("watts", "wind_rel", "v_rel"):
+                v = power_obj.get(k)
+                if v is not None:
+                    report[k] = v
 
         # ── KALIBRERING (kun hvis --calibrate) ────────────────────────────────
         if getattr(args, "calibrate", False):
@@ -588,11 +875,13 @@ def cmd_session(args: argparse.Namespace) -> int:
                 if w is not None and v is not None and a is not None:
                     watts_arr.append(float(w)); speed_arr.append(float(v)); alti_arr.append(float(a))
 
-            # Fallback: les CSV direkte hvis vi ikke fikk arrays fra samples
-            if not watts_arr or not speed_arr or not alti_arr:
+            # Fallback: bruk CSV direkte hvis arrays er utilstrekkelige (< MIN_SAMPLES_FOR_CAL)
+            if (len(watts_arr) < MIN_SAMPLES_FOR_CAL) or (len(speed_arr) < MIN_SAMPLES_FOR_CAL) or (len(alti_arr) < MIN_SAMPLES_FOR_CAL):
                 fw, fv, fa = _fallback_extract_for_calibration(path)
-                if len(fw) and len(fv) and len(fa):
-                    watts_arr, speed_arr, alti_arr = fw, fv, fa
+                if len(fw) >= MIN_SAMPLES_FOR_CAL and len(fv) >= MIN_SAMPLES_FOR_CAL and len(fa) >= MIN_SAMPLES_FOR_CAL:
+                   watts_arr, speed_arr, alti_arr = fw, fv, fa
+                   if getattr(args, "debug", False):
+                      print(f"DEBUG CAL: using CSV fallback arrays n={len(watts_arr)}", file=sys.stderr)
 
             if not watts_arr or not speed_arr or not alti_arr or not (len(watts_arr) == len(speed_arr) == len(alti_arr)):
                 print("⚠️ Kalibrering hoppes over: mangler speed/altitude/watts med like lengder.", file=sys.stderr)
@@ -639,12 +928,30 @@ def cmd_session(args: argparse.Namespace) -> int:
                     try:
                         cal = rs_cal(watts_arr, speed_arr, alti_arr, profile_for_cal, weather_for_cal)
 
-                        # slå cal-resultater inn i report
+                                     # slå cal-resultater inn i report
                         for k in ("calibrated", "cda", "crr", "mae"):
                             if cal.get(k) is not None:
                                 report[k] = cal[k]
                         # overskriv alltid reason, selv om None (rydder tidligere placeholder)
                         report["reason"] = cal.get("reason")
+
+                        # --- Små oppryddinger etter kalibrering ---
+                        # 1) Hvis kalibrering lykkes, null ut reason
+                        if isinstance(report.get("calibrated"), bool) and report["calibrated"]:
+                            report["reason"] = None
+                            # Hvis vi tidligere havnet i hr_only-modus, sett modus til outdoor
+                            if report.get("mode") == "hr_only":
+                                report["mode"] = "outdoor"
+
+                        # 2) Sett modus til 'outdoor' når vi faktisk bruker GPS/vind pipeline
+                        if not report.get("mode"):
+                            report["mode"] = "outdoor"
+
+                        # 3) Sett status fra puls hvis mulig; ellers behold 'LIMITED'
+                        if report.get("status") in (None, "LIMITED"):
+                            hr = report.get("avg_hr") or report.get("avg_pulse")
+                            if isinstance(hr, (int, float)):
+                                report["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
 
                         # (Valgfritt) lagre profil.json hvis medfulgt
                         if cal.get("profile"):
@@ -669,7 +976,7 @@ def cmd_session(args: argparse.Namespace) -> int:
         # Ikke-batch
         if not getattr(args, "batch", False):
             if getattr(args, "dry_run", False):
-                print(json.dumps(report, ensure_ascii=False, indent=2))
+                print(json.dumps(_ensure_cli_fields(report), ensure_ascii=False, indent=2))
                 try:
                     pieces = build_publish_texts(report, lang=lang)
                     print(f"[DRY-RUN] COMMENT: {pieces.comment}")
@@ -703,7 +1010,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             maybe_apply_big_engine_badge(r)
 
             if getattr(args, "dry_run", False):
-                print(json.dumps(r, ensure_ascii=False, indent=2))
+                print(json.dumps(_ensure_cli_fields(r), ensure_ascii=False, indent=2))
                 try:
                     pieces = build_publish_texts(r, lang=lang)
                     print(f"[DRY-RUN] COMMENT: {pieces.comment}")
