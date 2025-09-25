@@ -116,16 +116,23 @@ pub fn avg_power(p: &[f32]) -> f32 {
 /// Rullende 30 sekunders snitt (avrundet ned til nærmeste sample via `hz`) → 4. potens →
 /// gjennomsnitt → 4. rot. Hvis mindre enn 1 sample i vindu, brukes tilgjengelig prefiks.
 /// `hz` er samples per sekund (f.eks. 1.0 for 1 Hz).
+/// 🔢 Normalized Power (NP) – **f32-variant**
+/// 30 s glidende snitt → ^4 → mean → ^0.25.
+/// For korte serier (< 30 s @ hz) returneres gjennomsnittseffekt (golden-kompatibel).
 pub fn np(p: &[f32], hz: f32) -> f32 {
     if p.is_empty() {
         return 0.0;
     }
-    // Viktig: ikke tillat hz < 1.0 — golden-testene forventer et vindu på minst 30 samples
-    let hz_eff = if hz.is_finite() && hz >= 1.0 { hz } else { 1.0 };
-    let win = (30.0 * hz_eff).floor() as usize;
-    let window = win.max(1).min(p.len());
+    let hz = if hz.is_finite() && hz > 0.0 { hz } else { 1.0 };
+    let win = (30.0 * hz).floor() as usize;
+    let window = win.max(1);
 
-    // Rullende gjennomsnitt
+    // NEW: Korte serier → NP = avg power (golden forventning)
+    if p.len() < window {
+        return avg_power(p);
+    }
+
+    // Rullende gjennomsnitt med fast vindu = 30 s @ hz
     let mut rolling: Vec<f64> = Vec::with_capacity(p.len());
     let mut sum: f64 = 0.0;
     for i in 0..p.len() {
@@ -134,26 +141,30 @@ pub fn np(p: &[f32], hz: f32) -> f32 {
             sum -= p[i - window] as f64;
         }
         let avg = if i + 1 >= window {
-            sum / window as f64
+            sum / window as f64        // full 30 s
         } else {
-            sum / (i + 1) as f64
+            sum / (i + 1) as f64       // prefiks (har ikke nok samples ennå)
         };
         rolling.push(avg);
     }
 
-    // ^4 → mean → ^0.25
     let m4 = rolling.iter().map(|x| x.powi(4)).sum::<f64>() / rolling.len() as f64;
     (m4.powf(0.25)) as f32
 }
 
-/// 🔢 Normalized Power (NP) – **f64-variant** brukt av tester:
-/// Rullende 30s snitt → 4. potens → gjennomsnitt → ^0.25.
-/// Hvis input er kortere enn 30 samples brukes tilgjengelig lengde.
+/// 🔢 Normalized Power (NP) – **f64-variant** brukt av tester.
+/// For korte serier (< 30 samples @ 1 Hz) returneres gjennomsnittseffekt (golden-kompatibel).
 pub fn compute_np(power: &[f64]) -> f64 {
     if power.is_empty() {
         return 0.0;
     }
-    let window = 30usize.min(power.len());
+    let window = 30usize;
+
+    // NEW: Korte serier → NP = avg power (golden forventning)
+    if power.len() < window {
+        return power.iter().copied().sum::<f64>() / power.len() as f64;
+    }
+
     let mut rolling: Vec<f64> = Vec::with_capacity(power.len());
     let mut sum = 0.0;
     for i in 0..power.len() {

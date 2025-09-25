@@ -26,7 +26,8 @@ use serde_json::json;
 /// {
 ///   "watts":    [f64],
 ///   "wind_rel": [f64],
-///   "v_rel":    [f64]
+///   "v_rel":    [f64],
+///   "calibrated": bool
 /// }
 pub fn compute_power_with_wind_json(
     samples: &[Sample],
@@ -244,16 +245,16 @@ pub fn rust_calibrate_session(
 
     let mut samples = Vec::with_capacity(n);
     for i in 0..n {
-    samples.push(crate::models::Sample {
-        t: i as f64,
-        v_ms: speed_ms[i],
-        altitude_m: altitude_m[i],
-        heading_deg: 0.0,
-        moving: true,
-        device_watts: Some(watts[i]),
-        ..Default::default() // fyller latitude/longitude = None osv.
-    });
-}
+        samples.push(crate::models::Sample {
+            t: i as f64,
+            v_ms: speed_ms[i],
+            altitude_m: altitude_m[i],
+            heading_deg: 0.0,
+            moving: true,
+            device_watts: Some(watts[i]),
+            ..Default::default() // fyller latitude/longitude = None osv.
+        });
+    }
 
     // 3) Kjør fit
     let mut result = crate::calibration::fit_cda_crr(&samples, &watts[..n], &profile, &weather);
@@ -417,15 +418,7 @@ mod m7_tests {
         assert!(wpb > 1.0 && wpb < 2.0, "w_per_beat={}", wpb);
     }
 
-    // ---------- IO structs for golden ----------
-    #[derive(Deserialize, Serialize)]
-    struct Row {
-        #[serde(rename = "time")]
-        _time: f32,
-        hr: Option<f32>,
-        watts: Option<f32>,
-    }
-
+    // ---------- IO structs for golden (kept for completeness) ----------
     #[derive(Deserialize, Serialize)]
     struct ExpField { value: f32, tol: f32 }
 
@@ -443,15 +436,149 @@ mod m7_tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p)
     }
 
-    fn read_streams(csv_path: &str) -> (Vec<f32>, Vec<f32>) {
-        let mut rdr = csv::Reader::from_path(manifest_path(csv_path)).expect("open csv");
-        let mut hr = Vec::<f32>::new();
-        let mut p = Vec::<f32>::new();
-        for rec in rdr.deserialize::<Row>() {
-            let r = rec.expect("row");
-            hr.push(r.hr.unwrap_or(0.0));
-            p.push(r.watts.unwrap_or(0.0));
+    // ---------- Golden CSV helpers (robuste) ----------
+
+    // Finn kolonneindeks case-insensitive; først exact, så substring
+    fn find_col(headers: &csv::StringRecord, candidates: &[&str]) -> Option<usize> {
+        let lower: Vec<String> = headers.iter().map(|h| h.trim().to_ascii_lowercase()).collect();
+
+        // exact match først
+        for key in candidates {
+            let k = key.to_ascii_lowercase();
+            if let Some((idx, _)) = lower.iter().enumerate().find(|(_, h)| **h == k) {
+                return Some(idx);
+            }
         }
+        // substring match deretter (for f.eks. "Power (W)")
+        for key in candidates {
+            let k = key.to_ascii_lowercase();
+            if let Some((idx, _)) = lower.iter().enumerate().find(|(_, h)| h.contains(&k)) {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
+    // Truthy-strenger for maskefelt
+    fn is_truthy(s: &str) -> bool {
+        matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "ok")
+    }
+
+    // Robust delimiter-sjekk (komma vs semikolon)
+    fn sniff_delimiter(s: &str) -> u8 {
+        let commas = s.matches(',').count();
+        let semis  = s.matches(';').count();
+        if semis > commas { b';' } else { b',' }
+    }
+
+    // Robust tall-parser (1,23 / 1.23 / "200 W")
+    fn parse_num(s: &str) -> Option<f32> {
+        let mut t = s.trim();
+        if t.is_empty() { return None; }
+        t = t.trim_matches(|c| c == '"' || c == '\'');
+        let t = t.replace(',', ".");
+        let mut buf = String::new();
+        let mut seen_digit = false;
+        for ch in t.chars() {
+            if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E' {
+                buf.push(ch);
+                if ch.is_ascii_digit() { seen_digit = true; }
+            } else if seen_digit {
+                break;
+            } else {
+                continue;
+            }
+        }
+        if buf.is_empty() { return None; }
+        buf.parse::<f32>().ok()
+    }
+
+    fn read_streams(csv_path: &str) -> (Vec<f32>, Vec<f32>) {
+        let full = manifest_path(csv_path);
+        let content = std::fs::read_to_string(&full).expect("open csv text");
+        let delim = sniff_delimiter(&content);
+
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(delim)
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(content.as_bytes());
+
+        let headers = rdr.headers().expect("headers").clone();
+
+        // 1) HR-kolonne
+        let i_hr = find_col(&headers, &["hr", "heartrate", "heart_rate", "bpm", "pulse"])
+            .expect("no HR column in golden csv");
+
+        // 2) Power-kolonne – **foretrekk device_watts først**
+        let i_pw = find_col(&headers, &["device_watts", "watts", "power", "power_w", "pwr"])
+            .expect("no power column in golden csv");
+
+        // 3) Valgfri maskekolonne: behold kun truthy rader
+        let i_mask = find_col(&headers, &["moving", "in_segment", "valid", "ok"]);
+
+        let mut hr = Vec::<f32>::new();
+        let mut p  = Vec::<f32>::new();
+
+        let mut n_rows = 0usize;
+        let mut n_mask_dropped = 0usize;
+        let mut n_missing_dropped = 0usize;
+        let mut n_zero_w_dropped = 0usize;
+
+        for rec in rdr.records() {
+            let r = rec.expect("row");
+            n_rows += 1;
+
+            // maskefilter (om finnes)
+            if let Some(mi) = i_mask {
+                if let Some(mv) = r.get(mi) {
+                    if !is_truthy(mv) {
+                        n_mask_dropped += 1;
+                        continue;
+                    }
+                }
+            }
+
+            let hr_opt = r.get(i_hr).and_then(parse_num);
+            let pw_opt = r.get(i_pw).and_then(parse_num);
+
+            // dropp rader uten HR eller uten watt
+            let (Some(h), Some(w)) = (hr_opt, pw_opt) else {
+                n_missing_dropped += 1;
+                continue;
+            };
+
+            // dropp watt==0.0 (pauser/null-samples)
+            if w <= 0.0 {
+                n_zero_w_dropped += 1;
+                continue;
+            }
+
+            hr.push(h);
+            p.push(w);
+        }
+
+        // Debug kun hvis eksplisitt slått på
+        if std::env::var("CG_GOLDEN_DEBUG").ok().as_deref() == Some("1") {
+            eprintln!(
+                "[GOLDEN DEBUG] {}: rows={} kept={} drop_mask={} drop_missing={} drop_zeroW={} | hr_col='{}' pw_col='{}'{}",
+                csv_path,
+                n_rows,
+                p.len(),
+                n_mask_dropped,
+                n_missing_dropped,
+                n_zero_w_dropped,
+                headers.get(i_hr).unwrap_or(""),
+                headers.get(i_pw).unwrap_or(""),
+                i_mask.map(|ix| format!(" mask_col='{}'", headers.get(ix).unwrap_or(""))).unwrap_or_default()
+            );
+            if !p.is_empty() {
+                let avg = p.iter().copied().sum::<f32>() / p.len() as f32;
+                let (mn, mx) = p.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a,b), &x| (a.min(x), b.max(x)));
+                eprintln!("[GOLDEN DEBUG] {}: power_avg={:.2} min={:.2} max={:.2}", csv_path, avg, mn, mx);
+            }
+        }
+
         (p, hr)
     }
 
