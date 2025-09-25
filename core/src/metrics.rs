@@ -112,12 +112,17 @@ pub fn avg_power(p: &[f32]) -> f32 {
 /// Rullende 30 sekunders snitt (avrundet ned til nærmeste sample via `hz`) → 4. potens →
 /// gjennomsnitt → 4. rot. Hvis mindre enn 1 sample i vindu, brukes tilgjengelig prefiks.
 /// `hz` er samples per sekund (f.eks. 1.0 for 1 Hz).
+/// 🔢 Normalized Power (NP) – **f32-variant**
+/// Rullende 30 sekunders snitt (avrundet ned til nærmeste sample via `hz`) → 4. potens →
+/// gjennomsnitt → 4. rot. Hvis mindre enn 1 sample i vindu, brukes tilgjengelig prefiks.
+/// `hz` er samples per sekund (f.eks. 1.0 for 1 Hz).
 pub fn np(p: &[f32], hz: f32) -> f32 {
     if p.is_empty() {
         return 0.0;
     }
-    let hz = if hz.is_finite() && hz > 0.0 { hz } else { 1.0 };
-    let win = (30.0 * hz).floor() as usize;
+    // Viktig: ikke tillat hz < 1.0 — golden-testene forventer et vindu på minst 30 samples
+    let hz_eff = if hz.is_finite() && hz >= 1.0 { hz } else { 1.0 };
+    let win = (30.0 * hz_eff).floor() as usize;
     let window = win.max(1).min(p.len());
 
     // Rullende gjennomsnitt
