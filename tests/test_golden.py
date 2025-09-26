@@ -97,7 +97,15 @@ def test_golden_segment_output():
 
         assert vr > (vm - wr) - EPS, f"v_rel[{i}]={vr} <= v_mid[{i}] - wind_rel[{i}] ({vm} - {wr})"
 
-    assert obj["calibrated"] in ("Ja", "Nei")
+    # Accept both new (bool) and legacy ("Ja"/"Nei") formats for 'calibrated'
+    cal = obj.get("calibrated", None)
+    if isinstance(cal, bool):
+        pass  # OK: ny kontrakt (bool)
+    elif cal in ("Ja", "Nei"):
+        pass  # OK: legacy streng
+    else:
+        assert False, f"Ugyldig 'calibrated' type/verdi: {cal!r}"
+
     assert obj["status"] in ("OK", "Lav", "Høy puls", "LIMITED")
 
     # Helpful when running with --capture=no

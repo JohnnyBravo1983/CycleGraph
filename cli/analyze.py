@@ -47,6 +47,51 @@ try:
 except Exception:
     read_session_csv = None  # pylint: disable=invalid-name
 
+# Helper for S7: normaliser rapport (schema_version + avg_hr) for CLI-path
+# (NØYAKTIG etter ønsket blokk – robust import med trygg fallback.)
+try:
+    from .session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
+except Exception:
+    try:
+        from cli.session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
+    except Exception:
+        def _ensure_schema_and_avg_hr(report: dict) -> dict:
+            """Fallback-helper hvis session_api ikke kan importeres."""
+            r = dict(report)
+            r.setdefault("schema_version", "0.7.0")
+            if "avg_hr" not in r:
+                # 1) prøv avg_pulse (legacy)
+                ap = r.get("avg_pulse")
+                if isinstance(ap, (int, float)):
+                    r["avg_hr"] = float(ap)
+                else:
+                    # 2) metrics.avg_hr
+                    metrics = r.get("metrics") or {}
+                    m_avg = metrics.get("avg_hr")
+                    if isinstance(m_avg, (int, float)):
+                        r["avg_hr"] = float(m_avg)
+                    else:
+                        # 3) serier (hr/hr_series/metrics.hr_series)
+                        hr_series = r.get("hr_series") or r.get("hr") or metrics.get("hr_series")
+                        if hr_series:
+                            vals = [float(x) for x in hr_series if x is not None]
+                            r["avg_hr"] = (sum(vals) / len(vals)) if vals else 0.0
+                        else:
+                            # 4) siste utvei
+                            r["avg_hr"] = 0.0
+            return r
+
+# ─────────────────────────────────────────────────────────────
+# NYTT (S7): Felles emitter for CLI-stdout JSON
+# Bruk denne i stedet for direkte print(json.dumps(report)).
+# ─────────────────────────────────────────────────────────────
+def emit_cli_json(report: Dict[str, Any]) -> None:
+    """
+    S7: Normaliser rapport for CLI-stdout (schema_version + avg_hr),
+    og print som JSON til STDOUT.
+    """
+    report = _ensure_schema_and_avg_hr(report)
+    print(json.dumps(report, ensure_ascii=False))
 
 # ─────────────────────────────────────────────────────────────
 # TRINN 3: Strukturerte logger (enkelt JSON-logger på stderr)
@@ -169,6 +214,9 @@ def session_id_from_path(path: str) -> str:
 def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str):
     os.makedirs(outdir, exist_ok=True)
 
+    # --- S7: Normaliser rapporten (schema_version + avg_hr) før videre beriking ---
+    report = _ensure_schema_and_avg_hr(report)
+
     # ----------------- S5: avledede felt før serialisering -----------------
     # 1) Fallback: hent wind_rel fra et enkelt sample om tilgjengelig
     sample = report.get("sample")
@@ -176,7 +224,7 @@ def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str):
         report = dict(report)  # kopier for å ikke mutere referanse
         report["wind_rel"] = sample.get("wind_rel", None)
 
-    # 2) Mapp calibrated (bool -> "Ja"/"Nei")
+    # 2) Mapp calibrated (bool -> "Ja"/"Nei") for legacy-kompatibilitet i filrapport
     calibrated_val = report.get("calibrated")
     if isinstance(calibrated_val, bool):
         if report.get("calibrated") != ("Ja" if calibrated_val else "Nei"):
@@ -235,10 +283,13 @@ def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str):
         "scores.duration": report.get("scores", {}).get("duration"),
         "scores.quality": report.get("scores", {}).get("quality"),
         "scores.cgs": report.get("scores", {}).get("cgs"),
+
+        # --- S7: schema version for fil-JSON også ---
+        "schema_version": report.get("schema_version"),
     }
 
     # Fjern None-verdier, men behold tomme lister (de er gyldige)
-    enriched = {k: v for k, v in enriched.items() if v is not None}
+    enriched = {k: v for k, v in enriched.items() if v is not None or isinstance(v, list)}
 
     # Skriv JSON
     if fmt in ("json", "both"):

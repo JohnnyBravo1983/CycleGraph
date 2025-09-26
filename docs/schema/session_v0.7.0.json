@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "docs/schema/session_v0.7.0.json",
+  "title": "CycleGraph Session Report v0.7.0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "session_id",
+    "duration_s",
+    "samples",
+    "avg_power",
+    "np",
+    "if_",
+    "vi",
+    "pa_hr",
+    "w_per_beat",
+    "precision_watt",
+    "calibrated",
+    "status",
+    "wind_rel",
+    "v_rel",
+    "schema_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Semver for output-kontrakten",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "examples": ["0.7.0"]
+    },
+    "session_id": { "type": "string", "description": "Stabil unik ID for økten" },
+    "duration_s": { "type": "number", "minimum": 0, "description": "Varighet i sekunder" },
+    "samples": { "type": "integer", "minimum": 1, "description": "Antall samples i datasettet" },
+    "avg_power": { "type": "number", "minimum": 0, "description": "Gjennomsnittseffekt (W)" },
+    "np": { "type": "number", "minimum": 0, "description": "Normalized Power" },
+    "if_": { "type": "number", "minimum": 0, "description": "Intensity Factor" },
+    "vi": { "type": "number", "minimum": 0, "description": "Variability Index" },
+    "pa_hr": { "type": "number", "minimum": 0, "description": "Power:HR ratio" },
+    "w_per_beat": { "type": "number", "minimum": 0, "description": "Watt per hjerteslag" },
+    "precision_watt": { "type": "number", "minimum": 0, "description": "Usikkerhet / presisjon (W)" },
+    "calibrated": { "type": "boolean", "description": "Om økten er kalibrert" },
+    "status": { "type": "string", "description": "Status-etikett (OK, LIMITED, HR_ONLY, etc.)" },
+    "wind_rel": { "type": "number", "description": "Relativ vind (m/s), positiv motvind" },
+    "v_rel": { "type": "number", "description": "Relativ fart ift. luft (m/s)" },
+
+    "weather": {
+      "type": "object",
+      "description": "Opsjonell værblokk hvis tilgjengelig",
+      "additionalProperties": true
+    },
+    "gps": {
+      "type": "object",
+      "description": "Opsjonell GPS-blokk hvis tilgjengelig",
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": "string",
+      "description": "Opsjonelle kommentarer/diagnostikk"
+    }
+  }
+}

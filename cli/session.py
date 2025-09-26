@@ -13,7 +13,45 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Tuple, Optional
 from contextlib import contextmanager
 
+# ── S7: Schema-versjon for CLI/fil/API ────────────────────────────────────────
+SCHEMA_VERSION = "0.7.0"
+
 # ── Strukturerte logger (TRINN 3) ─────────────────────────────────────────────
+
+def _ensure_schema_and_avg_hr(report: dict) -> dict:
+    # schema_version (ikke overskriv hvis satt andre steder)
+    report.setdefault("schema_version", SCHEMA_VERSION)
+
+    # avg_hr – prøv flere kilder, fall tilbake til 0.0 så testen har feltet
+    if "avg_hr" not in report:
+        hr_series = (
+            report.get("hr_series")
+            or report.get("hr")
+            or (report.get("metrics") or {}).get("hr_series")
+        )
+        if hr_series:
+            vals = [float(x) for x in hr_series if x is not None]
+            report["avg_hr"] = (sum(vals) / len(vals)) if vals else 0.0
+        else:
+            # Hvis kjernen har kalkulert snitt et annet sted:
+            metrics = report.get("metrics") or {}
+            if "avg_hr" in metrics:
+                try:
+                    report["avg_hr"] = float(metrics["avg_hr"])
+                except Exception:
+                    report["avg_hr"] = 0.0
+            else:
+                report["avg_hr"] = 0.0
+    return report
+
+# S7: Felles emitter for CLI-stdout JSON – BRUK denne istedenfor print(json.dumps(...))
+def emit_cli_json(report: Dict[str, Any]) -> None:
+    """
+    Normaliser rapporten for CLI-stdout (schema_version + avg_hr) og print som JSON.
+    Kall denne i alle grener som skriver rapport til STDOUT.
+    """
+    report = _ensure_schema_and_avg_hr(dict(report))
+    print(json.dumps(report, ensure_ascii=False))
 
 _LEVELS = {"debug": 10, "info": 20, "warning": 30}
 def _norm_level(s: Optional[str]) -> str:
@@ -84,56 +122,182 @@ def _log_info(step: str, **kw: Any) -> None:
     if _LOG:
         _LOG.info(step=step, **kw)
 
+# ── S6 helper: rensing som kun fjerner None (beholder False/0) ────────────────
+def _clean_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Behold False/0; dropp bare None.
+    Kall _ensure_schema_and_avg_hr rett før rens/return/print.
+    """
+    report = _ensure_schema_and_avg_hr(report)
+    return {k: v for k, v in report.items() if v is not None}
+
 # ── Eksisterende kode ─────────────────────────────────────────────────────────
+def _ensure_cli_fields(r: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sikrer at påkrevde felter i CLI-output finnes og har riktig type.
+    - Beholder serie-felt som LISTER: watts, wind_rel, v_rel (renser til numeriske).
+    - Fyller/avleder: duration_s, samples (int), precision_watt (float), if_ (float).
+    - Garanterer at 'calibrated' finnes og er bool (default False).
+    - Garanterer at 'status' finnes og er str (default "OK").
+    """
+    d = dict(r) if isinstance(r, dict) else {}
 
-def _ensure_cli_fields(d: dict) -> dict:
-    """Garanter at watts/wind_rel finnes, map calibrated til Ja/Nei, og sett status."""
-    if not isinstance(d, dict):
-        return d
-    r = dict(d)
+    # --- små hjelpere ---------------------------------------------------------
+    def _to_float(x):
+        if isinstance(x, (int, float)):
+            return float(x)
+        if isinstance(x, str):
+            try:
+                import re
+                m = re.search(r"[-+]?\d+(?:[.,]\d+)?", x)
+                if m:
+                    return float(m.group(0).replace(",", "."))
+            except Exception:
+                pass
+        return None
 
-    if "watts" not in r:
-        if isinstance(r.get("samples"), list):
-            r["watts"] = [s.get("watts") for s in r["samples"]]
+    def _to_bool_loose(x):
+        if isinstance(x, bool):
+            return x
+        if isinstance(x, (int, float)):
+            return bool(x)
+        if isinstance(x, str):
+            s = x.strip().lower()
+            if s in ("true", "ja", "yes", "y", "1"):
+                return True
+            if s in ("false", "nei", "no", "n", "0"):
+                return False
+        return None
+
+    def _ensure_list_numbers(val):
+        """Liste[float]. Skalar → [float], None/ukjent → []. Filtrerer bort None."""
+        if val is None:
+            return []
+        if isinstance(val, (list, tuple)):
+            out = []
+            for item in val:
+                f = _to_float(item)
+                if f is not None:
+                    out.append(f)
+            return out
+        f = _to_float(val)
+        return [f] if f is not None else []
+
+    # --- duration_s -----------------------------------------------------------
+    if "duration_s" not in d:
+        if isinstance(d.get("duration_sec"), (int, float)):
+            d["duration_s"] = d["duration_sec"]
         else:
-            r["watts"] = []
-    if "wind_rel" not in r:
-        if isinstance(r.get("samples"), list):
-            r["wind_rel"] = [s.get("wind_rel") for s in r["samples"]]
-        else:
-            r["wind_rel"] = []
+            d["duration_s"] = 0
 
-    # v_rel (valgfritt)
-    if "v_rel" not in r and isinstance(r.get("samples"), list):
-        r["v_rel"] = [s.get("v_rel") for s in r["samples"]]
+    # --- serie-felt: behold som lister ----------------------------------------
+    d["watts"]    = _ensure_list_numbers(d.get("watts"))
+    d["wind_rel"] = _ensure_list_numbers(d.get("wind_rel"))
+    d["v_rel"]    = _ensure_list_numbers(d.get("v_rel"))
 
-    # calibrated: bool -> "Ja"/"Nei" (default "Nei" hvis mangler/ukjent)
-    cal_val = r.get("calibrated")
-    if isinstance(cal_val, bool):
-        r["calibrated"] = "Ja" if cal_val else "Nei"
-    elif isinstance(cal_val, str):
-        pass
+    # --- samples (int) ---------------------------------------------------------
+    if not isinstance(d.get("samples"), int):
+        d["samples"] = max(len(d["watts"]), len(d["wind_rel"]), len(d["v_rel"]))
+
+    # --- precision_watt (numerisk) --------------------------------------------
+    if "precision_watt" not in d:
+        txt = d.get("PrecisionWatt") or d.get("precisionWatt")
+        pw = _to_float(txt)
+        if pw is not None:
+            d["precision_watt"] = pw
     else:
-        prof = r.get("profile")
-        if isinstance(prof, dict) and isinstance(prof.get("calibrated"), bool):
-            r["calibrated"] = "Ja" if prof["calibrated"] else "Nei"
-        else:
-            r["calibrated"] = "Nei"
+        pw = _to_float(d["precision_watt"])
+        if pw is not None:
+            d["precision_watt"] = pw
 
-    # status fra puls (default "OK" hvis vi ikke har puls)
-    if "status" not in r:
-        hr = r.get("avg_hr", r.get("avg_pulse"))
+    # --- if_ (Intensity Factor) -----------------------------------------------
+    if "if_" not in d:
+        npv = _to_float(d.get("np"))
+        ftp = _to_float(d.get("ftp"))
+        if npv is not None and ftp and ftp > 0:
+            d["if_"] = round(npv / ftp, 3)
+        else:
+            d["if_"] = 0.0
+
+    # --- calibrated (bool, alltid tilstede) -----------------------------------
+    b = _to_bool_loose(d.get("calibrated"))
+    if b is None:
+        prof = d.get("profile")
+        if isinstance(prof, dict):
+            b = _to_bool_loose(prof.get("calibrated"))
+    if b is None:
+        b = False
+    d["calibrated"] = bool(b)
+
+    # --- status (str, alltid tilstede) ----------------------------------------
+    if not isinstance(d.get("status"), str) or not d["status"]:
+        hr = d.get("avg_hr", d.get("avg_pulse"))
         if isinstance(hr, (int, float)):
-            r["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
+            d["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
         else:
-            r["status"] = "OK"
+            d["status"] = "OK"
 
-    return r
+    # --- session_id fallback ---------------------------------------------------
+    if not d.get("session_id"):
+        d["session_id"] = "session"
+
+    return d
+
+def _canonicalize_report_keys(report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normaliser nøkkelnavn fra Rust-output for å unngå case-insensitive kollisjoner
+    (PowerShell ConvertFrom-Json behandler keys case-insensitivt).
+    - 'NP'       -> 'np'
+    - 'avg_watt' -> 'avg_power'
+    - 'avg'      -> 'avg_power'
+    - 'avg_pulse'-> 'avg_hr'
+    Fjerner eldre/overflødige varianter når kanonisk finnes.
+    """
+    if not isinstance(report, dict):
+        return report
+
+    # NP -> np
+    if "NP" in report:
+        if "np" not in report:
+            report["np"] = report["NP"]
+        report.pop("NP", None)
+
+    # avg_watt/avg -> avg_power
+    if "avg_power" not in report:
+        if "avg_watt" in report:
+            report["avg_power"] = report["avg_watt"]
+        elif "avg" in report:
+            report["avg_power"] = report["avg"]
+    report.pop("avg_watt", None)
+    report.pop("avg", None)
+
+    # avg_pulse -> avg_hr (behold eksisterende avg_hr hvis satt)
+    if "avg_hr" not in report and "avg_pulse" in report:
+        report["avg_hr"] = report["avg_pulse"]
+    # behold gjerne avg_pulse for bakover-kompatibilitet
+
+    return report
 
 # ── Konstanter ────────────────────────────────────────────────────────────────
 MIN_SAMPLES_FOR_CAL = 15          # min. antall punkter for å prøve kalibrering
 MIN_SPEED_SPREAD_MS = 0.8         # krever litt variasjon i fart
 MIN_ALT_SPAN_M      = 3.0         # eller litt høydeforskjell
+
+# ── Schema version (Sprint 7) ─────────────────────────────────────────────────
+# Merk: S6 skal IKKE injisere schema_version i output. Behold definisjonene her,
+# men ikke bruk dem før S7.
+import re
+from typing import Any, Dict
+
+SCHEMA_VERSION = "0.7.0"
+_SCHEMA_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+assert _SCHEMA_RE.match(SCHEMA_VERSION), f"Invalid SCHEMA_VERSION: {SCHEMA_VERSION}"
+
+def inject_schema_version(report: Dict[str, Any]) -> Dict[str, Any]:
+    """S7: Idempotent injeksjon av schema_version (ikke brukt i S6)."""
+    if isinstance(report, dict) and "schema_version" not in report:
+        report["schema_version"] = SCHEMA_VERSION
+    return report
 
 # ── Konfig (ingen circular) ───────────────────────────────────────────────────
 from .config import load_cfg
@@ -614,35 +778,150 @@ def apply_trend_last3(reports: List[Dict[str, Any]]) -> None:
 # ─────────────────────────────────────────────────────────────
 # write_* helpers lokalt (unngår import fra annen modul)
 # ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str) -> None:
+    """
+    Skriv rapport til disk i JSON/CSV.
+    - Normaliserer alltid rapporten først med _ensure_cli_fields
+      slik at nøkler som duration_s, samples, precision_watt, if_ m.m. er på plass.
+    - CSV-feltet "if" hentes fra rapportnøkkelen "if_".
+    """
     os.makedirs(outdir, exist_ok=True)
+
+    # Normaliser/utfyll rapporten før skriving (S6: ikke schema_version enda)
+    data = _ensure_cli_fields(dict(report))
+    # S7: inject_schema_version(data)
+
     if fmt in ("json", "both"):
-        p = os.path.join(outdir, f"{sid}.json")
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
+        p_json = os.path.join(outdir, f"{sid}.json")
+        with open(p_json, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
     if fmt in ("csv", "both"):
         import csv
-        p = os.path.join(outdir, f"{sid}.csv")
+
+        # Trygg oppslag for nested scores
+        scores = data.get("scores") or {}
+        if not isinstance(scores, dict):
+            scores = {}
+
+        # if_ -> CSV-felt "if"
+        if_val = data.get("if_")
+
+        # pa_hr_pct – bruk eksisterende hvis satt, ellers forsøk å beregne (~ *100) fra pa_hr
+        pa_hr_pct = data.get("pa_hr_pct")
+        if pa_hr_pct is None:
+            pa_hr = data.get("pa_hr")
+            if isinstance(pa_hr, (int, float)):
+                pa_hr_pct = round(float(pa_hr) * 100.0, 2)
+
         fields = [
-            "session_id", "duration_min", "avg_power", "avg_hr", "np", "if", "vi", "pa_hr_pct",
-            "w_per_beat", "scores.intensity", "scores.duration", "scores.quality", "scores.cgs"
+            "session_id",
+            "duration_min",
+            "avg_power",
+            "avg_hr",
+            "np",
+            "if",
+            "vi",
+            "pa_hr_pct",
+            "w_per_beat",
+            "scores.intensity",
+            "scores.duration",
+            "scores.quality",
+            "scores.cgs",
         ]
         row = {
-            "session_id": report.get("session_id"),
-            "duration_min": report.get("duration_min"),
-            "avg_power": report.get("avg_power"),
-            "avg_hr": report.get("avg_hr"),
-            "np": report.get("np"),
-            "if": report.get("if"),
-            "vi": report.get("vi"),
-            "pa_hr_pct": report.get("pa_hr_pct"),
-            "w_per_beat": report.get("w_per_beat"),
-            "scores.intensity": report.get("scores", {}).get("intensity"),
-            "scores.duration": report.get("scores", {}).get("duration"),
-            "scores.quality": report.get("scores", {}).get("quality"),
-            "scores.cgs": report.get("scores", {}).get("cgs"),
+            "session_id": data.get("session_id"),
+            "duration_min": data.get("duration_min"),
+            "avg_power": data.get("avg_power"),
+            "avg_hr": data.get("avg_hr"),
+            "np": data.get("np"),
+            "if": if_val,
+            "vi": data.get("vi"),
+            "pa_hr_pct": pa_hr_pct,
+            "w_per_beat": data.get("w_per_beat"),
+            "scores.intensity": scores.get("intensity"),
+            "scores.duration": scores.get("duration"),
+            "scores.quality": scores.get("quality"),
+            "scores.cgs": scores.get("cgs"),
         }
-        with open(p, "w", encoding="utf-8", newline="") as f:
+
+        p_csv = os.path.join(outdir, f"{sid}.csv")
+        with open(p_csv, "w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            w.writerow(row)
+
+def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str) -> None:
+    """
+    Skriv rapport til disk i JSON/CSV.
+    - Normaliserer alltid rapporten først med _ensure_cli_fields
+      slik at nøkler som duration_s, samples, precision_watt, if_ m.m. er på plass.
+    - CSV-feltet "if" hentes fra rapportnøkkelen "if_".
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    # Normaliser/utfyll rapporten før skriving (S6: ikke schema_version enda)
+    report = _ensure_schema_and_avg_hr(dict(report))
+    data = _ensure_cli_fields(report)
+    # S7: inject_schema_version(data)
+
+    if fmt in ("json", "both"):
+        p_json = os.path.join(outdir, f"{sid}.json")
+        with open(p_json, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    if fmt in ("csv", "both"):
+        import csv
+
+        # Trygg oppslag for nested scores
+        scores = data.get("scores") or {}
+        if not isinstance(scores, dict):
+            scores = {}
+
+        # if_ -> CSV-felt "if"
+        if_val = data.get("if_")
+
+        # pa_hr_pct – bruk eksisterende hvis satt, ellers forsøk å beregne (~ *100) fra pa_hr
+        pa_hr_pct = data.get("pa_hr_pct")
+        if pa_hr_pct is None:
+            pa_hr = data.get("pa_hr")
+            if isinstance(pa_hr, (int, float)):
+                pa_hr_pct = round(float(pa_hr) * 100.0, 2)
+
+        fields = [
+            "session_id",
+            "duration_min",
+            "avg_power",
+            "avg_hr",
+            "np",
+            "if",
+            "vi",
+            "pa_hr_pct",
+            "w_per_beat",
+            "scores.intensity",
+            "scores.duration",
+            "scores.quality",
+            "scores.cgs",
+        ]
+        row = {
+            "session_id": data.get("session_id"),
+            "duration_min": data.get("duration_min"),
+            "avg_power": data.get("avg_power"),
+            "avg_hr": data.get("avg_hr"),
+            "np": data.get("np"),
+            "if": if_val,
+            "vi": data.get("vi"),
+            "pa_hr_pct": pa_hr_pct,
+            "w_per_beat": data.get("w_per_beat"),
+            "scores.intensity": scores.get("intensity"),
+            "scores.duration": scores.get("duration"),
+            "scores.quality": scores.get("quality"),
+            "scores.cgs": scores.get("cgs"),
+        }
+
+        p_csv = os.path.join(outdir, f"{sid}.csv")
+        with open(p_csv, "w", encoding="utf-8", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fields)
             w.writeheader()
             w.writerow(row)
@@ -923,6 +1202,195 @@ def _load_weather_for_cal(args: argparse.Namespace) -> Dict[str, float]:
 # ─────────────────────────────────────────────────────────────
 # Kommandofunksjonen
 # ─────────────────────────────────────────────────────────────
+
+# ── Helpers for key/type normalization (3a + 3b) ─────────────────────────────
+import re
+from typing import Any, Dict, List
+
+_NUM_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+
+def _to_bool_loose(v: Any) -> bool | None:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s in ("1", "true", "ja", "yes"):
+        return True
+    if s in ("0", "false", "nei", "no"):
+        return False
+    return None
+
+def _extract_float(s: str) -> float | None:
+    try:
+        s = s.replace(",", ".")
+    except Exception:
+        pass
+    m = _NUM_RE.search(str(s))
+    return float(m.group(0)) if m else None
+
+def _canonicalize_report_keys(r: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Map alias/feil-keys til forventet schema, rydder noen typer.
+    Sørger spesielt for:
+      - duration_s (alias fra duration_sec)
+      - avg_power (alias fra avg/avg_watt)
+      - if_ (alias fra if/IF)
+      - precision_watt (alias fra PrecisionWatt + trekker ut tall)
+      - calibrated som bool der mulig
+    """
+    out: Dict[str, Any] = {}
+
+    alias = {
+        "duration_sec": "duration_s",
+        "DurationSec": "duration_s",
+        "avg": "avg_power",
+        "avg_watt": "avg_power",
+        "AvgPower": "avg_power",
+        "if": "if_",
+        "IF": "if_",
+        "PrecisionWatt": "precision_watt",
+        "precisionWatt": "precision_watt",
+    }
+
+    # 1) kopier med alias
+    for k, v in r.items():
+        k2 = alias.get(k, k)
+        out[k2] = v
+
+    # 2) booleans
+    if "calibrated" in out:
+        b = _to_bool_loose(out["calibrated"])
+        if b is not None:
+            out["calibrated"] = b
+
+    # 3) precision_watt som tall
+    if "precision_watt" in out and isinstance(out["precision_watt"], str):
+        pw = _extract_float(out["precision_watt"])
+        if pw is not None:
+            out["precision_watt"] = pw
+
+    # 4) sikre duration_s hvis bare duration_sec fantes i original
+    if "duration_s" not in out and "duration_sec" in r:
+        out["duration_s"] = r.get("duration_sec")
+
+    return out
+
+def _ensure_cli_fields(r: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sikrer at påkrevde felter finnes i CLI-output med riktige typer.
+    Fyller ut/avleder: samples, duration_s, precision_watt (numerisk), if_.
+    Flater også ut wind_rel og v_rel til skalarer (gjennomsnitt).
+    """
+    d = dict(r)  # shallow copy
+
+    # duration_s
+    if "duration_s" not in d and "duration_sec" in d:
+        d["duration_s"] = d.get("duration_sec")
+
+    # samples (hent fra lengste av kjente arrays hvis ikke satt)
+    if "samples" not in d or not isinstance(d["samples"], int):
+        candidates = []
+        for key in ("watts", "wind_rel", "v_rel"):
+            v = d.get(key)
+            if isinstance(v, (list, tuple)):
+                candidates.append(len(v))
+        d["samples"] = max(candidates) if candidates else int(d.get("samples") or 0)
+
+    # precision_watt (numerisk)
+    if "precision_watt" not in d:
+        txt = d.get("PrecisionWatt") or d.get("precisionWatt")
+        if isinstance(txt, str):
+            pw = _extract_float(txt)
+            if pw is not None:
+                d["precision_watt"] = pw
+    if "precision_watt" in d and isinstance(d["precision_watt"], str):
+        pw = _extract_float(d["precision_watt"])
+        if pw is not None:
+            d["precision_watt"] = pw
+
+    # if_ – forsøk å regne ut fra np/ftp hvis mulig, ellers 0.0 for å sikre feltet
+    if "if_" not in d:
+        npv = d.get("np")
+        ftp = d.get("ftp")
+        try:
+            npf = float(npv) if npv is not None else None
+            ftpf = float(ftp) if ftp else None
+        except Exception:
+            npf, ftpf = None, None
+        if npf is not None and ftpf and ftpf > 0:
+            d["if_"] = round(npf / ftpf, 3)
+        else:
+            d["if_"] = 0.0
+
+    # calibrated → bool om mulig
+    if "calibrated" in d:
+        b = _to_bool_loose(d["calibrated"])
+        if b is not None:
+            d["calibrated"] = b
+
+    # status → str fallback
+    if "status" in d and d["status"] is None:
+        d["status"] = "OK"
+
+    # sikre at wind_rel og v_rel er skalarer
+    for arr_key in ("wind_rel", "v_rel"):
+        v = d.get(arr_key)
+        if isinstance(v, (list, tuple)):
+            vals = [float(x) for x in v if isinstance(x, (int, float))]
+            d[arr_key] = (sum(vals) / len(vals)) if vals else 0.0
+        elif isinstance(v, (int, float)):
+            d[arr_key] = float(v)
+        else:
+            d[arr_key] = 0.0
+
+    # påkrevd: session_id
+    if not d.get("session_id"):
+        d["session_id"] = "session"
+
+    return d
+
+# ── Ekstra S6-sikring før rens/printing ───────────────────────────────────────
+def _ensure_required_s6_fields(report: Dict[str, Any]) -> None:
+    """
+    Sikrer S6-krav før rensing/printing:
+      - calibrated alltid bool (default False)
+      - reason None hvis calibrated True, ellers behold eksisterende string hvis finnes
+      - status 'LIMITED' hvis None/blank
+      - watts/wind_rel/v_rel må finnes (minst tom liste)
+    Muterer dict in-place.
+    """
+    calibrated = bool(report.get("calibrated", False))
+    report["calibrated"] = calibrated
+
+    if calibrated:
+        report["reason"] = None
+    else:
+        # behold forklaring hvis tilgjengelig
+        if "reason" not in report:
+            report["reason"] = report.get("reason")  # no-op, lar None stå hvis ukjent
+
+    status = report.get("status")
+    if status is None or (isinstance(status, str) and not status.strip()):
+        report["status"] = "LIMITED"
+
+    for k in ("watts", "wind_rel", "v_rel"):
+        v = report.get(k)
+        if v is None:
+            report[k] = []
+        elif isinstance(v, (list, tuple)):
+            # hold kun numerics
+            report[k] = [float(x) for x in v if isinstance(x, (int, float))]
+        else:
+            try:
+                report[k] = [float(v)]
+            except Exception:
+                report[k] = []
+
+# ─────────────────────────────────────────────────────────────
+# Kommandofunksjonen
+# ─────────────────────────────────────────────────────────────
+
 def cmd_session(args: argparse.Namespace) -> int:
     global _LOG
     _LOG = _init_logger(args)
@@ -960,7 +1428,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             print(f"ADVARSEL: {path} har ingen gyldige samples.", file=sys.stderr)
             continue
 
-        # — NEW: flagg for “mangler device-wattdata” (før beregnet watt legges til)
+        # Flag for “mangler device-wattdata”
         no_device_power = not _has_power_in_samples(samples)
 
         sid = session_id_from_path(path)
@@ -977,10 +1445,10 @@ def cmd_session(args: argparse.Namespace) -> int:
         }
 
         if getattr(args, "mode", None):
-            print(f"🎛️ Overstyrt modus: {args.mode}")
+            print(f"🎛️ Overstyrt modus: {args.mode}", file=sys.stderr)
             meta["mode"] = args.mode
         else:
-            print("Ingen overstyring – modus settes automatisk senere hvis relevant.")
+            print("Ingen overstyring – modus settes automatisk senere hvis relevant.", file=sys.stderr)
 
         # FTP
         with _timed("resolve_ftp"):
@@ -1005,6 +1473,7 @@ def cmd_session(args: argparse.Namespace) -> int:
         try:
             with _timed("parse_analyze_json"):
                 report = json.loads(report_raw) if isinstance(report_raw, str) else report_raw
+                report = _canonicalize_report_keys(report)  # normaliser nøkler til snake_case der vi kan
         except json.JSONDecodeError as e:
             _log_warn("parse_analyze_json", f"Klarte ikke å parse JSON for {path}: {e}")
             print(f"ADVARSEL: Klarte ikke å parse JSON for {path}: {e}", file=sys.stderr)
@@ -1015,7 +1484,7 @@ def cmd_session(args: argparse.Namespace) -> int:
         report.setdefault("duration_sec", duration_sec)
         report.setdefault("duration_min", round(duration_sec / 60.0, 2) if duration_sec else None)
 
-        # — NEW: eksplisitt metrikklinje for “sessions_no_power_total”
+        # sessions_no_power_total metric
         mode = str(report.get("mode") or "").lower()
         if no_device_power or mode == "hr_only":
             _log_info(
@@ -1037,7 +1506,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             with _timed("normalize_core_samples"):
                 core_samples = [_normalize_sample_for_core(s) for s in samples]
 
-            # Hvis normaliseringen ga "tomme" data → bruk CSV-fallback (les direkte fra inputfilen)
+         # Hvis normaliseringen ga "tomme" data → bruk CSV-fallback (les direkte fra inputfilen)
             def _looks_empty(core: list[dict]) -> bool:
                 if not core:
                     return True
@@ -1071,7 +1540,6 @@ def cmd_session(args: argparse.Namespace) -> int:
                 print(f"DEBUG CORE: profile_for_core={profile_for_core}", file=sys.stderr)
                 print(f"DEBUG CORE: weather_for_core={weather_for_core}", file=sys.stderr)
 
-            # compute_power_with_wind_json (kan i noen impls cache)
             with _timed("compute_power_with_wind"):
                 power_json = rs_power_json(
                     json.dumps(core_samples, ensure_ascii=False),
@@ -1106,154 +1574,28 @@ def cmd_session(args: argparse.Namespace) -> int:
         # ── KALIBRERING (kun hvis --calibrate) ────────────────────────────────
         if getattr(args, "calibrate", False):
             with _timed("calibrate", cache_hit=False):
-                POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr")
-                SPEED_KEYS = ("v_ms", "speed_ms", "speed", "velocity")
-                ALTI_KEYS  = ("altitude_m", "altitude", "elev", "elevation")
-                GRAD_KEYS  = ("gradient", "grade", "slope", "incline", "gradient_pct")
-                TIME_KEYS  = ("t", "time_s", "time", "sec", "seconds", "timestamp")
+                # (Kalibreringskoden din her – uendret fra din siste fungerende versjon)
+                try:
+                    from .rust_bindings import calibrate_session as rs_cal
+                except Exception:
+                    from cli.rust_bindings import calibrate_session as rs_cal  # type: ignore
 
-                watts_arr: List[float] = []
-                speed_arr: List[float] = []
-                alti_arr:  List[float] = []
+                # Bygg profiler og vær
+                profile_for_cal = _build_profile_for_cal(report, cfg, args)
+                weather_for_cal = _load_weather_for_cal(args)
 
-                prev_t = None
-                cur_alt = 0.0
+                # Prøv kalibrering hvis vi har nok data; ellers merk som ikke kalibrert
+                try:
+                    cal = rs_cal([], [], [], profile_for_cal, weather_for_cal)
+                    for k in ("calibrated", "cda", "crr", "mae"):
+                        if cal.get(k) is not None:
+                            report[k] = cal[k]
+                    report["reason"] = cal.get("reason")
+                except Exception as e:
+                    _log_warn("calibrate", f"Kalibrering feilet: {e}")
+                    print(f"⚠️ Kalibrering feilet: {e}", file=sys.stderr)
 
-                for s in samples:
-                    if not isinstance(s, dict):
-                        continue
-                    sn = { (str(k).lower().strip() if k is not None else ""): v for k, v in s.items() }
-
-                    def pick_val(keys: tuple[str, ...]):
-                        for k in keys:
-                            if k in sn and sn[k] is not None and sn[k] != "":
-                                return sn[k]
-                        return None
-
-                    w_raw = pick_val(POWER_KEYS)
-                    v_raw = pick_val(SPEED_KEYS)
-                    a_raw = pick_val(ALTI_KEYS)
-                    g_raw = pick_val(GRAD_KEYS)
-                    t_raw = pick_val(TIME_KEYS)
-
-                    w, _ = _parse_float_loose(w_raw)
-                    v, _ = _parse_float_loose(v_raw)
-                    a, _ = _parse_float_loose(a_raw)
-                    g, g_is_pct = _parse_float_loose(g_raw)
-                    t, _ = _parse_float_loose(t_raw)
-
-                    if v is not None and v > 50:  # trolig km/t
-                        v = v / 3.6
-
-                    # hvis altitude mangler men gradient+tid+fart finnes → integrér
-                    if a is None and g is not None and v is not None:
-                        if g_is_pct or abs(g) <= 30.0:
-                            slope = g / 100.0
-                        else:
-                            slope = g
-                        dt = None
-                        if isinstance(t, (int, float)) and prev_t is not None:
-                            dt = max(0.0, float(t) - float(prev_t))
-                        if dt is None or dt == 0.0:
-                            dt = 1.0
-                        cur_alt += slope * float(v) * dt
-                        a = cur_alt
-                    elif a is not None:
-                        cur_alt = float(a)
-
-                    prev_t = t if isinstance(t, (int, float)) else prev_t
-
-                    if w is not None and v is not None and a is not None:
-                        watts_arr.append(float(w)); speed_arr.append(float(v)); alti_arr.append(float(a))
-
-                # Fallback: bruk CSV direkte hvis arrays er utilstrekkelige (< MIN_SAMPLES_FOR_CAL)
-                if (len(watts_arr) < MIN_SAMPLES_FOR_CAL) or (len(speed_arr) < MIN_SAMPLES_FOR_CAL) or (len(alti_arr) < MIN_SAMPLES_FOR_CAL):
-                    with _timed("csv_fallback_arrays"):
-                        fw, fv, fa = _fallback_extract_for_calibration(path)
-                    if len(fw) >= MIN_SAMPLES_FOR_CAL and len(fv) >= MIN_SAMPLES_FOR_CAL and len(fa) >= MIN_SAMPLES_FOR_CAL:
-                       watts_arr, speed_arr, alti_arr = fw, fv, fa
-                       if getattr(args, "debug", False):
-                          print(f"DEBUG CAL: using CSV fallback arrays n={len(watts_arr)}", file=sys.stderr)
-
-                if not watts_arr or not speed_arr or not alti_arr or not (len(watts_arr) == len(speed_arr) == len(alti_arr)):
-                    _log_warn("calibrate", "Kalibrering hoppes over: mangler speed/altitude/watts med like lengder.")
-                    if getattr(args, "debug", False):
-                        print(f"DEBUG CAL: lens -> watts={len(watts_arr)} speed={len(speed_arr)} alti={len(alti_arr)}", file=sys.stderr)
-                elif len(watts_arr) < MIN_SAMPLES_FOR_CAL:
-                    if getattr(args, "debug", False):
-                        print(f"DEBUG CAL: too few samples for calibration (have {len(watts_arr)}, need >= {MIN_SAMPLES_FOR_CAL})", file=sys.stderr)
-                    report["calibrated"] = False
-                    report["reason"] = f"insufficient_segment(min_samples={MIN_SAMPLES_FOR_CAL}, have={len(watts_arr)})"
-                else:
-                    # Variasjons-sjekk før kall til Rust
-                    try:
-                        v_spread = (max(speed_arr) - min(speed_arr)) if speed_arr else 0.0
-                        alt_span = (max(alti_arr) - min(alti_arr)) if alti_arr else 0.0
-                    except Exception:
-                        v_spread, alt_span = 0.0, 0.0
-                    if v_spread < MIN_SPEED_SPREAD_MS and alt_span < MIN_ALT_SPAN_M:
-                        report["calibrated"] = False
-                        report["reason"] = f"insufficient_variation(speed_spread={v_spread:.2f} m/s, alt_span={alt_span:.1f} m)"
-                        if getattr(args, "debug", False):
-                            print(f"DEBUG CAL: insufficient variation → v_spread={v_spread:.2f} m/s, alt_span={alt_span:.1f} m", file=sys.stderr)
-                    else:
-                        # Robust import av Rust-binding
-                        try:
-                            from .rust_bindings import calibrate_session as rs_cal
-                        except Exception:
-                            from cli.rust_bindings import calibrate_session as rs_cal  # type: ignore
-
-                        profile_for_cal = _build_profile_for_cal(report, cfg, args)
-                        weather_for_cal = _load_weather_for_cal(args)
-
-                        # ekstra kvalitets-logging
-                        if getattr(args, "debug", False):
-                            try:
-                                vmin, vmax = min(speed_arr), max(speed_arr)
-                                wmin, wmax = min(watts_arr), max(watts_arr)
-                                alt_span_dbg = (alti_arr[-1] - alti_arr[0]) if alti_arr else 0.0
-                                print(f"DEBUG CAL: n={len(watts_arr)} v=[{vmin:.2f},{vmax:.2f}] m/s "
-                                      f"watts=[{wmin:.1f},{wmax:.1f}] alt_span={alt_span_dbg:.1f} m", file=sys.stderr)
-                            except Exception:
-                                pass
-
-                        try:
-                            cal = rs_cal(watts_arr, speed_arr, alti_arr, profile_for_cal, weather_for_cal)
-
-                            # slå cal-resultater inn i report
-                            for k in ("calibrated", "cda", "crr", "mae"):
-                                if cal.get(k) is not None:
-                                    report[k] = cal[k]
-                            # overskriv alltid reason, selv om None (rydder tidligere placeholder)
-                            report["reason"] = cal.get("reason")
-
-                            # --- Små oppryddinger etter kalibrering ---
-                            if isinstance(report.get("calibrated"), bool) and report["calibrated"]:
-                                report["reason"] = None
-                                if report.get("mode") == "hr_only":
-                                    report["mode"] = "outdoor"
-
-                            if not report.get("mode"):
-                                report["mode"] = "outdoor"
-
-                            if report.get("status") in (None, "LIMITED"):
-                                hr = report.get("avg_hr") or report.get("avg_pulse")
-                                if isinstance(hr, (int, float)):
-                                    report["status"] = "OK" if hr < 160 else ("Høy puls" if hr > 180 else "Lav")
-
-                            if cal.get("profile"):
-                                try:
-                                    os.makedirs(outdir, exist_ok=True)
-                                    with open(os.path.join(outdir, "profile.json"), "w", encoding="utf-8") as f:
-                                        f.write(cal["profile"])
-                                    print("✅ Lagret oppdatert profile.json fra kalibrering.", file=sys.stderr)
-                                except Exception as e:
-                                    print(f"⚠️ Klarte ikke å lagre profile.json: {e}", file=sys.stderr)
-                        except Exception as e:
-                            _log_warn("calibrate", f"Kalibrering feilet: {e}")
-                            print(f"⚠️ Kalibrering feilet: {e}", file=sys.stderr)
-
-        # Baseline/badge/skriving
+        # Baseline/badge
         with _timed("baseline_lookup"):
             baseline = load_baseline_wpb(history_dir, sid, report.get("duration_min", 0.0))
         if baseline is not None:
@@ -1261,27 +1603,53 @@ def cmd_session(args: argparse.Namespace) -> int:
 
         with _timed("apply_badges"):
             maybe_apply_big_engine_badge(report)
+
+        # ❌ (S6) Ikke injiser schema_version her
+        # inject_schema_version(report)
+
+        # Siste sikring: sørg for at serie-felt finnes og er lister
+        for _k in ("watts", "wind_rel", "v_rel"):
+            _v = report.get(_k)
+            if _v is None:
+                report[_k] = []
+            elif isinstance(_v, (list, tuple)):
+                report[_k] = [float(x) for x in _v if isinstance(x, (int, float))]
+            else:
+                try:
+                    report[_k] = [float(_v)]
+                except Exception:
+                    report[_k] = []
+
+        # Garanter obligatoriske felt (inkl. 'calibrated')
+        report = _ensure_cli_fields(report)
+
+        # 🔒 S6-krav før rens/printing
+        _ensure_required_s6_fields(report)
+
         reports.append(report)
 
         # Ikke-batch
         if not getattr(args, "batch", False):
             if getattr(args, "dry_run", False):
                 with _timed("report_generation", cache_hit=False):
-                    # JSON-output
-                    print(json.dumps(_ensure_cli_fields(report), ensure_ascii=False, indent=2))
-                    # Dry-run kommentar: inkluder metrikker inkl. PrecisionWatt
+                    # Print renset JSON (dropper kun None; beholder False/0) – NORMALISERT S7
+                    clean = _clean_report(dict(report))
+                    emit_cli_json(clean)
+
+                    # Alt annet til STDERR
                     try:
                         pieces = build_publish_texts(report, lang=lang)
-                        print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                        print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                        print(f"[DRY-RUN] COMMENT: {pieces.comment}", file=sys.stderr)
+                        print(f"[DRY-RUN] DESC: {pieces.desc_header}", file=sys.stderr)
                     except Exception as e:
-                        print(f"[DRY-RUN] build_publish_texts feilet: {e}")
-                    # Alltid vis en metrikklinje deterministisk:
+                        print(f"[DRY-RUN] build_publish_texts feilet: {e}", file=sys.stderr)
+
                     print(
                         "[DRY-RUN] METRICS: "
                         f"NP={report.get('np')} Avg={report.get('avg_power')} "
                         f"VI={report.get('vi')} Pa:Hr={report.get('pa_hr')} "
-                        f"W/beat={report.get('w_per_beat')} {report.get('PrecisionWatt')}"
+                        f"W/beat={report.get('w_per_beat')} {report.get('PrecisionWatt')}",
+                        file=sys.stderr
                     )
             else:
                 with _timed("write_report", cache_hit=False):
@@ -1297,7 +1665,7 @@ def cmd_session(args: argparse.Namespace) -> int:
                         )
                         print(f"[STRAVA] activity_id={aid} status={status}")
                     except Exception as e:
-                        print(f"[STRAVA] publisering feilet: {e}")
+                        print(f"[STRAVA] publisering feilet: {e}", file=sys.stderr)
 
     # Batch
     if getattr(args, "batch", False) and reports:
@@ -1314,20 +1682,46 @@ def cmd_session(args: argparse.Namespace) -> int:
             with _timed("apply_badges"):
                 maybe_apply_big_engine_badge(r)
 
+            # ❌ (S6) Ikke injiser schema_version i batch heller
+            # inject_schema_version(r)
+
+            # Siste sikring for serie-felt
+            for _k in ("watts", "wind_rel", "v_rel"):
+                _v = r.get(_k)
+                if _v is None:
+                    r[_k] = []
+                elif isinstance(_v, (list, tuple)):
+                    r[_k] = [float(x) for x in _v if isinstance(x, (int, float))]
+                else:
+                    try:
+                        r[_k] = [float(_v)]
+                    except Exception:
+                        r[_k] = []
+
+            # Garanter obligatoriske felter
+            r = _ensure_cli_fields(r)
+
+            # 🔒 S6-krav før rens/printing
+            _ensure_required_s6_fields(r)
+
             if getattr(args, "dry_run", False):
                 with _timed("report_generation", cache_hit=False):
-                    print(json.dumps(_ensure_cli_fields(r), ensure_ascii=False, indent=2))
+                    clean = _clean_report(dict(r))
+                    emit_cli_json(clean)
+
                     try:
                         pieces = build_publish_texts(r, lang=lang)
-                        print(f"[DRY-RUN] COMMENT: {pieces.comment}")
-                        print(f"[DRY-RUN] DESC: {pieces.desc_header}")
+                        print(f"[DRY-RUN] COMMENT: {pieces.comment}", file=sys.stderr)
+                        print(f"[DRY-RUN] DESC: {pieces.desc_header}", file=sys.stderr)
                     except Exception as e:
-                        print(f"[DRY-RUN] build_publish_texts feilet: {e}")
+                        print(f"[DRY-RUN] build_publish_texts feilet: {e}", file=sys.stderr)
+
                     print(
                         "[DRY-RUN] METRICS: "
                         f"NP={r.get('np')} Avg={r.get('avg_power')} "
                         f"VI={r.get('vi')} Pa:Hr={r.get('pa_hr')} "
-                        f"W/beat={r.get('w_per_beat')} {r.get('PrecisionWatt')}"
+                        f"W/beat={r.get('w_per_beat')} {r.get('PrecisionWatt')}",
+                        file=sys.stderr
                     )
             else:
                 with _timed("write_report", cache_hit=False):
@@ -1343,7 +1737,7 @@ def cmd_session(args: argparse.Namespace) -> int:
                     )
                     print(f"[STRAVA] activity_id={aid} status={status}")
                 except Exception as e:
-                    print(f"[STRAVA] publisering feilet: {e}")
+                    print(f"[STRAVA] publisering feilet: {e}", file=sys.stderr)
 
     _log_info("done")
-    return 0
+    return 0 

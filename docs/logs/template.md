@@ -348,13 +348,13 @@ Sprint 5 bygger videre på S4 og leverer full integrasjon av indoor/outdoor-pipe
 Frontend-API gir et klart fortrinn for videre Sprint 8 (observabilitet/rapporter).
 Løsningen er robust både uten og med GPS, og output er deterministisk og testbar.
 
-✅ Sprint: S6 – Rapportfelt og observabilitet Branch: feature/s6-reports-observability
+✅ Sprint: S6 – Rapportfelt og observabilitet
+Branch: feature/s6-reports-observability
 
 Commits: a45a44a – Sprint 6: fullført rapportfelt, observabilitet, metrikker og dokumentasjon
 
 Endrede filer:
 
-plaintext
 cli/analyze.py  
 cli/session.py  
 core/src/metrics.rs  
@@ -368,19 +368,29 @@ tests/test_metric_no_power.py
 Sprinter/m6/* (slettet)  
 Sprinter/m7/* (slettet)  
 Sprinter/m8/* (slettet)
+
+
 Tester:
 
-plaintext
 ✅ pytest -q: alle tester grønt  
 ✅ cargo test: alle tester grønt
+
+
 Observasjoner:
-CLI genererer deterministisk rapport med NP, VI, Pa:Hr, W/beat, PrecisionWatt
+
+CLI genererer deterministisk rapport med NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt
+
 Fallback-modus (hr_only) fungerer ved manglende wattdata
+
 Strukturert logging med level, step, component, cache_hit
-Metrikk sessions_no_power_total logges eksplisitt
-Dokumentasjon oppdatert med rapportlogikk og begrensninger
+
+Metrikk sessions_no_power_total logges eksplisitt med verdi 1 og session_id
+
+Dokumentasjon oppdatert med rapportlogikk, observabilitet og begrensninger
+
 CGS v1 utvidet med observabilitet og PrecisionWatt
-Status: ✅ Ferdig
+
+Slettes av gamle sprinter (m6–m8) ryddet repoet
 
 Status:
 ✅ Ferdig (alle DoD bestått, sprintmål oppnådd)
@@ -430,6 +440,9 @@ Indoor/outdoor-pipeline koblet til fysikkmotor med vindkorrigering. CLI-output i
 Observasjoner: indoor pipeline fungerer uten GPS, outdoor justerer mot vind/heading. Unicode-bug i CLI fikset.
 Status: Ferdig.
 
-
+✅ cargo test – fysikkmotor + golden-test (syntetisk GPS/vind) grønne.
+✅ pytest – CLI dry-run og API-test grønne.
+Observasjoner: CLI-rapportene stabile, logging gir sporbarhet, golden-test deterministisk ±1–2W. Mindre inkonsistenser (reason vs calibrated, status=LIMITED) ryddet manuelt. Flere golden-tester på ekte segmenter legges til i S7.
+Status: Ferdig.
 
 

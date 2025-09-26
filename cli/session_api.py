@@ -12,6 +12,9 @@ MIN_SAMPLES_FOR_CAL = 30
 MIN_SPEED_SPREAD_MS = 0.8
 MIN_ALT_SPAN_M = 3.0
 
+# ── S7: Schema-versjon (semver for output-kontrakten) ────────────────────────
+SCHEMA_VERSION = "0.7.0"
+
 
 # ── Trygge imports av kjernebindinger ─────────────────────────────────────────
 try:
@@ -257,6 +260,39 @@ def _build_profile_for_cal() -> Dict[str, Any]:
     }
 
 
+# ── S7 helper: normaliser rapporten (schema_version + avg_hr) ─────────────────
+def _ensure_schema_and_avg_hr(report: dict) -> dict:
+    # schema_version
+    report.setdefault("schema_version", SCHEMA_VERSION if "SCHEMA_VERSION" in globals() else "0.7.0")
+
+    if "avg_hr" not in report:
+        # 1) Prøv serier
+        hr_series = (
+            report.get("hr_series")
+            or report.get("hr")
+            or (report.get("metrics") or {}).get("hr_series")
+        )
+        if hr_series:
+            vals = [float(x) for x in hr_series if x is not None]
+            report["avg_hr"] = (sum(vals) / len(vals)) if vals else 0.0
+        else:
+            # 2) Prøv ferdig beregnet snitt i metrics
+            metrics = report.get("metrics") or {}
+            if "avg_hr" in metrics:
+                try:
+                    report["avg_hr"] = float(metrics["avg_hr"])
+                except Exception:
+                    report["avg_hr"] = 0.0
+            else:
+                # 3) Fallback: bruk avg_pulse (legacy felt) hvis tilstede
+                ap = report.get("avg_pulse")
+                if isinstance(ap, (int, float)):
+                    report["avg_hr"] = float(ap)
+                else:
+                    # 4) Siste utvei
+                    report["avg_hr"] = 0.0
+    return report
+
 # ── Offentlig API ─────────────────────────────────────────────────────────────
 def analyze_session(input_path: str, weather_path: str | None = None, calibrate: bool = True) -> dict:
     """
@@ -267,7 +303,9 @@ def analyze_session(input_path: str, weather_path: str | None = None, calibrate:
       "wind_rel": [...],
       "calibrated": "Ja" | "Nei",
       "status": "OK" | "LIMITED" | ...
-      "mode": "outdoor" | "indoor"
+      "mode": "outdoor" | "indoor",
+      "schema_version": "0.7.0",
+      "avg_hr": <float>   # 0.0 hvis ikke kan utledes her
     }
     """
     if rs_power_json is None:
@@ -330,4 +368,7 @@ def analyze_session(input_path: str, weather_path: str | None = None, calibrate:
         "status": status or "OK",
         "mode": mode,
     }
+
+    # S7: Normaliser før retur (schema_version + ev. avg_hr hvis tilgjengelig)
+    ret = _ensure_schema_and_avg_hr(ret)
     return ret

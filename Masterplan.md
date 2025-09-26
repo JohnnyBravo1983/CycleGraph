@@ -49,7 +49,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-09-19 | S3   | Fysikkmotor                            | Ferdig   | Kraftmodell (gravitasjon, rulling, aero, akselerasjon, drivverkstap), smoothing/outlier-kutt, NP/avg/glatting i CLI. Golden test integrert i CI (±1–2W stabilt). Alle tester grønne. |
 | 2025-09-23 | S4   | Kalibrering                            | Ferdig   | CdA/Crr-fit med MAE ≤10 %, lagring av profil (profile.json), CLI-integrasjon med flagg --calibrate. Tester grønne i cargo/pytest. |
 | 2025-09-25 | S5   | Indoor pipeline + GPS/Wind integrasjon | Ferdig   | Vindkorrigert fysikkmotor koblet på indoor/outdoor-pipeline. CLI-output viser watts, wind_rel, v_rel, calibrated, status. Bonus: backend-API `analyze_session()` for frontend (M8). Tester grønne i cargo/pytest. |
-
+| 2025-09-26 | S6   | CLI/Reports & observabilitet	     | Ferdig 	| Rapportfelt (NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ± usikkerhet), strukturert JSON-logging, metrics for no-watt, docs. Tester grønne i cargo/pytest. Små inkonsistenser ryddet manuelt, golden stabil ±1–2 W.
 
 ## Milepælsrapporter Status Pr 23.09.2025
 
@@ -149,6 +149,20 @@ S4 – Kalibrering – status per 2025-09-23 Ferdig
 🔎 Observasjoner: små inkonsistenser (reason vs calibrated, status=LIMITED) ryddet opp i CLI etter kalibrering.
 📝 Endringer: core/src/physics.rs, core/src/lib.rs, core/src/models.rs, core/src/calibration.rs, cli/session.py, cli/analyze.py, cli/session_api.py, tests/test_api.py, tests/test_golden.py, tests/test_cli.py.
 ℹ️ Notater: API gjør frontend-integrasjon enklere i Sprint 8 (UI scaffolding), da backend kan kalles direkte.
+
+S6 – CLI/Reports & observabilitet – status per 2025-09-26 Ferdig
+✅ Rapportfelt: NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ± usikkerhet i CLI/JSON.
+✅ Strukturert JSON-logging (level, step, duration_ms, cache_hit) med --log-level + LOG_LEVEL.
+✅ Observability-metrikk: sessions_no_power_total.
+✅ Docs: “How it works” + “Known limits” oppdatert for nye felter/flows.
+✅ Tester: cargo test -q (fysikk + golden syntetisk GPS/vind) grønne; pytest -q (CLI dry-run + API) grønne.
+🔎 Observasjoner: mindre inkonsistenser (reason vs calibrated, status=LIMITED) ryddet i CLI; golden deterministisk ±1–2 W; logging gir god sporbarhet.
+
+🆕 DoD-synk (kjernekrav oppdatert):
+JSON-schema versjonering av CLI/API-output (schema_version) – planlagt S7.
+Datasettkrav (≥30 samples pr. testsegment, indoor + outdoor) – planlagt S7.
+CLI-flagg-dokumentasjonstabell i docs/ – planlagt S8.
+📝 Endringer: cli/analyze.py, cli/session.py, cli/session_api.py, tests/test_cli.py, tests/test_api.py, tests/test_golden.py, samt mindre justeringer i core for feltene som eksponeres.
 
 
 
