@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "source": "test_fixture",
+    "tz": "UTC"
+  },
+  "samples": [
+    { "t": 0,   "wind_ms": 3.2, "wind_dir_deg": 210, "air_temp_c": 12.3, "air_pressure_hpa": 1012.5 },
+    { "t": 15,  "wind_ms": 3.5, "wind_dir_deg": 215, "air_temp_c": 12.4, "air_pressure_hpa": 1012.4 },
+    { "t": 30,  "wind_ms": 3.6, "wind_dir_deg": 220, "air_temp_c": 12.5, "air_pressure_hpa": 1012.4 }
+  ]
+}

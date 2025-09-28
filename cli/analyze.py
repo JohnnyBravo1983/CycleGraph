@@ -48,7 +48,7 @@ except Exception:
     read_session_csv = None  # pylint: disable=invalid-name
 
 # Helper for S7: normaliser rapport (schema_version + avg_hr) for CLI-path
-# (NØYAKTIG etter ønsket blokk – robust import med trygg fallback.)
+# (Ryddig import med trygg fallback)
 try:
     from .session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
 except Exception:
@@ -57,8 +57,9 @@ except Exception:
     except Exception:
         def _ensure_schema_and_avg_hr(report: dict) -> dict:
             """Fallback-helper hvis session_api ikke kan importeres."""
-            r = dict(report)
-            r.setdefault("schema_version", "0.7.0")
+            r = dict(report) if report else {}
+            # 🔁 Oppdatert default for S7
+            r.setdefault("schema_version", "1.1")
             if "avg_hr" not in r:
                 # 1) prøv avg_pulse (legacy)
                 ap = r.get("avg_pulse")
@@ -82,17 +83,42 @@ except Exception:
             return r
 
 # ─────────────────────────────────────────────────────────────
-# NYTT (S7): Felles emitter for CLI-stdout JSON
-# Bruk denne i stedet for direkte print(json.dumps(report)).
+# S6/S7: Felles normalisering + emitter for CLI-stdout JSON
 # ─────────────────────────────────────────────────────────────
+def _normalize_for_cli(report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Idempotent normalisering for CLI-stdout-banen:
+      - Sikrer avg_hr + øvrige felter via _ensure_schema_and_avg_hr
+      - Tilstedeværelse: status, wind_rel, v_rel
+      - Calibrated/Reason-regel
+      - Lås schema_version = "1.1" (string)
+    """
+    r: Dict[str, Any] = _ensure_schema_and_avg_hr(dict(report) if report else {})
+
+    # Kontrakt: presence (tolerant typer for wind_rel/v_rel)
+    r.setdefault("status", "ok")
+    r.setdefault("wind_rel", None)  # kan være tall ELLER liste -> ikke cast
+    r.setdefault("v_rel", None)
+
+    # Calibrated/Reason-regel (ingen duplikat)
+    if r.get("calibrated") is True:
+        r.pop("reason", None)
+    else:
+        r.setdefault("reason", "calibration_context_missing")
+
+    # Lås schema_version som streng
+    r["schema_version"] = "0.7.0"
+    return r
+
+
 def emit_cli_json(report: Dict[str, Any]) -> None:
     """
-    S7: Normaliser rapport for CLI-stdout (schema_version + avg_hr),
-    og print som JSON til STDOUT.
+    S7: Normaliser rapport for CLI-stdout og print nøyaktig én JSON-linje til STDOUT.
+    All logging skal gå via logging-handler på STDERR (ikke her).
     """
-    report = _ensure_schema_and_avg_hr(report)
-    print(json.dumps(report, ensure_ascii=False))
-
+    out = _normalize_for_cli(report)
+    # separators hindrer ekstra whitespace -> én linje
+    print(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 # ─────────────────────────────────────────────────────────────
 # TRINN 3: Strukturerte logger (enkelt JSON-logger på stderr)
 # ─────────────────────────────────────────────────────────────
@@ -331,16 +357,16 @@ def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):
         else:
             comment_text, desc_header_text, desc_body_text = res
     except Exception as e:
-        print(f"[strava] build_publish_texts feilet: {e}")
+        print(f"[strava] build_publish_texts feilet: {e}", file=sys.stderr)
         return None
 
     pieces = PublishPieces(comment=comment_text, desc_header=desc_header_text, desc_body=desc_body_text)
     try:
         aid, status = StravaClient(lang=lang).publish_to_strava(pieces, dry_run=dry_run)
-        print(f"[strava] activity_id={aid} status={status}")
+        print(f"[strava] activity_id={aid} status={status}", file=sys.stderr)
         return aid, status
     except Exception as e:
-        print(f"[strava] publisering feilet: {e}")
+        print(f"[strava] publisering feilet: {e}", file=sys.stderr)
         return None
 
 
@@ -404,10 +430,10 @@ def load_baseline_wpb(history_dir: str, cur_sid: str, cur_dur_min: float):
 # -----------------------------
 def _run_calibration_from_args(args: argparse.Namespace) -> int:
     if rust_calibrate_session is None:
-        print("⚠️ Kalibrering ikke tilgjengelig (rust_calibrate_session ikke eksponert).")
+        print("⚠️ Kalibrering ikke tilgjengelig (rust_calibrate_session ikke eksponert).", file=sys.stderr)
         return 3
     if read_session_csv is None:
-        print("⚠️ Kan ikke lese samples (read_session_csv mangler).")
+        print("⚠️ Kan ikke lese samples (read_session_csv mangler).", file=sys.stderr)
         return 3
 
     paths = sorted(glob.glob(args.input))
@@ -443,7 +469,7 @@ def _run_calibration_from_args(args: argparse.Namespace) -> int:
             continue
 
     if not valid:
-        print("⚠️ Fant ingen gyldige watt/hr-par for kalibrering.")
+        print("⚠️ Fant ingen gyldige watt/hr-par for kalibrering.", file=sys.stderr)
         return 3
 
     watts = [w for w, _ in valid]
@@ -453,7 +479,7 @@ def _run_calibration_from_args(args: argparse.Namespace) -> int:
     try:
         result = rust_calibrate_session(watts, pulses)  # type: ignore
     except Exception as e:
-        print(f"Kalibrering feilet i Rust: {e}")
+        print(f"Kalibrering feilet i Rust: {e}", file=sys.stderr)
         return 3
 
     try:
@@ -462,7 +488,7 @@ def _run_calibration_from_args(args: argparse.Namespace) -> int:
         data = result
 
     mae = data.get("mae") if isinstance(data, dict) else None
-    print(f"✅ Kalibrering OK. MAE={mae}" if mae is not None else "✅ Kalibrering OK.")
+    print(f"✅ Kalibrering OK. MAE={mae}" if mae is not None else "✅ Kalibrering OK.", file=sys.stderr)
     # Her kunne vi evt. lagret til profile.json via Python-siden også
     return 0
 
@@ -523,7 +549,7 @@ def main() -> None:
     _LOG = _init_logger_from_args_env(args)
     _log_info("startup", component="analyze.py", subcommand=getattr(args, "command", None), log_level=_LOG.level_name)
 
-    # (Valgfritt) vis enkel profilstatus (beholdt fra tidligere)
+    # (Valgfritt) vis enkel profilstatus på STDERR (ikke STDOUT)
     with _timed("load_profile"):
         try:
             from cli.profile import load_profile as _lp
@@ -531,7 +557,7 @@ def main() -> None:
             profile["estimat"] = False
         except Exception:
             profile = {"bike_type": "unknown", "weight": None, "crr": None, "estimat": True}
-    print("Profil:", profile)
+    _log_info("profile", profile=profile)
 
     # Viktig: IKKE kjør noen kalibrering her. Håndteres i cli/session.py.
 

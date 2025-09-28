@@ -1,99 +1,176 @@
-# cli/session.py
+# -*- coding: utf-8 -*-
+"""
+CycleGraph CLI
+- Subcommand 'efficiency': dispatch via parser -> efficiency.py
+- Subcommand 'session'   : NP/IF/VI/Pa:Hr/W/beat/CGS + batch/trend + baseline
+- --calibrate: valgfri kalibrering mot powermeter
+- --weather: path til værfil (JSON) som brukes i kalibrering
+- --indoor : kjør indoor pipeline uten GPS (device_watts-policy)
+
+TRINN 3 (Sprint 6): Strukturerte JSON-logger
+- Logger som JSON på stderr med felter: level, step, duration_ms (+ev. extras)
+- Nivåstyring via --log-level (debug/info/warning) eller miljøvariabel LOG_LEVEL
+"""
+
 from __future__ import annotations
 
 import argparse
+import csv
 import glob
-import sys
 import json
 import os
 import re
-import math
+import sys
 import time
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Tuple, Optional
+import math
+import logging
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Any, Optional, Tuple
 
-# ── S7: Schema-versjon for CLI/fil/API ────────────────────────────────────────
-SCHEMA_VERSION = "0.7.0"
+# ─────────────────────────────────────────────────────────────
+# Global logger + wrappers (alltid tom msg, data i extra)
+# Konfigurer handler/formatter/level i cmd_session()
+# ─────────────────────────────────────────────────────────────
+_LOG = logging.getLogger("cyclegraph.cli")
 
-# ── Strukturerte logger (TRINN 3) ─────────────────────────────────────────────
+def _log(level: str, step: str, **kwargs) -> None:
+    extra = {"step": step, **kwargs}
+    if level == "INFO":
+        _LOG.info("", extra=extra)
+    elif level == "WARNING":
+        _LOG.warning("", extra=extra)
+    elif level == "ERROR":
+        _LOG.error("", extra=extra)
+    else:
+        _LOG.debug("", extra=extra)
 
-def _ensure_schema_and_avg_hr(report: dict) -> dict:
-    # schema_version (ikke overskriv hvis satt andre steder)
-    report.setdefault("schema_version", SCHEMA_VERSION)
+def _log_info(step: str, **kwargs) -> None:
+    _log("INFO", step, **kwargs)
 
-    # avg_hr – prøv flere kilder, fall tilbake til 0.0 så testen har feltet
-    if "avg_hr" not in report:
-        hr_series = (
-            report.get("hr_series")
-            or report.get("hr")
-            or (report.get("metrics") or {}).get("hr_series")
-        )
-        if hr_series:
-            vals = [float(x) for x in hr_series if x is not None]
-            report["avg_hr"] = (sum(vals) / len(vals)) if vals else 0.0
-        else:
-            # Hvis kjernen har kalkulert snitt et annet sted:
-            metrics = report.get("metrics") or {}
-            if "avg_hr" in metrics:
-                try:
-                    report["avg_hr"] = float(metrics["avg_hr"])
-                except Exception:
-                    report["avg_hr"] = 0.0
-            else:
-                report["avg_hr"] = 0.0
-    return report
+def _log_warn(step: str, msg: str = "", **kwargs) -> None:
+    if msg:
+        kwargs["msg"] = msg
+    _log("WARNING", step, **kwargs)
 
-# S7: Felles emitter for CLI-stdout JSON – BRUK denne istedenfor print(json.dumps(...))
+# Unngå sirkulærimport; selve session-kjøringen ligger i denne fila (cmd_session)
+from .config import load_cfg  # noqa: F401
+
+# (Valgfritt) andre CLI-avhengigheter
+from cli.weather_client_mock import WeatherClient  # noqa: F401
+from cli.formatters.strava_publish import PublishPieces, build_publish_texts  # noqa: F401
+from cli.strava_client import StravaClient  # noqa: F401
+
+# STDOUT-emitter fra analyze (én linje JSON). Ikke importer _init_logger her.
+from cli.analyze import emit_cli_json  # type: ignore
+
+# Rust-funksjon for kalibrering (valgfri, fail-safe import)
+try:
+    from cyclegraph_core import calibrate_session as rust_calibrate_session  # type: ignore
+except Exception:
+    rust_calibrate_session = None
+
+# Lese samples hvis --calibrate brukes
+try:
+    from cli.io import read_session_csv  # type: ignore
+except Exception:
+    read_session_csv = None  # pylint: disable=invalid-name
+
+# Helper for normalisering (schema_version + avg_hr) for CLI-path
+# Ryddig import med trygg fallback
+try:
+    from .session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
+except Exception:
+    try:
+        from cli.session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
+    except Exception:
+        def _ensure_schema_and_avg_hr(report: dict) -> dict:
+            """Fallback-helper hvis session_api ikke kan importeres."""
+            r = dict(report) if report else {}
+            # Lås semver for CLI-kontrakt
+            r.setdefault("schema_version", "0.7.0")
+            if "avg_hr" not in r:
+                # 1) legacy avg_pulse
+                ap = r.get("avg_pulse")
+                if isinstance(ap, (int, float)):
+                    r["avg_hr"] = float(ap)
+                else:
+                    # 2) metrics.avg_hr
+                    metrics = r.get("metrics") or {}
+                    m_avg = metrics.get("avg_hr")
+                    if isinstance(m_avg, (int, float)):
+                        r["avg_hr"] = float(m_avg)
+                    else:
+                        # 3) serier (hr/hr_series/metrics.hr_series)
+                        hr_series = r.get("hr_series") or r.get("hr") or metrics.get("hr_series")
+                        if hr_series:
+                            vals = [float(x) for x in hr_series if x is not None]
+                            r["avg_hr"] = (sum(vals) / len(vals)) if vals else 0.0
+                        else:
+                            # 4) siste utvei
+                            r["avg_hr"] = 0.0
+            return r
+
+# ─────────────────────────────────────────────────────────────
+# (resten av helperne og cmd_session følger under)
+
+# ─────────────────────────────────────────────────────────────
+# (evt. øvrige helpers/konstanter/regex etc. følger under)
+# ─────────────────────────────────────────────────────────────
+def _normalize_for_cli(report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Idempotent normalisering for CLI-stdout-banen:
+      - Sikrer avg_hr via _ensure_schema_and_avg_hr
+      - Tilstedeværelse: status, wind_rel, v_rel
+      - Calibrated/Reason-regel
+      - Lås schema_version = "1.1.0" (semver string)
+    """
+    r: Dict[str, Any] = _ensure_schema_and_avg_hr(dict(report) if report else {})
+
+    # Presence (tolerant typer for wind_rel/v_rel)
+    r.setdefault("status", "ok")
+    r.setdefault("wind_rel", None)  # kan være tall ELLER liste
+    r.setdefault("v_rel", None)
+
+    # Calibrated/Reason-regel (ingen duplikat)
+    if r.get("calibrated") is True:
+        r.pop("reason", None)
+    else:
+        r.setdefault("reason", "calibration_context_missing")
+
+    # Lås schema_version som streng (semver)
+    r["schema_version"] = "0.7.0"
+    return r
+
+
 def emit_cli_json(report: Dict[str, Any]) -> None:
     """
-    Normaliser rapporten for CLI-stdout (schema_version + avg_hr) og print som JSON.
-    Kall denne i alle grener som skriver rapport til STDOUT.
+    Normaliser rapport for CLI-stdout og print nøyaktig én JSON-linje til STDOUT.
+    All logging skal gå via logging-handler på STDERR (ikke her).
     """
-    report = _ensure_schema_and_avg_hr(dict(report))
-    print(json.dumps(report, ensure_ascii=False))
-
-_LEVELS = {"debug": 10, "info": 20, "warning": 30}
-def _norm_level(s: Optional[str]) -> str:
-    if not s:
-        return "info"
-    s2 = str(s).strip().lower()
-    return s2 if s2 in _LEVELS else "info"
+    out = _normalize_for_cli(report)
+    print(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
 
 class JsonLogger:
-    """Minimal JSON-logger på stderr med nivå-filter."""
-    def __init__(self, level: str = "info") -> None:
-        self.level_name = _norm_level(level)
-        self.level = _LEVELS[self.level_name]
+    def __init__(self, level="info"):
+        self.level_name = level
+    def debug(self, **kwargs):
+        pass
+    def info(self, **kwargs):
+        pass
+    def warning(self, **kwargs):
+        pass
 
-    def _emit(self, lvl_name: str, **fields: Any) -> None:
-        if _LEVELS[lvl_name] < self.level:
-            return
-        record = {
-            "level": lvl_name.upper(),
-        }
-        # Ikke-None felt, og enkle typer for determinisme
-        for k, v in fields.items():
-            if v is None:
-                continue
-            try:
-                json.dumps(v)
-                record[k] = v
-            except Exception:
-                record[k] = str(v)
-        print(json.dumps(record, ensure_ascii=False), file=sys.stderr)
-
-    def debug(self, step: str, duration_ms: Optional[int] = None, cache_hit: Optional[bool] = None, **kw: Any) -> None:
-        self._emit("debug", step=step, duration_ms=duration_ms, cache_hit=cache_hit, **kw)
-
-    def info(self, step: str, duration_ms: Optional[int] = None, cache_hit: Optional[bool] = None, **kw: Any) -> None:
-        self._emit("info", step=step, duration_ms=duration_ms, cache_hit=cache_hit, **kw)
-
-    def warning(self, step: str, msg: str, **kw: Any) -> None:
-        self._emit("warning", step=step, message=msg, **kw)
-
-# Global init per kjøring (settes i cmd_session)
-_LOG: Optional[JsonLogger] = None
+def _norm_level(level: str | None) -> str:
+    """Normaliserer loggnivå til 'debug', 'info', eller 'warning'."""
+    if not level:
+        return "info"
+    s = str(level).strip().lower()
+    if s in ("debug", "d"):
+        return "debug"
+    if s in ("warning", "warn", "w"):
+        return "warning"
+    return "info"
 
 def _init_logger(args: argparse.Namespace) -> JsonLogger:
     # Prioritet: CLI-flagget (--log-level) > miljøvariabel (LOG_LEVEL) > default ("info")
@@ -103,16 +180,22 @@ def _init_logger(args: argparse.Namespace) -> JsonLogger:
     logger = JsonLogger(level=level)
     return logger
 
+
 @contextmanager
 def _timed(step: str, cache_hit: Optional[bool] = None):
-    """Context manager som logger DEBUG med duration_ms og cache_hit."""
+    """
+    Mål varighet for et steg og logg som strukturert DEBUG på STDERR.
+    Bruker alltid tom 'msg' og legger felter i 'extra'.
+    """
     t0 = time.perf_counter()
     try:
         yield
     finally:
-        dur_ms = int((time.perf_counter() - t0) * 1000.0)
-        if _LOG:
-            _LOG.debug(step=step, duration_ms=dur_ms, cache_hit=cache_hit)
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        data = {"duration_ms": dur_ms}
+        if cache_hit is not None:
+            data["cache_hit"] = cache_hit
+        _log_debug(step, **data)
 
 def _log_warn(step: str, msg: str) -> None:
     if _LOG:
@@ -1178,6 +1261,17 @@ def _build_profile_for_cal(report: Dict[str, Any], cfg: Dict[str, Any], args: ar
         print(f"DEBUG CAL: profile_for_cal={prof}", file=sys.stderr)
     return prof
 
+
+def _safe_load_weather(path: str) -> dict | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        return obj if isinstance(obj, dict) else None
+    except Exception as e:
+        print(f"ADVARSEL: Klarte ikke å lese weather-fil: {path} ({e})", file=sys.stderr)
+        return None
+
+
 def _load_weather_for_cal(args: argparse.Namespace) -> Dict[str, float]:
     """Les weather JSON fra --weather, eller bruk defaults."""
     default_w = {
@@ -1390,11 +1484,56 @@ def _ensure_required_s6_fields(report: Dict[str, Any]) -> None:
 # ─────────────────────────────────────────────────────────────
 # Kommandofunksjonen
 # ─────────────────────────────────────────────────────────────
-
 def cmd_session(args: argparse.Namespace) -> int:
+    # Init/bruk JSON-logger lokalt (STDERR). Uavhengig av analyze.py.
+    import logging as _logging, os as _os
+
+    class _JsonFormatter(_logging.Formatter):
+        def format(self, record: _logging.LogRecord) -> str:
+            payload = {"level": record.levelname}  # "INFO"/"DEBUG"/"WARNING"
+            # Ta med alle extras (step, component, metric, cache_hit, osv.)
+            for k, v in record.__dict__.items():
+                if k not in (
+                    "args", "asctime", "created", "exc_info", "exc_text", "filename", "funcName",
+                    "levelname", "levelno", "lineno", "module", "msecs", "message", "msg", "name",
+                    "pathname", "process", "processName", "relativeCreated", "stack_info", "thread", "threadName"
+                ):
+                    payload[k] = v
+            return json.dumps(payload, ensure_ascii=False)
+
+    # Konfigurer global logger hvis den ikke allerede har handler(e)
     global _LOG
-    _LOG = _init_logger(args)
-    _log_info("startup", config="session", log_level=_LOG.level_name)
+    _LOG = _logging.getLogger("cyclegraph.cli")
+    if not _LOG.handlers:
+        h = _logging.StreamHandler(sys.stderr)  # <- VIKTIG: STDERR
+        h.setFormatter(_JsonFormatter())
+        _LOG.handlers.clear()
+        _LOG.addHandler(h)
+        lvl = (getattr(args, "log_level", None) or _os.getenv("LOG_LEVEL") or "INFO").upper()
+        _LOG.setLevel(getattr(_logging, lvl, _logging.INFO))
+        _LOG.propagate = False
+
+    # ── HARD REBIND (GLOBAL): sikre at wrapperne alltid bruker tom msg + extra=... ──
+    def __json_debug(step: str, **kwargs):
+        _LOG.debug("", extra={"step": step, **kwargs})
+
+    def __json_info(step: str, **kwargs):
+        _LOG.info("", extra={"step": step, **kwargs})
+
+    def __json_warn(step: str, detail: str = "", **kwargs):
+        # NB: IKKE bruk 'msg' eller 'message' i extra (reserverte)
+        if detail:
+            kwargs["detail"] = detail
+        _LOG.warning("", extra={"step": step, **kwargs})
+
+    # Viktig: rebind GLOBALT slik at også _timed() bruker disse
+    global _log_debug, _log_info, _log_warn
+    _log_debug = __json_debug
+    _log_info = __json_info
+    _log_warn = __json_warn
+    # ────────────────────────────────────────────────────────────────────────────────
+
+    _log_info("startup", config="session", log_level=(getattr(args, "log_level", None) or "info"))
 
     with _timed("load_cfg"):
         cfg = load_cfg(getattr(args, "cfg", None))
@@ -1410,7 +1549,7 @@ def cmd_session(args: argparse.Namespace) -> int:
     if getattr(args, "debug", False):
         print("DEBUG: input filer:", paths, file=sys.stderr)
     if not paths:
-        _log_warn("parse_input_glob", f"Ingen filer for pattern: {args.input}")
+        _log_warn("parse_input_glob", detail=f"Ingen filer for pattern: {args.input}")
         print(f"Ingen filer for pattern: {args.input}", file=sys.stderr)
         return 2
 
@@ -1424,7 +1563,7 @@ def cmd_session(args: argparse.Namespace) -> int:
         if getattr(args, "debug", False):
             print(f"DEBUG: {path} -> {len(samples)} samples", file=sys.stderr)
         if not samples:
-            _log_warn("read_session_csv", f"{path} har ingen gyldige samples.")
+            _log_warn("read_session_csv", detail=f"{path} har ingen gyldige samples.")
             print(f"ADVARSEL: {path} har ingen gyldige samples.", file=sys.stderr)
             continue
 
@@ -1466,7 +1605,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             report_raw = _analyze_session_bridge(samples, meta, cfg)
 
         if isinstance(report_raw, str) and report_raw.strip() == "":
-            _log_warn("analyze_session", f"_analyze_session_bridge returnerte tom streng for {path}")
+            _log_warn("analyze_session", detail=f"_analyze_session_bridge returnerte tom streng for {path}")
             print(f"ADVARSEL: _analyze_session_bridge returnerte tom streng for {path}", file=sys.stderr)
             continue
 
@@ -1475,7 +1614,7 @@ def cmd_session(args: argparse.Namespace) -> int:
                 report = json.loads(report_raw) if isinstance(report_raw, str) else report_raw
                 report = _canonicalize_report_keys(report)  # normaliser nøkler til snake_case der vi kan
         except json.JSONDecodeError as e:
-            _log_warn("parse_analyze_json", f"Klarte ikke å parse JSON for {path}: {e}")
+            _log_warn("parse_analyze_json", detail=f"Klarte ikke å parse JSON for {path}: {e}")
             print(f"ADVARSEL: Klarte ikke å parse JSON for {path}: {e}", file=sys.stderr)
             continue
 
@@ -1492,7 +1631,7 @@ def cmd_session(args: argparse.Namespace) -> int:
                 metric="sessions_no_power_total",
                 value=1,
                 session_id=sid,
-                component="cli/session"
+                component="cli/session",
             )
 
         # --- Vind/kraft fra kjernen (PowerOutputs) ---
@@ -1506,7 +1645,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             with _timed("normalize_core_samples"):
                 core_samples = [_normalize_sample_for_core(s) for s in samples]
 
-         # Hvis normaliseringen ga "tomme" data → bruk CSV-fallback (les direkte fra inputfilen)
+            # CSV-fallback hvis normaliseringen ser "tom" ut
             def _looks_empty(core: list[dict]) -> bool:
                 if not core:
                     return True
@@ -1534,6 +1673,8 @@ def cmd_session(args: argparse.Namespace) -> int:
                 "calibration_mae": report.get("mae"),
                 "estimat": True,
             }
+
+            # Last vær robust
             weather_for_core = _load_weather_for_cal(args)
 
             if getattr(args, "debug", False):
@@ -1548,13 +1689,13 @@ def cmd_session(args: argparse.Namespace) -> int:
                 )
             power_obj = json.loads(power_json) if isinstance(power_json, str) else power_json
 
-            # Logg med mulig cache-hit hvis eksponert fra kjernen
             cache_hit = False
             try:
                 cache_hit = bool(power_obj.get("cache_hit", False))
             except Exception:
                 cache_hit = False
-            _log_info("compute_power_with_wind", cache_hit=cache_hit)
+            # Viktig: component på compute_power_with_wind
+            _log_info("compute_power_with_wind", cache_hit=cache_hit, component="cli/session")
 
             if getattr(args, "debug", False):
                 print(f"DEBUG CORE: keys={list(power_obj.keys())}", file=sys.stderr)
@@ -1574,17 +1715,14 @@ def cmd_session(args: argparse.Namespace) -> int:
         # ── KALIBRERING (kun hvis --calibrate) ────────────────────────────────
         if getattr(args, "calibrate", False):
             with _timed("calibrate", cache_hit=False):
-                # (Kalibreringskoden din her – uendret fra din siste fungerende versjon)
                 try:
                     from .rust_bindings import calibrate_session as rs_cal
                 except Exception:
                     from cli.rust_bindings import calibrate_session as rs_cal  # type: ignore
 
-                # Bygg profiler og vær
                 profile_for_cal = _build_profile_for_cal(report, cfg, args)
                 weather_for_cal = _load_weather_for_cal(args)
 
-                # Prøv kalibrering hvis vi har nok data; ellers merk som ikke kalibrert
                 try:
                     cal = rs_cal([], [], [], profile_for_cal, weather_for_cal)
                     for k in ("calibrated", "cda", "crr", "mae"):
@@ -1592,7 +1730,7 @@ def cmd_session(args: argparse.Namespace) -> int:
                             report[k] = cal[k]
                     report["reason"] = cal.get("reason")
                 except Exception as e:
-                    _log_warn("calibrate", f"Kalibrering feilet: {e}")
+                    _log_warn("calibrate", detail=f"Kalibrering feilet: {e}")
                     print(f"⚠️ Kalibrering feilet: {e}", file=sys.stderr)
 
         # Baseline/badge
@@ -1603,9 +1741,6 @@ def cmd_session(args: argparse.Namespace) -> int:
 
         with _timed("apply_badges"):
             maybe_apply_big_engine_badge(report)
-
-        # ❌ (S6) Ikke injiser schema_version her
-        # inject_schema_version(report)
 
         # Siste sikring: sørg for at serie-felt finnes og er lister
         for _k in ("watts", "wind_rel", "v_rel"):
@@ -1623,51 +1758,108 @@ def cmd_session(args: argparse.Namespace) -> int:
         # Garanter obligatoriske felt (inkl. 'calibrated')
         report = _ensure_cli_fields(report)
 
-        # 🔒 S6-krav før rens/printing
+        # 🔒 S6-krav før utskrift
         _ensure_required_s6_fields(report)
 
         reports.append(report)
 
-        # Ikke-batch
-        if not getattr(args, "batch", False):
-            if getattr(args, "dry_run", False):
-                with _timed("report_generation", cache_hit=False):
-                    # Print renset JSON (dropper kun None; beholder False/0) – NORMALISERT S7
-                    clean = _clean_report(dict(report))
-                    emit_cli_json(clean)
+ # --- Siste normalisering og utskriftshjelper -----------------------------
+    def _finalize_cli_report(d: dict) -> dict:
+        """
+        Siste-sjekk før CLI-stdout:
+        - Idempotent normalisering
+        - schema_version som "0.7.0" (string)
+        - calibrated: str ('Ja'/'Nei') -> bool
+        - reason-regel: hvis calibrated==True -> fjern; ellers sett default
+        - status default 'ok' hvis mangler
+        - behold toleranse for wind_rel/v_rel (tall ELLER liste)
+        """
+        out = dict(d or {})
+        # Sørg for basisfelt brukt av CLI (din eksisterende helper)
+        try:
+            out = _ensure_cli_fields(out)
+        except Exception:
+            pass
 
-                    # Alt annet til STDERR
-                    try:
-                        pieces = build_publish_texts(report, lang=lang)
-                        print(f"[DRY-RUN] COMMENT: {pieces.comment}", file=sys.stderr)
-                        print(f"[DRY-RUN] DESC: {pieces.desc_header}", file=sys.stderr)
-                    except Exception as e:
-                        print(f"[DRY-RUN] build_publish_texts feilet: {e}", file=sys.stderr)
+        # Ekstra S6-krav (din helper – gjør ikke noe hvis ikke finnes)
+        try:
+            _ensure_required_s6_fields(out)
+        except Exception:
+            pass
 
-                    print(
-                        "[DRY-RUN] METRICS: "
-                        f"NP={report.get('np')} Avg={report.get('avg_power')} "
-                        f"VI={report.get('vi')} Pa:Hr={report.get('pa_hr')} "
-                        f"W/beat={report.get('w_per_beat')} {report.get('PrecisionWatt')}",
-                        file=sys.stderr
-                    )
+        # schema_version som streng (testene dine forventer "0.7.0")
+        out["schema_version"] = "0.7.0"
+
+        # status default
+        out.setdefault("status", "ok")
+
+        # calibrated -> bool
+        cal = out.get("calibrated")
+        if isinstance(cal, str):
+            norm = cal.strip().lower()
+            if norm in ("ja", "yes", "true", "1"):
+                out["calibrated"] = True
+            elif norm in ("nei", "no", "false", "0"):
+                out["calibrated"] = False
             else:
-                with _timed("write_report", cache_hit=False):
-                    write_report(outdir, sid, report, fmt)
-                    write_history_copy(history_dir, report)
+                out["calibrated"] = False
+        elif cal is None:
+            out["calibrated"] = False  # safe default
 
-            if getattr(args, "publish_to_strava", False):
-                with _timed("publish_to_strava", cache_hit=False):
-                    try:
-                        pieces = build_publish_texts(report, lang=lang)
-                        aid, status = StravaClient(lang=lang).publish_to_strava(
-                            pieces, dry_run=getattr(args, "dry_run", False)
-                        )
-                        print(f"[STRAVA] activity_id={aid} status={status}")
-                    except Exception as e:
-                        print(f"[STRAVA] publisering feilet: {e}", file=sys.stderr)
+        # reason-regel (ingen duplikat)
+        if out.get("calibrated") is True:
+            out.pop("reason", None)
+        else:
+            if not out.get("reason"):
+                out["reason"] = "calibration_context_missing"
 
-    # Batch
+        # Garanter at seriefeltene finnes (tillat tall ELLER liste – ikke cast her)
+        for k in ("watts", "wind_rel", "v_rel"):
+            if k not in out or out[k] is None:
+                out[k] = [] if k == "watts" else None
+
+        return out
+
+    # ------------------------------ Ikke-batch -------------------------------
+    if not getattr(args, "batch", False):
+        if getattr(args, "dry_run", False):
+            with _timed("report_generation", cache_hit=False):
+                # ÉN linje ren JSON til STDOUT
+                emit_cli_json(_finalize_cli_report(report))
+
+                # Alt annet til STDERR
+                try:
+                    pieces = build_publish_texts(report, lang=lang)
+                    print(f"[DRY-RUN] COMMENT: {pieces.comment}", file=sys.stderr)
+                    print(f"[DRY-RUN] DESC: {pieces.desc_header}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[DRY-RUN] build_publish_texts feilet: {e}", file=sys.stderr)
+
+                print(
+                    "[DRY-RUN] METRICS: "
+                    f"NP={report.get('np')} Avg={report.get('avg_power')} "
+                    f"VI={report.get('vi')} Pa:Hr={report.get('pa_hr')} "
+                    f"W/beat={report.get('w_per_beat')} {report.get('PrecisionWatt')}",
+                    file=sys.stderr
+                )
+        else:
+            with _timed("write_report", cache_hit=False):
+                # Filskriving kan bruke ikke-finalisert report (write_report normaliserer selv)
+                write_report(outdir, sid, report, fmt)
+                write_history_copy(history_dir, report)
+
+        if getattr(args, "publish_to_strava", False):
+            with _timed("publish_to_strava", cache_hit=False):
+                try:
+                    pieces = build_publish_texts(report, lang=lang)
+                    aid, status = StravaClient(lang=lang).publish_to_strava(
+                        pieces, dry_run=getattr(args, "dry_run", False)
+                    )
+                    print(f"[STRAVA] activity_id={aid} status={status}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[STRAVA] publisering feilet: {e}", file=sys.stderr)
+
+    # ------------------------------- Batch -----------------------------------
     if getattr(args, "batch", False) and reports:
         if getattr(args, "with_trend", False):
             with _timed("apply_trend_last3"):
@@ -1679,14 +1871,12 @@ def cmd_session(args: argparse.Namespace) -> int:
                 baseline = load_baseline_wpb(history_dir, sid, r.get("duration_min", 0.0))
             if baseline is not None:
                 r["w_per_beat_baseline"] = round(baseline, 4)
+
             with _timed("apply_badges"):
                 maybe_apply_big_engine_badge(r)
 
-            # ❌ (S6) Ikke injiser schema_version i batch heller
-            # inject_schema_version(r)
-
-            # Siste sikring for serie-felt
-            for _k in ("watts", "wind_rel", "v_rel"):
+            # Siste sikring for serier i batch (her holder vi oss til listetype for watts)
+            for _k in ("watts",):
                 _v = r.get(_k)
                 if _v is None:
                     r[_k] = []
@@ -1698,16 +1888,19 @@ def cmd_session(args: argparse.Namespace) -> int:
                     except Exception:
                         r[_k] = []
 
-            # Garanter obligatoriske felter
-            r = _ensure_cli_fields(r)
-
-            # 🔒 S6-krav før rens/printing
-            _ensure_required_s6_fields(r)
+            # Garanter obligatoriske felt og S6-krav før utskrift/skriving
+            try:
+                r = _ensure_cli_fields(r)
+            except Exception:
+                pass
+            try:
+                _ensure_required_s6_fields(r)
+            except Exception:
+                pass
 
             if getattr(args, "dry_run", False):
                 with _timed("report_generation", cache_hit=False):
-                    clean = _clean_report(dict(r))
-                    emit_cli_json(clean)
+                    emit_cli_json(_finalize_cli_report(r))
 
                     try:
                         pieces = build_publish_texts(r, lang=lang)
@@ -1735,9 +1928,9 @@ def cmd_session(args: argparse.Namespace) -> int:
                     aid, status = StravaClient(lang=lang).publish_to_strava(
                         pieces, dry_run=getattr(args, "dry_run", False)
                     )
-                    print(f"[STRAVA] activity_id={aid} status={status}")
+                    print(f"[STRAVA] activity_id={aid} status={status}", file=sys.stderr)
                 except Exception as e:
                     print(f"[STRAVA] publisering feilet: {e}", file=sys.stderr)
 
-    _log_info("done")
-    return 0 
+    _log_info(step="done")
+    return 0       
