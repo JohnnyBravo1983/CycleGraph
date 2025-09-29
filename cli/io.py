@@ -9,6 +9,29 @@ from typing import Any, Dict, List, Optional, Tuple
 # ----------------------------
 # Delimiter & utils
 # ----------------------------
+def _open_with_best_encoding(path: str, debug: bool = False):
+    """
+    Åpner en tekstfil robust på Windows ved å prøve flere vanlige enkodinger.
+    Rekkefølge: utf-8, utf-8-sig (BOM), cp1252, latin-1. Faller tilbake til latin-1 m/replace.
+    """
+    candidates = ["utf-8", "utf-8-sig", "cp1252", "latin-1"]
+    for enc in candidates:
+        try:
+            f = open(path, "r", encoding=enc, errors="strict", newline="")
+            # Test-les et lite vindu for å trigge ev. decode-feil med en gang
+            _ = f.read(2048)
+            f.seek(0)
+            if debug:
+                print(f"DEBUG IO: opened '{path}' with encoding={enc}", flush=True)
+            return f
+        except UnicodeDecodeError:
+            continue
+    # Siste utvei: latin-1 med erstatning (taper enkelte spesialtegn, men stopper ikke prosessering)
+    if debug:
+        print(f"DEBUG IO: fallback open '{path}' with encoding=latin-1, errors=replace", flush=True)
+    return open(path, "r", encoding="latin-1", errors="replace", newline="")
+
+
 def _detect_delimiter(sample: str) -> str:
     # enkel heuristikk før Sniffer (som kan feile på små filer)
     if ";" in sample and "," not in sample:
@@ -50,20 +73,32 @@ def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
       - 'watts' (float eller None)
       - 'hr' (float eller None)
     Godtar typiske alias for kraft/puls/tid.
+    Robust mot vanlige Windows/Strava-enkodinger (utf-8, utf-8-sig, cp1252, latin-1).
     """
     if not os.path.exists(path):
         if debug:
             print(f"DEBUG: {path} finnes ikke", file=sys.stderr)
         return []
 
-    with open(path, "r", encoding="utf-8") as f:
-        head = f.read(2048)
-    delim = _detect_delimiter(head)
-    if debug:
-        print(f"DEBUG: {path} delimiter='{delim}'", file=sys.stderr)
+    # Åpne robust og snus ut delimiter fra head
+    with _open_with_best_encoding(path, debug=debug) as f:
+        try:
+            head = f.read(2048)
+            f.seek(0)
+        except UnicodeDecodeError as e:
+            if debug:
+                print(f"DEBUG IO: failed to read head strictly: {e}", file=sys.stderr)
+            # Re-åpne mest tolerante vei
+            f.close()
+            f = open(path, "r", encoding="latin-1", errors="replace", newline="")
+            head = f.read(2048)
+            f.seek(0)
 
-    rows: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as f:
+        delim = _detect_delimiter(head)
+        if debug:
+            print(f"DEBUG: {path} delimiter='{delim}'", file=sys.stderr)
+
+        rows: List[Dict[str, Any]] = []
         reader = csv.DictReader(f, delimiter=delim)
         field_map = _norm_headers(reader.fieldnames)
         if debug:
@@ -71,7 +106,7 @@ def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
 
         time_keys = ("t", "time", "timestamp", "date", "datetime")
         power_keys = ("watts", "watt", "power", "power_w", "pwr")
-        hr_keys = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
+        hr_keys    = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
 
         idx = 0
         for raw in reader:
@@ -91,10 +126,10 @@ def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
             idx += 1
 
     if debug:
-        total = len(rows)
+        total   = len(rows)
         have_pw = sum(1 for r in rows if isinstance(r.get("watts"), (int, float)))
         have_hr = sum(1 for r in rows if isinstance(r.get("hr"), (int, float)))
-        both = sum(1 for r in rows if isinstance(r.get("watts"), (int, float)) and isinstance(r.get("hr"), (int, float)))
+        both    = sum(1 for r in rows if isinstance(r.get("watts"), (int, float)) and isinstance(r.get("hr"), (int, float)))
         print(
             f"DEBUG: read {total} rows from {path}; with_watts={have_pw} with_hr={have_hr} with_both={both}",
             file=sys.stderr
@@ -103,7 +138,6 @@ def read_session_csv(path: str, debug: bool = False) -> List[Dict[str, Any]]:
             print(f"DEBUG: first_row_norm={rows[0]}", file=sys.stderr)
 
     return rows
-
 # ----------------------------
 # Efficiency CSV (for efficiency subcommand)
 # Gir power[], hr[], hz

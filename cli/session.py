@@ -711,6 +711,8 @@ def _normalize_sample_for_core(s: dict) -> dict:
 
 def _read_csv_for_core_samples(csv_path: str, debug: bool = False) -> list[dict]:
     """Les CSV direkte og bygg core-samples med v_ms/altitude_m/lat/lon/device_watts."""
+    # Lokal import for å unngå sirkulær import ved modul-load
+    from cli.io import _open_with_best_encoding  # type: ignore
     import csv
 
     def _to_float(v):
@@ -744,14 +746,34 @@ def _read_csv_for_core_samples(csv_path: str, debug: bool = False) -> list[dict]
         except Exception:
             return None
 
-    with open(csv_path, "r", encoding="utf-8") as f:
-        head = f.read(2048)
-        f.seek(0)
+    # --- ROBUST ÅPNING + DELIMITER-SNIFF ---
+    with _open_with_best_encoding(csv_path, debug=debug) as f:
         try:
-            dialect = csv.Sniffer().sniff(head)
+            head = f.read(2048)
+            f.seek(0)
+        except UnicodeDecodeError as e:
+            if debug:
+                print(f"DEBUG CORE: failed to read head strictly: {e}", flush=True)
+            # Siste utvei – reopen tolerant
+            f.close()
+            f = open(csv_path, "r", encoding="latin-1", errors="replace", newline="")
+            head = f.read(2048)
+            f.seek(0)
+
+        try:
+            dialect = csv.Sniffer().sniff(head, delimiters=",;")
+            delim = getattr(dialect, "delimiter", ",")
             rdr = csv.reader(f, dialect)
         except Exception:
-            rdr = csv.reader(f)
+            delim = ","
+            rdr = csv.reader(f, delimiter=delim)
+
+        if debug:
+            try:
+                print(f"DEBUG CORE: delimiter='{delim}'", flush=True)
+            except Exception:
+                pass
+
         rows = list(rdr)
 
     if not rows:
@@ -775,7 +797,8 @@ def _read_csv_for_core_samples(csv_path: str, debug: bool = False) -> list[dict]
         alt    = _to_float(pick(r, "altitude", "altitude_m", "elev", "elevation"))
         dw     = _to_float(pick(r, "device_watts", "watts", "power", "pwr"))
 
-        if speed is not None and speed > 50.0:  # km/t → m/s
+        # Hvis speed feilaktig er km/t, konverter til m/s
+        if speed is not None and speed > 50.0:
             speed = speed / 3.6
 
         t_sec = _t_to_sec(t_raw)
@@ -796,8 +819,6 @@ def _read_csv_for_core_samples(csv_path: str, debug: bool = False) -> list[dict]
         if samples:
             print(f"DEBUG CSV-FALLBACK: first={samples[0]}", file=sys.stderr)
     return samples
-# ── SLUTT: nye helpere ────────────────────────────────────────────────────────
-
 DATE_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})")
 
 def _parse_date_from_sid_or_name(name: str):

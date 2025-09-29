@@ -1,22 +1,30 @@
-import { useEffect } from "react";
+// frontend/src/routes/SessionView.tsx
+import { useEffect, useMemo } from "react";
+import { useParams, Link } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
-
-// Enkle UI-snutter (inline for å slippe ekstra filer)
-function ModeBadge() {
-  const isMock = import.meta.env.VITE_USE_MOCK !== "0";
-  return (
-    <span
-      title={isMock ? "Data fra mockSession" : "Data fra backend"}
-      className="text-[11px] px-2 py-1 rounded-full border"
-    >
-      MODE: {isMock ? "MOCK" : "LIVE"}
-    </span>
-  );
-}
+import ModeBadge from "../components/ModeBadge";
+import SessionCard from "../components/SessionCard";
 
 function Spinner() {
   return <div className="inline-block animate-pulse select-none">Laster…</div>;
+}
+
+function EnvBadge({ source }: { source: "mock" | "live" | null }) {
+  const tone =
+    source === "live"
+      ? "bg-blue-100 text-blue-800"
+      : source === "mock"
+      ? "bg-gray-100 text-gray-800"
+      : "bg-slate-100 text-slate-800";
+  const label = source === "live" ? "Live" : source === "mock" ? "Mock" : "—";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}
+    >
+      {label}
+    </span>
+  );
 }
 
 function renderScalarOrList(
@@ -30,70 +38,90 @@ function renderScalarOrList(
   return v ?? "–";
 }
 
+function hasWattsValue(w: SessionReport["watts"]): boolean {
+  if (typeof w === "number") return Number.isFinite(w);
+  if (Array.isArray(w)) return w.some((x) => Number.isFinite(x as number));
+  return false;
+}
+
+function wattsPreview(w: SessionReport["watts"]): string {
+  if (typeof w === "number" && Number.isFinite(w)) {
+    return `${Math.round(w)} W`;
+  }
+  if (Array.isArray(w) && w.length > 0) {
+    const slice = w.slice(0, 10);
+    const body = slice
+      .map((x) => (Number.isFinite(x as number) ? x : "NaN"))
+      .join(", ");
+    const tail = w.length > 10 ? ", …" : "";
+    return `[${body}${tail}]`;
+  }
+  return "—";
+}
+
 export default function SessionView() {
-  const { session, loading, error, fetchSession } = useSessionStore();
+  const params = useParams();
+  const id = useMemo(() => params.id ?? "mock", [params.id]);
+
+  const { session, source, loading, error, fetchSession } = useSessionStore();
 
   useEffect(() => {
-    // Hent en demo-økt ved mount
-    fetchSession("demo");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // fetchSession er stabil i vår Zustand-implementasjon
+    fetchSession(id);
+  }, [id, fetchSession]);
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="page">
+      <div className="page-header">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Økt</h1>
-          <ModeBadge />
+          <EnvBadge source={source} />
+          {session && <ModeBadge />}
         </div>
-        <button
-          onClick={() => fetchSession("demo")}
-          className="px-3 py-2 rounded-2xl shadow hover:shadow-md border"
-        >
+        <button onClick={() => fetchSession(id)} className="btn">
           Oppdater
         </button>
       </div>
 
+      <nav className="text-sm text-slate-600 mb-2">
+        <span>Hopp til: </span>
+        <Link className="underline" to="/session/mock">
+          mock
+        </Link>
+        <span> · </span>
+        <Link className="underline" to="/session/ABC123">
+          live eksempel
+        </Link>
+      </nav>
+
       {loading && (
-        <div className="rounded-2xl border p-4">
+        <div className="card">
           <Spinner />
         </div>
       )}
 
       {!loading && error && (
-        <div className="rounded-2xl border p-4 text-red-700">
-          Kunne ikke hente økt: <span className="font-mono">{error}</span>
+        <div className="card text-red-700">
+          Kunne ikke hente økt: <span className="mono">{error}</span>
         </div>
       )}
 
       {!loading && !error && session && (
         <div className="grid gap-4">
-          <div className="rounded-2xl border p-4">
-            <div className="text-sm text-gray-500">schema_version</div>
-            <div className="font-mono">{session.schema_version}</div>
+          {/* Oppsummeringskort */}
+          <SessionCard session={session} />
+
+          {/* Ekstra: schema_version */}
+          <div className="card">
+            <div className="k">schema_version</div>
+            <div className="mono">{session.schema_version}</div>
           </div>
 
-          <div className="rounded-2xl border p-4 grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-sm text-gray-500">avg_hr</div>
-              <div className="font-mono">{session.avg_hr ?? "–"}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">calibrated</div>
-              <div className="font-mono">{String(session.calibrated)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">status</div>
-              <div className="font-mono">{session.status}</div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border p-4">
-            <div className="text-sm text-gray-500">watt-data</div>
-            {session.watts && session.watts.length > 0 ? (
-              <div className="font-mono text-sm break-words">
-                [{session.watts.slice(0, 10).join(", ")}
-                {session.watts.length > 10 ? ", …" : ""}]
+          {/* Ekstra: watt-data (rå visning) */}
+          <div className="card">
+            <div className="k">watt-data</div>
+            {hasWattsValue(session.watts) ? (
+              <div className="mono text-sm break-words">
+                {wattsPreview(session.watts)}
               </div>
             ) : (
               <div className="italic text-gray-600">
@@ -102,16 +130,17 @@ export default function SessionView() {
             )}
           </div>
 
-          <div className="rounded-2xl border p-4 grid grid-cols-2 gap-4">
+          {/* Ekstra: wind_rel / v_rel */}
+          <div className="card grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <div className="text-sm text-gray-500">wind_rel</div>
-              <div className="font-mono text-sm break-words">
+              <div className="k">wind_rel</div>
+              <div className="mono text-sm break-words">
                 {renderScalarOrList(session.wind_rel)}
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-500">v_rel</div>
-              <div className="font-mono text-sm break-words">
+              <div className="k">v_rel</div>
+              <div className="mono text-sm break-words">
                 {renderScalarOrList(session.v_rel)}
               </div>
             </div>
