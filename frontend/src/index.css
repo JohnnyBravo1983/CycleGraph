@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* (valgfritt) egne globale regler */
+html, body, #root { height: 100%; }

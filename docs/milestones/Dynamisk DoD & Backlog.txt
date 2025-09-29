@@ -151,36 +151,71 @@ Oppdatér CGS v1.1-kobling.
 Nytt (B): Refaktorér testoppsett (conftest.py, test_utils.py) for mindre mocking-knot.
 DoD: alle tester grønne; CGS konsumerer nye felter uten regress.
 
+
+🔜 PLANLAGT (IKKE STARTET) – Frontlog
+
 S8 — Scaffold & dataadapter (🧩)
+
 React/Tailwind scaffold, routing, state.
-Nytt (B): Bruk eksisterende Python-API analyze_session() som backend-adapter (forenkler integrasjon).
-DoD: viser én økt (mock) i UI; bytte mock→live via .env.
+Bruk eksisterende Python-API analyze_session() som backend-adapter (forenkler integrasjon).
+Nytt: sørge for at frontend alltid forventer schema_version i output og håndterer HR-only fallback.
+
+DoD:
+Viser én økt (mock) i UI; bytte mock→live via .env.
+JSON-output fra backend valideres mot schema_version.
+HR-only fallback vises uten crash i UI.
 
 S9 — Økt-kort & nøkkelmetrikker (📊)
 Øktvisning: NP, IF, VI, Pa:Hr, W/slag, CGS, PrecisionWatt.
 Indoor/outdoor-chip + “Kalibrert: Ja/Nei”.
 Varsel-banner for no-watt-økter.
-DoD: enhetstester for formattere; visuell smoke på mobile/desktop.
+Nytt: golden-krav (≥30 samples) gjør at UI må kunne håndtere kortere økter kontrollert (feilmelding/tom state).
+
+DoD:
+Enhetstester for formattere; visuell smoke på mobile/desktop.
+UI håndterer korte økter (<30 samples) med kontrollert beskjed.
+“Kalibrert: Nei” beholder reason feltet synlig.
 
 S10 — Precision Watt UI (🎛️)
 Graf/komponent: watt + usikkerhetsbånd.
 Tooltip: datakilde (powermeter/estimat), værbruk, profil.
-DoD: render uten jank med 1 Hz data (2 h økt).
+Nytt: ta hensyn til at CLI nå beholder falsy-felter (calibrated=False), så UI må vise eksplisitt Nei/Ja.
+DoD:
+Render uten jank med 1 Hz data (2 h økt).
+Tooltip viser calibrated + datakilde korrekt også når verdien er False.
 
 S11 — Trender & liste (🗂️)
 Liste over økter, enkel filter/sort.
 Trendgraf (NP/PrecisionWatt over tid).
-DoD: 30+ økter fungerer uten lagg; tom-state og feil-state håndteres.
+Nytt: sikre robusthet – test med ≥30 økter for ytelse, men også edge-cases (null HR, GPS-drift).
+
+DoD:
+30+ økter fungerer uten lagg.
+Tom-state og feil-state håndteres.
+Edge-case økter (null HR, GPS-drift) rendres uten crash.
 
 S12 — Kalibreringsguide (🧭)
 Onboarding-kort for første outdoor-økt.
 Stegvis modal for kalibreringsbakke.
 Info for brukere uten wattmåler (forklare fallback).
-DoD: “Ferdig kalibrert” trigger backend-flagg; guide kan hoppes.
+Nytt: knytt guide til schema-versionerte felt (calibrated, cda, crr, reason).
+DoD:
+“Ferdig kalibrert” trigger backend-flagg.
+Guide kan hoppes.
+UI viser backend-verdier i henhold til schema v0.7.x.
 
 S13 — QA, polish & CI (✅)
+
 Tilgjengelighet (kontraster, tastatur).
 Liten CI (lint, build, vitest hvis brukt).
 Docs: “Using Precision Watt”.
-DoD: Lighthouse pass (perf>80, a11y>90); build grønn i Actions.
-CI inkluderer relevante tester per sprint; sanity-test kun ved publisering.
+
+Nytt:
+CI skal kjøre schema-kontrakttest mot session_v0.7.0.json.
+Logging må testes i CI (stdout = ren JSON, stderr = debug).
+DoD:
+Lighthouse pass (perf>80, a11y>90).
+
+Build grønn i Actions.
+CI inkluderer pytest/cargo + kontrakttest mot schema.
+Sanity-test kun ved publisering.

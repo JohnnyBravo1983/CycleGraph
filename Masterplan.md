@@ -43,13 +43,14 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-09-09 | M7.5 | Backend-forfining (CGS v1.1, explain)  | Ferdig   | CI satt opp, systemtest grønn, perf ~0.73s, fixes gjort, forebyggende tester planlagt. |
 | 2025-09-09 | M7.5 | Forebyggende tester                    | Ferdig   | Pytest ValueError for `_analyze_session_bridge`, Rust golden-test for `w_per_beat` (NaN/null/mismatch). Alle tester grønne. |
 | 2025-09-09 | M7.5 | GitHub Actions (basic CI)              | Ferdig   | Minimal workflow: `pytest -q` og `cargo test --tests -q` kjøres på push/PR. |---
-| 2025-09-10 | M7.6 | Strava Fetch & modusdeteksjon (S1)     | Ferdig   | Auto-modus med trainer/sport_type/device_watts, CLI-flag --mode, JSON-ruting. |
-| 2025-09-12 | M7.6 | No-watt fallback & policy (S1B)        | Ferdig   | Fallback til hr_only implementert, structured WARN, metrics lagt inn, tester grønne.
+| 2025-09-10 | S1   | Strava Fetch & modusdeteksjon (S1)     | Ferdig   | Auto-modus med trainer/sport_type/device_watts, CLI-flag --mode, JSON-ruting. |
+| 2025-09-12 | S1B  | No-watt fallback & policy (S1B)        | Ferdig   | Fallback til hr_only implementert, structured WARN, metrics lagt inn, tester grønne.
 | 2025-09-16 | S2   | Vær & profiler                         | Ferdig   | Værklient med caching/validering (vind, temp, trykk), profilsettings og CLI-integrasjon med justert effektivitet. Tester grønne, fallback og debug-modus sikrer robusthet.
 | 2025-09-19 | S3   | Fysikkmotor                            | Ferdig   | Kraftmodell (gravitasjon, rulling, aero, akselerasjon, drivverkstap), smoothing/outlier-kutt, NP/avg/glatting i CLI. Golden test integrert i CI (±1–2W stabilt). Alle tester grønne. |
 | 2025-09-23 | S4   | Kalibrering                            | Ferdig   | CdA/Crr-fit med MAE ≤10 %, lagring av profil (profile.json), CLI-integrasjon med flagg --calibrate. Tester grønne i cargo/pytest. |
 | 2025-09-25 | S5   | Indoor pipeline + GPS/Wind integrasjon | Ferdig   | Vindkorrigert fysikkmotor koblet på indoor/outdoor-pipeline. CLI-output viser watts, wind_rel, v_rel, calibrated, status. Bonus: backend-API `analyze_session()` for frontend (M8). Tester grønne i cargo/pytest. |
 | 2025-09-26 | S6   | CLI/Reports & observabilitet	     | Ferdig 	| Rapportfelt (NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ± usikkerhet), strukturert JSON-logging, metrics for no-watt, docs. Tester grønne i cargo/pytest. Små inkonsistenser ryddet manuelt, golden stabil ±1–2 W.
+| 2025-09-29 | S7   | QA & Hardening                         | Ferdig   | Schema-versionering (v0.7.0) og avg_hr lagt til i CLI/API-output, falsy-felter beholdes. Golden-datasett utvidet til ≥30 samples. Edge-case-tester (vær, GPS-drift, null HR, korte økter) implementert, HR-only plausibilitet med fallback. Robust JSON-uttrekk i tester håndterer stdout-støy. CGS konsumerer nye felter uten regressjoner. Pytest 55 passert / 4 skipped (akseptert), cargo test alle grønne. |
 
 ## Milepælsrapporter Status Pr 23.09.2025
 
@@ -158,12 +159,33 @@ S6 – CLI/Reports & observabilitet – status per 2025-09-26 Ferdig
 ✅ Tester: cargo test -q (fysikk + golden syntetisk GPS/vind) grønne; pytest -q (CLI dry-run + API) grønne.
 🔎 Observasjoner: mindre inkonsistenser (reason vs calibrated, status=LIMITED) ryddet i CLI; golden deterministisk ±1–2 W; logging gir god sporbarhet.
 
-🆕 DoD-synk (kjernekrav oppdatert):
-JSON-schema versjonering av CLI/API-output (schema_version) – planlagt S7.
-Datasettkrav (≥30 samples pr. testsegment, indoor + outdoor) – planlagt S7.
-CLI-flagg-dokumentasjonstabell i docs/ – planlagt S8.
-📝 Endringer: cli/analyze.py, cli/session.py, cli/session_api.py, tests/test_cli.py, tests/test_api.py, tests/test_golden.py, samt mindre justeringer i core for feltene som eksponeres.
+S7 – QA & Hardening – status per 2025-09-29 Ferdig
+✅ Schema-versionering (schema_version = "0.7.0") lagt til i CLI/API-output.
+✅ avg_hr normaliseres og beholdes i både filer og CLI-stdout.
+✅ Falsy-felter (f.eks. calibrated=False) beholdes i output.
+✅ Golden-datasett (indoor, outdoor, hr-only) utvidet til ≥30 samples med plausibel variasjon.
+✅ Edge-case-tester lagt til (manglende vær, GPS-drift, null HR, korte økter) – håndteres kontrollert uten crash.
+✅ HR-only plausibilitet sikret via fallback-logikk.
+✅ Robust JSON-uttrekk i tester håndterer stdout-støy (debug-linjer).
+✅ Tester: cargo test -q alle grønne; pytest -q 55 passert / 4 skipped (akseptert).
 
+🔎 Observasjoner:
+CLI-stdout normaliseres, men debug-linjer kan fortsatt dukke opp i stdout med --debug; testene plukker siste gyldige JSON.
+CGS konsumerer nye felter uten regressjoner.
+Edge-case-håndtering bekreftet stabil og idempotent.
+
+🆕 DoD-synk (kjernekrav oppdatert):
+CLI/API-output skal alltid inkludere schema_version og avg_hr.
+Golden-datasett skal ha ≥30 samples.
+Edge-cases (vær, GPS-drift, null HR, korte økter) skal dekkes med tester og håndteres kontrollert.
+Falsy-felter skal beholdes i JSON-output.
+
+📝 Endringer:
+cli/analyze.py, cli/session.py, cli/session_api.py,
+tests/conftest.py, tests/test_utils.py, tests/test_schema.py,
+tests/test_golden_min_samples.py, tests/test_golden_variants.py, tests/test_golden_hr_only.py,
+docs/schema/session_v0.7.0.json, docs/schema.md,
+tests/data/golden_indoor.csv, tests/data/golden_outdoor.csv, tests/data/golden_hr_only.csv.
 
 
 ## Oppdateringsrutine
