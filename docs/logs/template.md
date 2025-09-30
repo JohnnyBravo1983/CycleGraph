@@ -374,62 +374,84 @@ Tester:
 
 ✅ pytest -q: alle tester grønt  
 ✅ cargo test: alle tester grønt
-
-
 Observasjoner:
-
 CLI genererer deterministisk rapport med NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt
-
 Fallback-modus (hr_only) fungerer ved manglende wattdata
-
 Strukturert logging med level, step, component, cache_hit
-
 Metrikk sessions_no_power_total logges eksplisitt med verdi 1 og session_id
-
 Dokumentasjon oppdatert med rapportlogikk, observabilitet og begrensninger
-
 CGS v1 utvidet med observabilitet og PrecisionWatt
-
 Slettes av gamle sprinter (m6–m8) ryddet repoet
 
 Status:
 ✅ Ferdig (alle DoD bestått, sprintmål oppnådd)
 
-📋 Sluttrapport – S7 QA & Hardening
-Startet: 26. september 2025 · Avsluttet: 29. september 2025
-Branch: feature/s7-qa-schema
+✅ Sprint: 7 – QA & Stabilisering
+Branch: feature/s7-qa
 
-Oppgave:
-Styrke robusthet og kompatibilitet i CLI/API-output og testmiljø: schema-versjonering, HR-støtte, edge-cases, og golden-datasett.
-
-Commits (forkortede SHA):
-a1f3c7d – Add schema_version to CLI/API output
-b4e9d21 – Add session_v0.7.0.json and schema.md
-c7a2e88 – Introduce test_utils.py with HR helpers
-d9f1b34 – Extend golden datasets to ≥30 samples
-e2c5a90 – Add edge-case tests (missing weather, GPS drift, null HR, short session)
-f3d7e12 – Add HR-only plausibility tests with fallback logic
-g8b1f55 – Finalize CGS compatibility and normalize output
+Commits:
+9f3b2c1 – Add schema_version to session reports
+4d8a7f9 – Implement HR-only fallback in analyzer
+d21e5c4 – Extend CLI with new flags (weather, cfg, debug, etc.)
+a7c6f0b – Update golden tests for HR-only + schema_version
+5e1b9d2 – Improve JSON logging and metrics coverage
 
 Endrede filer:
-cli/analyze.py · cli/session.py · cli/session_api.py · tests/conftest.py · tests/test_utils.py · tests/test_schema.py · tests/test_golden_min_samples.py · tests/test_golden_variants.py · tests/test_golden_hr_only.py · docs/schema/session_v0.7.0.json · docs/schema.md · tests/data/golden_indoor.csv · tests/data/golden_outdoor.csv · tests/data/golden_hr_only.csv
+cli/analyze.py
+cli/cmd_session.py
+frontend/src/components/SessionCard.tsx
+tests/test_golden_outdoor.py
+tests/test_golden_hr_only.py
+tests/test_schema.py
+core/src/lib.rs
+core/src/metrics.rs
+core/tests/*
 
-Testresultater:
-✅ pytest: 55 passed, 4 skipped (aksepterte skips)
-✅ cargo test: alle tester grønne
+Tester:
+pytest: 55 passed, 4 skipped (OK, forventede skips)
+cargo test: 17 passed (alle grønne)
+Observasjoner:
+schema_version felt lagt til i output, frontend må forvente dette.
+Robust fallback når bare HR-data er tilgjengelig (HR-only).
+CLI utvidet med full flaggdekning (input, weather, format, lang, out, validate, dry-run, log-level, cfg, debug).
+JSON-logging og observabilitet fungerer etter plan.
+Golden-tester oppdatert og akseptert, både outdoor og HR-only.
+Status: ✅ Ferdig
+
+
+✅ Sprint: S8 — Scaffold & dataadapter
+Branch: main
+
+Commits:
+- <hash> — "✅ Sprint 8: build & DoD-verifikasjon fullført"   (fyll inn hash: git log -1 --oneline)
+
+Endrede filer:
+- frontend/src/lib/api.ts
+- frontend/src/lib/schema.ts
+- frontend/src/routes/SessionView.tsx
+- frontend/src/components/SessionCard.tsx
+- frontend/docs/cli_flags.md
+- (lokalt, ikke i git): frontend/.env.local
+- (ev. justert underveis): vite.config.ts, tsconfig*.json, .eslintrc.*
+
+Tester:
+- pytest: 55 passed, 4 skipped (~17s)  [fra 28.09.2025-kjøringen]
+- cargo test (Rust): 17/17 tester ok
+- FE build: vite v7.1.7 — ✓ built (ca. 327 kB JS gzip ~102 kB)
 
 Observasjoner:
-schema_version = "0.7.0" injisert og validert i CLI/API.
-avg_hr og øvrige metrikker normaliseres konsistent; kontrakt idempotent og uten duplikater.
-Golden-datasett utvidet til ≥30 samples (indoor/outdoor/hr-only) med plausibel variasjon; ingen NaN/inf/negative.
-Edge-case-dekning: manglende vær, GPS-drift, null HR, korte økter → ingen crash, kontrollert oppførsel.
-HR-only plausibilitet på plass med fallback-logikk.
-CLI-stdout normaliseres og inkluderer alltid schema_version + avg_hr. Falsy-felter (som calibrated=False) beholdes.
-Debug-linjer kan fortsatt forekomme i stdout hvis --debug brukes, men testene håndterer dette robust ved å plukke siste gyldige JSON.
-CGS konsumerer nye felt uten regressjoner.
-Anbefalinger (neste sprint):
-Flytt all ikke-JSON logging konsekvent til STDERR, slik at CLI-stdout alltid er ren JSON.
-Etabler kontrakttest i CI mot docs/schema/session_v0.7.0.json.
+- Windows/OneDrive låste `esbuild.exe` → EPERM ved `npm ci`. Løst ved å:
+  - kjøre i PowerShell (Admin) utenfor VS Code,
+  - slette node_modules + cache, og bruke `npm install` (ikke `npm ci`),
+  - evt. kjøre prosjekt utenfor OneDrive-sti.
+- Prodvisning: bruk `npx serve -s dist` (SPA-modus) for å unngå 404.
+- ENV-switch fungerer: `.env.local` (`VITE_BACKEND_MODE=mock|live`, `VITE_BACKEND_URL=...`).
+- Robusthet: `schema_version` valideres og gir kontrollert feilkort ved mangler/feil.
+- HR-only fallback håndteres uten crash; tydelig infoboks i UI.
+- CLI-flagg-tabell i `docs/cli_flags.md` rendres pent i VS Code og GitHub.
+- Innsikt for videre arbeid: liten “S8.5” mini-sprint (stubs for PrecisionWatt + short-session guard) vil trolig spare 3–7h i S9–S12 for ~2h innsats.
+
+Status: Ferdig
 
 
 📋 Delta Sammendrag av Sluttrapporter
@@ -481,12 +503,30 @@ Status: Ferdig.
 Observasjoner: CLI-rapportene stabile, logging gir sporbarhet, golden-test deterministisk ±1–2W. Mindre inkonsistenser (reason vs calibrated, status=LIMITED) ryddet manuelt. Flere golden-tester på ekte segmenter legges til i S7.
 Status: Ferdig.
 
-Sprint 7 – QA & Hardening
-Schema-versjonering (v0.7.0) innført i CLI/API-output, avg_hr og falsy-felter (som calibrated=False) beholdes.
-Golden-datasett utvidet til ≥30 samples (indoor/outdoor/hr-only) med plausibel variasjon.
-Edge-case-tester lagt til (manglende vær, GPS-drift, null HR, korte økter) – alle håndtert uten crash.
-HR-only plausibilitet sikret via fallback-logikk.
-Robust JSON-uttrekk i tester håndterer ikke-JSON stdout-støy; CGS konsumerer nye felter uten regressjoner.
-✅ pytest: 55 passert, 4 skipped (akseptert)
-✅ cargo test: alle tester grønne
-Status: Ferdig
+Sprint 6 – Rapportfelt & Observabilitet
+CLI genererer deterministiske rapporter med NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt. Fallback-modus (HR-only) fungerer uten wattdata. Strukturert logging lagt til (level, step, component, cache_hit), og metrikken sessions_no_power_total logges eksplisitt. Dokumentasjon oppdatert med observabilitet, rapportlogikk og kjente begrensninger. Repo ryddet for gamle sprintmapper.
+
+✅ cargo test – alle grønne.
+✅ pytest – alle grønne.
+Observasjoner: rapportfelt dekker alle metrikker, logging gir sporbarhet, fallback robust. Dokumentasjon og CGS v1 oppdatert.
+Status: Ferdig.
+
+
+Sprint 7 – QA & Stabilisering
+schema_version lagt til i alle rapporter, frontend forventer feltet. HR-only fallback implementert (avg_hr, status=hr_only_demo). CLI utvidet med full flaggdekning (input, weather, out, format, lang, validate, dry-run, log-level, cfg, debug). JSON-logging og metrikker validert, golden-tester oppdatert (outdoor + HR-only).
+
+✅ cargo test – 17/17 grønne (metrics, physics, golden).
+✅ pytest – 55 passed, 4 skipped (forventede skips).
+Observasjoner: frontend får stabil output med schema_version. Robust degradert modus ved HR-only. Logging/observabilitet fungerer, output deterministisk.
+Status: Ferdig.
+
+Sprint 8 – Scaffold & dataadapter
+React/Tailwind scaffold satt opp med routing og state-management. Backend-adapter implementert (mock → live) med ENV-switch via .env.local. Schema-version validering lagt inn med kontrollert feilhåndtering, HR-only fallback støttet. Dokumentasjonstabell for CLI-flagg opprettet i docs/cli_flags.md. Prod-build verifisert (vite v7.1.7) og servert via npx serve -s dist.
+
+✅ cargo test – 17/17 tester grønne.
+✅ pytest – 55 passed, 4 skipped (~17s).
+✅ npm run build – grønn, ~327 kB JS gzip ~102 kB.
+
+Observasjoner: Windows/OneDrive ga EPERM unlink-feil ved npm ci; løst via PowerShell-admin og npm install. CLI-flagg-tabellen rendres pent i både VS Code og GitHub. Innsikt: liten “S8.5” mini-sprint (stubs for PrecisionWatt + short-session guard) vil spare 3–7h i S9–S12 for ca. 2h investering.
+
+Status: Ferdig.

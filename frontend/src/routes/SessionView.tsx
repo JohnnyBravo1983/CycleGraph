@@ -1,10 +1,11 @@
 // frontend/src/routes/SessionView.tsx
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
 import ModeBadge from "../components/ModeBadge";
 import SessionCard from "../components/SessionCard";
+import { guessSampleLength, isShortSession } from "../lib/guards";
 
 function Spinner() {
   return <div className="inline-block animate-pulse select-none">Laster…</div>;
@@ -59,15 +60,57 @@ function wattsPreview(w: SessionReport["watts"]): string {
   return "—";
 }
 
+/** ---- DEV-sanity helpers (no-any) -------------------------------------- */
+type PrecisionFields = {
+  precision_watt?: unknown;
+  precision_watt_ci?: unknown;
+};
+
+function getDevPrecisionCounts(
+  s: SessionReport
+): { pw: number; ci: number } | null {
+  const pf: PrecisionFields = s as unknown as PrecisionFields;
+
+  const pwArr = Array.isArray(pf.precision_watt)
+    ? (pf.precision_watt as unknown[])
+    : null;
+  if (!pwArr) return null;
+
+  const ciArr = Array.isArray(pf.precision_watt_ci)
+    ? (pf.precision_watt_ci as unknown[])
+    : [];
+
+  return { pw: pwArr.length, ci: ciArr.length };
+}
+/** ----------------------------------------------------------------------- */
+
 export default function SessionView() {
   const params = useParams();
   const id = useMemo(() => params.id ?? "mock", [params.id]);
 
   const { session, source, loading, error, fetchSession } = useSessionStore();
 
+  // 🔹 TRINN 4: kort-økt guard state
+  const [sampleCount, setSampleCount] = useState<number>(0);
+  const [shortSession, setShortSession] = useState<boolean>(false);
+
   useEffect(() => {
     fetchSession(id);
   }, [id, fetchSession]);
+
+  // 🔹 TRINN 4: beregn samples + kort-økt når session endrer seg
+  useEffect(() => {
+    if (!session) {
+      setSampleCount(0);
+      setShortSession(false);
+      return;
+    }
+    const n = guessSampleLength(session);
+    setSampleCount(n);
+    setShortSession(isShortSession(n, 30));
+  }, [session]);
+
+  const devCounts = import.meta.env.DEV && session ? getDevPrecisionCounts(session) : null;
 
   return (
     <div className="page">
@@ -109,6 +152,27 @@ export default function SessionView() {
         <div className="grid gap-4">
           {/* Oppsummeringskort */}
           <SessionCard session={session} />
+
+          {/* 🔹 TRINN 5: DEV-sanity for Precision Watt (kun i dev, lint-safe) */}
+          {devCounts && (
+            <div className="mt-0 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-800 text-xs">
+              <span className="mr-2 rounded bg-slate-200 px-2 py-0.5 font-mono">
+                DEV
+              </span>
+              <span className="mr-4">PW samples: {devCounts.pw}</span>
+              <span>CI: {devCounts.ci}</span>
+            </div>
+          )}
+
+          {/* 🔹 TRINN 4: kort-økt info-kort */}
+          {shortSession && (
+            <div className="mt-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+              <div className="font-medium">Kort økt – viser begrenset visning</div>
+              <div className="text-sm opacity-80">
+                Samples: {sampleCount} (krever ≥ 30 for full analyse)
+              </div>
+            </div>
+          )}
 
           {/* Ekstra: schema_version */}
           <div className="card">
