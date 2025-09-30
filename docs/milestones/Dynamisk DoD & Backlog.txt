@@ -132,7 +132,7 @@ Hvis calibrated=True → reason=None.
 Når GPS/vind brukes → mode="outdoor".
 status avledes fra HR når mulig (ellers behold LIMITED).
 
-🔜 PLANLAGT (IKKE STARTET) – Frontlog
+
 S6 — CLI/Reports & observabilitet (📈)
 Rapportfelt: NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ±usikkerhet.
 Strukturerte logger (level, tidsbruk, cache hits).
@@ -165,14 +165,14 @@ Viser én økt (mock) i UI; bytte mock→live via .env.
 JSON-output fra backend valideres mot schema_version.
 HR-only fallback vises uten crash i UI.
 
-🔜 PLANLAGT (IKKE STARTET) – Frontlog
 
 S8.5 — Mini-sprint: Precision Watt stubs + short-session guard (🧩)
+Status: ✅ Ferdig
 
 Oppgaver
-Utvid SessionReport med: precision_watt, precision_watt_ci, sources, cda, crr, reason (nullable).
-Oppdater mockSession med små dummy-serier.
-Dev-sanity i SessionView (kun DEV): vis antall PW/CI samples.
+Utvidet SessionReport med: precision_watt, precision_watt_ci, sources, cda, crr, reason (nullable).
+Oppdatert mockSession med dummy-serier (40 samples).
+Dev-sanity i SessionView (kun DEV): teller PW/CI samples.
 Short-session guard (<30 samples): kontrollert melding, ingen crash.
 
 DoD
@@ -180,18 +180,23 @@ App bygger grønt med nye felter.
 Dev-sanity synlig i DEV.
 Kort-økt gir kontrollert beskjed.
 
+
+🔜 PLANLAGT (IKKE STARTET) – Frontlog
+
 S9 — Økt-kort & nøkkelmetrikker (📊)
 Oppgaver
 Øktvisning: NP, IF, VI, Pa:Hr, W/slag, CGS, PrecisionWatt (verdi, ikke graf).
 Indoor/outdoor-chip + “Kalibrert: Ja/Nei”.
 Varsel-banner for no-watt-økter.
 Kort-økt-håndtering (<30 samples) – benytt guard fra S8.5.
-Baseline: schema_version-guard alltid aktiv.
+Baseline: schema_version-guard alltid aktiv (fra S8.5).
+Prod-verifisering: test med npx serve -s dist for å sikre SPA-routing.
 
 DoD
 Enhetstester for formattere; visuell smoke (mobile/desktop).
 Kort-økt håndteres kontrollert (ikke crash).
 “Kalibrert: Nei” viser reason når tilgjengelig.
+Prod-build testet med npx serve -s dist uten 404.
 
 S10 — Precision Watt UI (🎛️)
 Oppgaver
@@ -232,18 +237,22 @@ Oppgaver
 Tilgjengelighet (kontraster, tastatur).
 Liten CI (lint/build/test).
 Docs: “Using Precision Watt”.
+
 CI: schema-kontrakttest mot session_v0.7.0.json.
 Logging-test i CI (stdout = ren JSON, stderr = debug).
 Sanity-test kjøres kun ved publisering.
+Miljø-hensyn: unngå npm ci i OneDrive-miljøer, bruk npm install eller legg prosjekt utenfor OneDrive.
 
 DoD
 Lighthouse: perf > 80, a11y > 90.
 Build grønn i Actions.
 CI kjører pytest + cargo + schema-kontrakttest.
 Logging-test passerer (stdout/stderr-regler).
+CI stabil i Windows-miljøer (OneDrive-hensyn ivaretatt).
+Merknader (nye innsikter innarbeidet)
 
-Merknader (nye innsikter som er innarbeidet)
-S8.5 reduserer total tid: forventet besparelse 3–7h i S9–S12 for ~2h arbeid nå.
+S8.5 reduserte total tid: forventet besparelse 3–7h i S9–S12 for ~2h arbeid nå.
 Schema-version-guard er baseline (skal ikke skrus av).
 Prod-serve: bruk npx serve -s dist (SPA) for å unngå 404.
 Windows/OneDrive: unngå npm ci i låste miljøer; bruk npm install/prosjekt utenfor OneDrive.
+

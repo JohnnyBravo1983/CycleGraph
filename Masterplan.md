@@ -52,7 +52,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-09-26 | S6   | CLI/Reports & observabilitet	     | Ferdig 	| Rapportfelt (NP, Avg, VI, Pa:Hr, W/beat, PrecisionWatt ± usikkerhet), strukturert JSON-logging, metrics for no-watt, docs. Tester grønne i cargo/pytest. Små inkonsistenser ryddet manuelt, golden stabil ±1–2 W.
 | 2025-09-29 | S7   | QA & Hardening                         | Ferdig   | Schema-versionering (v0.7.0) og avg_hr lagt til i CLI/API-output, falsy-felter beholdes. Golden-datasett utvidet til ≥30 samples. Edge-case-tester (vær, GPS-drift, null HR, korte økter) implementert, HR-only plausibilitet med fallback. Robust JSON-uttrekk i tester håndterer stdout-støy. CGS konsumerer nye felter uten regressjoner. Pytest 55 passert / 4 skipped (akseptert), cargo test alle grønne. |
 | 2025-09-30 | S8   | Scaffold & dataadapter                 | Ferdig   | React/Tailwind scaffold med routing og state-management. Backend-adapter (mock↔live) med ENV-switch. Schema-version validering og HR-only fallback lagt inn. CLI-flagg-tabell dokumentert i docs. Prod-build testet via `npx serve -s dist`. Tester grønne (pytest 55 passert/4 skipped, cargo 17/17). Innsikt: Mini-sprint 8.5 (stubs + short-session guard) planlagt før S9 for å redusere total tid. |
-
+| 2025-10-01 | S8.5 | Mini-sprint: Precision Watt stubs + short-session guard | Ferdig | Utvidet `SessionReport` med PW/CI/stubs, oppdatert `mockSession`, lagt til DEV-sanity (PW/CI counts) og short-session guard. Prod-serve verifisert med `npx serve -s dist`. Besparelse 3–7h i kommende S9–S12. |
 
 ## Milepælsrapporter Status Pr 23.09.2025
 
@@ -179,6 +179,15 @@ S8 – Scaffold & dataadapter – status per 2025-09-30 Ferdig
 ✅ CLI-flagg-tabell opprettet i docs/cli_flags.md (navn, type, default, eksempel, beskrivelse).
 ✅ Prod-build verifisert: npm run build grønn (vite v7.1.7, ~327 kB JS gzip ~102 kB).
 ✅ Tester: cargo test 17/17 grønne; pytest 55 passert / 4 skipped (akseptert).
+
+S8.5 – Mini-sprint: Precision Watt stubs + short-session guard – status per 2025-10-01 Ferdig
+✅ SessionReport utvidet med nye felter: precision_watt, precision_watt_ci, sources, cda, crr, reason.
+✅ mockSession oppdatert med 40 samples (PW og CI-stubs) for å validere DEV-sanity og unngå kort-økt.
+✅ DEV-sanity lagt inn i SessionView: viser “PW samples: N, CI: M” kun når import.meta.env.DEV === true.
+✅ Kort-økt guard implementert (<30 samples): viser kontrollert melding (“Kort økt – viser begrenset visning”), ingen crash.
+✅ Prod-build verifisert (npx serve -s dist): debug-info skjules, kort-økt vises korrekt, ingen feil.
+✅ Tester: npm run type-check og npm run build grønne; npm run dev og npx serve -s dist testet OK. Eksisterende tester (cargo/pytest) fortsatt grønne.
+✅ Effekt: Ca. 2–2.25h brukt, men gir 3–7h besparelse i S9–S12 ved at PW-stubs og kort-økt-håndtering er etablert tidlig.
 
 
 

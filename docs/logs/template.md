@@ -451,6 +451,38 @@ Observasjoner:
 - CLI-flagg-tabell i `docs/cli_flags.md` rendres pent i VS Code og GitHub.
 - Innsikt for videre arbeid: liten “S8.5” mini-sprint (stubs for PrecisionWatt + short-session guard) vil trolig spare 3–7h i S9–S12 for ~2h innsats.
 
+✅ Sprint: S8.5 – Scaffold & dataadapter
+Branch: feature/s8.5-scaffold-adapter
+
+Commits:
+b7c9f3a – Sprint 8.5: lagt til React/Tailwind scaffold + routing, state-management og backend-adapter
+d3a1f42 – Oppdatert SessionView med kort-økt-guard og DEV-sanity for Precision Watt
+e94b6d8 – Justert mockSession (40 samples, PW/CI stubs) og koblet til sessionStore
+f28c0d1 – DoD-verifikasjon: typecheck/build grønt, dev/prod testet uten crash
+
+Endrede filer:
+frontend/src/routes/SessionView.tsx
+frontend/src/components/SessionCard.tsx (mindre justeringer ifm. schema guards)
+frontend/src/state/sessionStore.ts
+frontend/src/mocks/mockSession.ts
+docs/cli_flags.md (oppdatert dokumentasjonstabell fra trinn 2)
+
+Tester:
+npm run type-check → grønt
+npm run build → grønt
+npm run dev → mock + DEV-sanity synlig, kort-økt testet (<30 samples)
+npx serve -s dist → prod-server uten debug, kort-økt vises korrekt
+pytest -q og cargo test → alle tester grønt (ingen nye feil introdusert)
+
+Observasjoner:
+DEV-sanity blokken gir nyttig feedback (PW samples/CI).
+Kort-økt visning fungerer kontrollert ved <30 samples.
+Prod bygger grønt og skjuler debug-info som forventet.
+Hele leveransen er nå robust både i dev og prod.
+Status: ✅ Ferdig – Sprint 8.5 kan lukkes.
+
+
+
 Status: Ferdig
 
 
@@ -530,3 +562,8 @@ React/Tailwind scaffold satt opp med routing og state-management. Backend-adapte
 Observasjoner: Windows/OneDrive ga EPERM unlink-feil ved npm ci; løst via PowerShell-admin og npm install. CLI-flagg-tabellen rendres pent i både VS Code og GitHub. Innsikt: liten “S8.5” mini-sprint (stubs for PrecisionWatt + short-session guard) vil spare 3–7h i S9–S12 for ca. 2h investering.
 
 Status: Ferdig.
+
+Sprint 8.5
+Scaffold, state-management og backend-adapter implementert; SessionView utvidet med kort-økt-guard og DEV-sanity, mockSession koblet til store.
+Typecheck, build, pytest og cargo test alle grønne; dev/prod verifisert uten crash.
+Observasjon: Kort-økt og DEV-sanity oppfører seg kontrollert, prod skjuler debug som forventet.
