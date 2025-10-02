@@ -5,24 +5,42 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 
 ---
 
-## Milepæl-plan (M1–M12)
-
-- **M1** – Prosjektstruktur & repo (**Ferdig**)  
-- **M2** – Rust-core med pyo3 (**Ferdig**)  
-- **M3** – CLI-oppsett & dataflyt (**Ferdig**)  
-- **M4** – Dummydata & testkjøring (**Ferdig**)  
-- **M5** – SHACL-validering (**Ferdig**)  
-- **M6** – Strava-integrasjon (API & import) (**Ferdig**)  
-- **M7** – Analysefunksjoner (effektivitet, treningsscore) (**Ferdig**)  
-- **M7.5** – Backend-forfining (CGS v1.1, explain, tester) (**Ferdig**)  
-- **M7.6** – Watt-engine v1 (værdata, sykkeltype, perf-tests) (**Påbegynt**) 
-- **M8** – Demo/MVP med verdi (**Planlagt**)  
-- **M9** – MVP-forberedelse & skyoppsett (Azure/Kubernetes, CI/CD) (**Ikke startet**)  
-- **M10** – Feedback-innsamling & justeringer (**Ikke startet**)  
-- **M11** – Markedsdemo & kommunikasjon (**Ikke startet**)  
-- **M12** – Kommersialisering & skalering (**Ikke startet**)  
-
----
+Milepæl-plan (M1–M13)
+M1 – Prosjektstruktur & repo (Ferdig)
+Mappeoppsett, GitHub-init, byggbare grunnkommandoer.
+M2 – Rust-core med PyO3 (Ferdig)
+PyO3-binding, første funksjon bundet til Python.
+M3 – CLI-oppsett & dataflyt (Ferdig)
+CLI → Rust → output-flyt, feilhåndtering, argparse-flagg.
+M4 – Dummydata & testkjøring (Ferdig)
+Samples i repo, kjøreeksempel dokumentert, sanity-test OK.
+M5 – SHACL-validering (Ferdig)
+Shapes definert, valideringsscript, eksempelfiler verifisert.
+M6 – Strava-integrasjon (API & import) (Ferdig)
+OAuth-flyt, streams → CSV, state-håndtering, end-to-end test.
+M7 – Analysefunksjoner (effektivitet, treningsscore) (Ferdig)
+CGS v1, NP/IF/VI/Pa:Hr/WpB, badges, Strava publish.
+M7.5 – Backend-forfining (CGS v1.1, explain, tester) (Ferdig)
+Forebyggende tester, CI satt opp, golden-tester stabile.
+M8 – Frontend-baseline (Scaffold & dataadapter, schema guards) (Ferdig)
+React/Tailwind scaffold, routing, schema_version-validering.
+M8.5 – Precision Watt stubs + short-session guard (Ferdig)
+Utvidet SessionReport, DEV-sanity teller, kort-økt guard.
+M9 – Økt-kort & nøkkelmetrikker (Ferdig)
+NP, IF, VI, Pa:Hr, W/slag, CGS, PW-verdi.
+Indoor/outdoor-chip, kalibrering, kort-økt-guard, prod-verifisert build.
+M10 – Live API-integrasjon (Planlagt)
+Koble fetchSession mot backend-API.
+Sømløst bytte mock↔API, feilbanner og tester.
+M11 – Analysepanel & trender (Planlagt)
+Graf med CI-bånd, tooltip, øktliste m/filter/sort.
+Trendgraf (NP/PW), edge-case-tester, Strava pull-synk.
+M12 – Brukeropplevelse & kalibreringsguide (Planlagt)
+Onboarding/kalibreringsmodal, fallback-info, labels ryddes.
+Navigasjon forbedres, tydelig kilde (API/mock).
+M13 – QA, demo & CI readiness (Planlagt)
+Prod-optimalisering, tilgjengelighet, docs, deploy.
+CI: schema-kontrakttest, logging-test, sanity-publisering.
 
 ## Statusoversikt
 
@@ -53,6 +71,7 @@ Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot først
 | 2025-09-29 | S7   | QA & Hardening                         | Ferdig   | Schema-versionering (v0.7.0) og avg_hr lagt til i CLI/API-output, falsy-felter beholdes. Golden-datasett utvidet til ≥30 samples. Edge-case-tester (vær, GPS-drift, null HR, korte økter) implementert, HR-only plausibilitet med fallback. Robust JSON-uttrekk i tester håndterer stdout-støy. CGS konsumerer nye felter uten regressjoner. Pytest 55 passert / 4 skipped (akseptert), cargo test alle grønne. |
 | 2025-09-30 | S8   | Scaffold & dataadapter                 | Ferdig   | React/Tailwind scaffold med routing og state-management. Backend-adapter (mock↔live) med ENV-switch. Schema-version validering og HR-only fallback lagt inn. CLI-flagg-tabell dokumentert i docs. Prod-build testet via `npx serve -s dist`. Tester grønne (pytest 55 passert/4 skipped, cargo 17/17). Innsikt: Mini-sprint 8.5 (stubs + short-session guard) planlagt før S9 for å redusere total tid. |
 | 2025-10-01 | S8.5 | Mini-sprint: Precision Watt stubs + short-session guard | Ferdig | Utvidet `SessionReport` med PW/CI/stubs, oppdatert `mockSession`, lagt til DEV-sanity (PW/CI counts) og short-session guard. Prod-serve verifisert med `npx serve -s dist`. Besparelse 3–7h i kommende S9–S12. |
+| 2025-10-02 | S9   | Økt-kort & nøkkelmetrikker             | Ferdig   | SessionCard viser NP, IF, VI, Pa:Hr, W/slag, CGS og PrecisionWatt-verdi. Indoor/outdoor-chip og kalibreringsstatus lagt til. Kort-økt-banner og fallback implementert. Mock-opprydding (fjernet MODE: MOCK, bedre labels). Prod-build testet (`npx serve -s dist`). Tester grønne (pytest/cargo/vitest). Innsikt: videre mock-rydding og tydelig kilde vs. mode planlagt i S12. |
 
 ## Milepælsrapporter Status Pr 23.09.2025
 
@@ -189,7 +208,15 @@ S8.5 – Mini-sprint: Precision Watt stubs + short-session guard – status per 
 ✅ Tester: npm run type-check og npm run build grønne; npm run dev og npx serve -s dist testet OK. Eksisterende tester (cargo/pytest) fortsatt grønne.
 ✅ Effekt: Ca. 2–2.25h brukt, men gir 3–7h besparelse i S9–S12 ved at PW-stubs og kort-økt-håndtering er etablert tidlig.
 
-
+M9 – Økt-kort & nøkkelmetrikker – status per 2025-10-02 Ferdig
+✅ SessionView oppdatert med nøkkelmetrikker: NP, IF, VI, Pa:Hr, W/slag, CGS og PrecisionWatt-verdi.
+✅ Indoor/outdoor-chip og kalibreringsstatus synliggjort i UI.
+✅ Kort-økt guard (<30 samples) fungerer – viser tydelig varsel uten crash.
+✅ Prod-build verifisert med npx serve -s dist, routing fungerer sømløst.
+✅ MockSession oppdatert med outdoor/indoor-varianter, SessionCard rendrer konsekvent.
+✅ Enhetstester for formattere grønne; visuell smoke-test OK på desktop og mobil.
+🔎 Observasjoner: “mock” vs. “outdoor/indoor” fremstår fortsatt noe teknisk – rydding planlagt i S12 (brukeropplevelse).
+🔎 Oppdaget at “kort økt”-banner vises også for enkelte mock-data (expected); planlagt finjustering.
 
 ## Oppdateringsrutine
 Når en milepæl eller oppgave er ferdig:  

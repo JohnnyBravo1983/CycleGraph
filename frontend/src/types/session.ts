@@ -1,6 +1,11 @@
 // frontend/src/types/session.ts
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Type-definisjon for SessionReport – tåler HR-only (watts kan mangle/null)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SessionMode = 'indoor' | 'outdoor';
+
 export type SessionReport = {
   schema_version: string; // SemVer
   avg_hr: number | null; // gjennomsnittspuls
@@ -49,4 +54,45 @@ export type SessionReport = {
    * f.eks. "short_session" / "hr_only_demo" / "no_power_data"
    */
   reason?: string | null;
+
+  /** ───────── S9: Nøkkelmetrikker (alle optional + null-sikret) ───────── */
+  /** Normalized Power (W) */
+  np?: number | null;
+
+  /** Intensity Factor (0–2). Underscore for å unngå kollisjon med reserverte navn */
+  if_?: number | null;
+
+  /** Variability Index (typisk 1.0–2.0+) */
+  vi?: number | null;
+
+  /** Pa:Hr (lagres som ratio, f.eks. 0.035 = 3.5 %). Formatteres til % i UI. */
+  pa_hr?: number | null;
+
+  /** Watt per hjerteslag (W/slag) */
+  w_per_beat?: number | null;
+
+  /** CycleGraph Score (skala 0–100 eller flyttall) */
+  cgs?: number | null;
+
+  /** Precision Watt — aggregert verdi (W), ikke graf i S9 */
+  precision_watt_value?: number | null;
+
+  /** ───────── S9: Indoor/Outdoor + GPS (valgfritt for bakoverkomp) ───────── */
+  /** Eksplisitt modus for visning av chip/badge i UI */
+  mode?: SessionMode;
+
+  /** Om økten hadde GPS-telemetri tilgjengelig (kan brukes for avledning) */
+  has_gps?: boolean;
 };
+
+// Hjelpetype for å plukke ut nøkkelmetrikker i UI (SessionCard m.m.)
+export type KeyMetrics = Pick<
+  SessionReport,
+  | 'np'
+  | 'if_'
+  | 'vi'
+  | 'pa_hr'
+  | 'w_per_beat'
+  | 'cgs'
+  | 'precision_watt_value'
+>;

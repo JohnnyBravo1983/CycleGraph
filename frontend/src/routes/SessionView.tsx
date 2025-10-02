@@ -3,29 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
-import ModeBadge from "../components/ModeBadge";
 import SessionCard from "../components/SessionCard";
 import { guessSampleLength, isShortSession } from "../lib/guards";
+import { mockSessionShort } from "../mocks/mockSession";
 
 function Spinner() {
   return <div className="inline-block animate-pulse select-none">Laster…</div>;
-}
-
-function EnvBadge({ source }: { source: "mock" | "live" | null }) {
-  const tone =
-    source === "live"
-      ? "bg-blue-100 text-blue-800"
-      : source === "mock"
-      ? "bg-gray-100 text-gray-800"
-      : "bg-slate-100 text-slate-800";
-  const label = source === "live" ? "Live" : source === "mock" ? "Mock" : "—";
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}
-    >
-      {label}
-    </span>
-  );
 }
 
 function renderScalarOrList(
@@ -88,72 +71,91 @@ export default function SessionView() {
   const params = useParams();
   const id = useMemo(() => params.id ?? "mock", [params.id]);
 
-  const { session, source, loading, error, fetchSession } = useSessionStore();
+  const { session, loading, error, fetchSession } = useSessionStore();
 
-  // 🔹 TRINN 4: kort-økt guard state
+  // 🔹 TRINN 4/5: kort-økt guard state
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [shortSession, setShortSession] = useState<boolean>(false);
 
+  // Ikke kall store ved dev-sti for kort økt
   useEffect(() => {
+    if (id === "mock-short") return;
     fetchSession(id);
   }, [id, fetchSession]);
 
-  // 🔹 TRINN 4: beregn samples + kort-økt når session endrer seg
+  // Bruk aktiv session, men override med mock-short i dev-sti
+  const effectiveSession: SessionReport | null =
+    id === "mock-short" ? mockSessionShort : session ?? null;
+
+  // 🔹 Beregn samples + kort-økt når data endrer seg (inkl. mock-short)
   useEffect(() => {
-    if (!session) {
+    const s = effectiveSession;
+    if (!s) {
       setSampleCount(0);
       setShortSession(false);
       return;
     }
-    const n = guessSampleLength(session);
+    const n = guessSampleLength(s);
     setSampleCount(n);
-    setShortSession(isShortSession(n, 30));
-  }, [session]);
+    setShortSession(isShortSession(n, 30) || s.reason === "short_session");
+  }, [effectiveSession]);
 
-  const devCounts = import.meta.env.DEV && session ? getDevPrecisionCounts(session) : null;
+  const devCounts =
+    import.meta.env.DEV && effectiveSession
+      ? getDevPrecisionCounts(effectiveSession)
+      : null;
 
   return (
     <div className="page">
+      {/* Header — ryddig, uten Env/Mode badges */}
       <div className="page-header">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Økt</h1>
-          <EnvBadge source={source} />
-          {session && <ModeBadge />}
         </div>
-        <button onClick={() => fetchSession(id)} className="btn">
+        <button
+          onClick={() => id !== "mock-short" && fetchSession(id)}
+          className={`btn ${id === "mock-short" ? "opacity-60 cursor-not-allowed" : ""}`}
+          disabled={id === "mock-short"}
+          title={id === "mock-short" ? "Dev-visning bruker lokal mock" : "Hent på nytt"}
+        >
           Oppdater
         </button>
       </div>
 
+      {/* Navigasjon — tydelig skille mellom eksempler og live */}
       <nav className="text-sm text-slate-600 mb-2">
-        <span>Hopp til: </span>
-        <Link className="underline" to="/session/mock">
-          mock
+        <span>Velg datasett: </span>
+        <Link className="underline" to="/session/mock" title="Vis eksempeløkt (outdoor)">
+          Eksempel – Outdoor
         </Link>
         <span> · </span>
-        <Link className="underline" to="/session/ABC123">
-          live eksempel
+        <Link className="underline" to="/session/mock-short" title="Vis kort eksempeløkt (indoor)">
+          Eksempel – Indoor (kort)
+        </Link>
+        <span> · </span>
+        <Link className="underline" to="/session/ABC123" title="Hent live-økt fra API">
+          Live fra API
         </Link>
       </nav>
 
-      {loading && (
+      {loading && id !== "mock-short" && (
         <div className="card">
           <Spinner />
         </div>
       )}
 
-      {!loading && error && (
+      {!loading && error && id !== "mock-short" && (
         <div className="card text-red-700">
           Kunne ikke hente økt: <span className="mono">{error}</span>
         </div>
       )}
 
-      {!loading && !error && session && (
+      {effectiveSession && (
         <div className="grid gap-4">
           {/* Oppsummeringskort */}
-          <SessionCard session={session} />
+          <SessionCard session={effectiveSession} />
 
-          {/* 🔹 TRINN 5: DEV-sanity for Precision Watt (kun i dev, lint-safe) */}
+          {/* 🔹 DEV-sanity for Precision Watt (kun i dev, lint-safe) */}
           {devCounts && (
             <div className="mt-0 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-800 text-xs">
               <span className="mr-2 rounded bg-slate-200 px-2 py-0.5 font-mono">
@@ -164,7 +166,7 @@ export default function SessionView() {
             </div>
           )}
 
-          {/* 🔹 TRINN 4: kort-økt info-kort */}
+          {/* 🔹 kort-økt info-kort */}
           {shortSession && (
             <div className="mt-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
               <div className="font-medium">Kort økt – viser begrenset visning</div>
@@ -177,15 +179,15 @@ export default function SessionView() {
           {/* Ekstra: schema_version */}
           <div className="card">
             <div className="k">schema_version</div>
-            <div className="mono">{session.schema_version}</div>
+            <div className="mono">{effectiveSession.schema_version}</div>
           </div>
 
           {/* Ekstra: watt-data (rå visning) */}
           <div className="card">
             <div className="k">watt-data</div>
-            {hasWattsValue(session.watts) ? (
+            {hasWattsValue(effectiveSession.watts) ? (
               <div className="mono text-sm break-words">
-                {wattsPreview(session.watts)}
+                {wattsPreview(effectiveSession.watts)}
               </div>
             ) : (
               <div className="italic text-gray-600">
@@ -199,18 +201,29 @@ export default function SessionView() {
             <div>
               <div className="k">wind_rel</div>
               <div className="mono text-sm break-words">
-                {renderScalarOrList(session.wind_rel)}
+                {renderScalarOrList(effectiveSession.wind_rel)}
               </div>
             </div>
             <div>
               <div className="k">v_rel</div>
               <div className="mono text-sm break-words">
-                {renderScalarOrList(session.v_rel)}
+                {renderScalarOrList(effectiveSession.v_rel)}
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {!effectiveSession && (
+        <div className="card">
+          Ingen data å vise.
+        </div>
+      )}
+
+      {/* Diskré kildeinfo nederst (for utviklere), uten å spamme toppen */}
+      <div className="mt-6 text-xs text-slate-400">
+        Kilde: {id === "mock-short" ? "Eksempel (kort)" : id === "mock" ? "Eksempel" : "Live (API)"}
+      </div>
     </div>
   );
 }

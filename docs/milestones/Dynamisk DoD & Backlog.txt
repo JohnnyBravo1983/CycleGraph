@@ -183,76 +183,78 @@ Kort-økt gir kontrollert beskjed.
 
 🔜 PLANLAGT (IKKE STARTET) – Frontlog
 
-S9 — Økt-kort & nøkkelmetrikker (📊)
+
+S10 — Live API-integrasjon (🌐)
 Oppgaver
-Øktvisning: NP, IF, VI, Pa:Hr, W/slag, CGS, PrecisionWatt (verdi, ikke graf).
-Indoor/outdoor-chip + “Kalibrert: Ja/Nei”.
-Varsel-banner for no-watt-økter.
-Kort-økt-håndtering (<30 samples) – benytt guard fra S8.5.
-Baseline: schema_version-guard alltid aktiv (fra S8.5).
-Prod-verifisering: test med npx serve -s dist for å sikre SPA-routing.
+Koble fetchSession mot backend-API.
+
+Skille kilde: API vs. eksempeldata (mock).
+Bruke samme UI for begge (sømløst).
+Håndtere feil (nettverk/timeout) med banner.
+Oppdatere tester (mock fetch).
 
 DoD
-Enhetstester for formattere; visuell smoke (mobile/desktop).
-Kort-økt håndteres kontrollert (ikke crash).
-“Kalibrert: Nei” viser reason når tilgjengelig.
-Prod-build testet med npx serve -s dist uten 404.
+Live-økt kan hentes og vises uten crash.
+Mock-data fortsatt brukbare for utvikling.
+Feilmeldinger håndteres konsistent.
+Prod+dev viser samme layout (uavhengig av kilde).
 
-S10 — Precision Watt UI (🎛️)
+S11 — Analysepanel & trender (📈)
 Oppgaver
-Graf med usikkerhetsbånd (bruk stubs fra S8.5).
-Tooltip: datakilde (powermeter/estimat), vær, profil; vis calibrated eksplisitt Ja/Nei.
+Graf over tid (Power/HR) med CI-bånd for PrecisionWatt.
+Tooltip: datakilder + calibrated-status.
+Liste over økter med filter/sort.
+Trendgraf (NP/PW over tid).
+Test ≥30 økter inkl. edge-cases (null HR, GPS-drift).
+Enkel manuell “pull”-synk fra Strava (for testdatasett).
 
 DoD
-Render uten jank på 1 Hz (2h økt).
-Golden-skjermbilder.
-Tooltip viser calibrated korrekt også når False.
-
-S11 — Trender & liste (🗂️)
-Oppgaver
-Liste over økter m/ filter/sort.
-Trendgraf (NP/PrecisionWatt over tid).
-Robusthet: test ≥30 økter; edge-cases (null HR, GPS-drift).
-(Planlagt) Enkel manuell “pull”-synk fra Strava (ikke webhooks) for testdatasett.
-
-DoD
-30+ økter uten lagg.
+Tidsseriegraf rendres uten lagg på 1Hz-data (2h økt).
+Tooltip viser riktig info også når calibrated=false.
+30+ økter fungerer uten lagg.
 Tom/feil-state håndteres.
 Edge-case-økter rendres uten crash.
 
-S12 — Kalibreringsguide (🧭)
+S12 — Brukeropplevelse & kalibreringsguide (🎨🧭)
+
 Oppgaver
 Onboarding for første outdoor-økt.
 Stegvis modal for kalibreringsbakke.
-Info for brukere uten wattmåler (forklar fallback).
-Knyt til schema-felter (calibrated, cda, crr, reason) – felter finnes fra S8.5.
+Info for brukere uten wattmåler (fallback).
+Rydd labels i prod (fjerne “Eksempel …” helt).
+Skille tydelig mellom Mode (Indoor/Outdoor) og Kilde (API/Mock).
+Forbedre navigasjon (breadcrumb/meny).
+Knytte til schema-felter (calibrated, cda, crr, reason).
 
 DoD
 “Ferdig kalibrert” trigger backend-flag.
 Guide kan hoppes.
 UI viser backend-verdier iht. schema v0.7.x.
+Brukeropplevelsen er konsistent, uten tekniske termer.
+Enhetstester på UI-komponenter lagt til.
 
-S13 — QA, polish & CI (✅)
+S13 — QA, demo & CI readiness (🚀✅)
 Oppgaver
+Prod-build optimalisering (vite, minify, code-split).
 Tilgjengelighet (kontraster, tastatur).
-Liten CI (lint/build/test).
-Docs: “Using Precision Watt”.
-
-CI: schema-kontrakttest mot session_v0.7.0.json.
+Dokumentasjon: README + “Using Precision Watt”.
+Deploy til testmiljø (Netlify/Vercel).
+CI: lint/build/test + schema-kontrakttest mot session_v0.7.0.json.
 Logging-test i CI (stdout = ren JSON, stderr = debug).
-Sanity-test kjøres kun ved publisering.
-Miljø-hensyn: unngå npm ci i OneDrive-miljøer, bruk npm install eller legg prosjekt utenfor OneDrive.
+Sanity-test kun ved publisering.
+Miljø-hensyn: unngå npm ci i OneDrive, bruk npm install eller flytt prosjektmappe.
 
 DoD
-Lighthouse: perf > 80, a11y > 90.
+Lighthouse perf >80, a11y >90.
 Build grønn i Actions.
 CI kjører pytest + cargo + schema-kontrakttest.
-Logging-test passerer (stdout/stderr-regler).
-CI stabil i Windows-miljøer (OneDrive-hensyn ivaretatt).
-Merknader (nye innsikter innarbeidet)
+Logging-test passerer.
+Deploy kjørbar i testmiljø.
+Ingen blocker-bugs ved demo.
 
-S8.5 reduserte total tid: forventet besparelse 3–7h i S9–S12 for ~2h arbeid nå.
-Schema-version-guard er baseline (skal ikke skrus av).
-Prod-serve: bruk npx serve -s dist (SPA) for å unngå 404.
-Windows/OneDrive: unngå npm ci i låste miljøer; bruk npm install/prosjekt utenfor OneDrive.
-
+📊 Totalballpark (oppdatert)
+S10: 10–14h
+S11: 12–16h
+S12: 8–12h
+S13: 10–14h
+➡️ Totalt S10–S13: 40–56h
