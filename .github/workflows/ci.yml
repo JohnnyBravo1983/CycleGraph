@@ -50,14 +50,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3.12-dev
 
-      # Endret: eksplisitt cd til core før cargo clean
-      - name: Cargo clean (core)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd core
-          cargo clean
-
+    
       - name: Build Rust wheel
         working-directory: core
         run: maturin build --release -i python3.12 --features python
