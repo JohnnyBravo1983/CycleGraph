@@ -1,25 +1,26 @@
 // frontend/src/lib/api.ts
 import type { SessionReport } from "../types/session";
-import { mockSession } from "./mockSession";
+import { mockSession } from "../mocks/mockSession";
 import { safeParseSession, ensureSemver } from "./schema";
 
+/** Result-typer beholdt som hos deg */
 type Ok = { ok: true; data: SessionReport; source: "mock" | "live" };
 type Err = { ok: false; error: string; source?: "mock" | "live" };
 export type FetchSessionResult = Ok | Err;
 
-// Hent Vite-variabler (.env.local)
+// Hent Vite-variabler (.env.local). Hvis BASE mangler → vi faller til mock-kilde.
 const BASE = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
-// Hjelper: fjern trailing slash
+/** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
   if (!url) return undefined;
   return url.replace(/\/+$/, "");
 }
 
-// Litt ventetid for realisme i mock
+/** Liten hjelp for realisme i mock */
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-/** Dev-bryter: legg til ?simulateInvalid=1 i URL for å teste ugyldig/manglende schema_version */
+/** Dev-bryter: ?simulateInvalid i URL for å teste ugyldig/manglende schema_version */
 function shouldSimulateInvalid(): boolean {
   try {
     const qs = new URLSearchParams(window.location.search);
@@ -36,13 +37,77 @@ function invalidateSchemaForTest<T>(obj: T): T {
   return rec as unknown as T;
 }
 
+/** Abort/timeout-wrapper for fetch (ingen eksterne libs) */
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit & { timeoutMs?: number } = {}
+): Promise<Response> {
+  const { timeoutMs = 10_000, signal, ...rest } = init;
+
+  const ac = new AbortController();
+  const timeoutId = setTimeout(() => ac.abort(), timeoutMs);
+
+  // Kobler evt. ekstern AbortSignal til vår controller
+  if (signal) {
+    if (signal.aborted) ac.abort();
+    else signal.addEventListener("abort", () => ac.abort(), { once: true });
+  }
+
+  try {
+    const res = await fetch(input, { ...rest, signal: ac.signal });
+    return res;
+ } catch (err: unknown) {
+  const isAbort =
+    typeof err === "object" &&
+    err !== null &&
+    "name" in err &&
+    (err as { name?: unknown }).name === "AbortError";
+
+  if (isAbort) {
+    throw new Error("Tidsavbrudd: forespørselen tok for lang tid.");
+  }
+  throw err instanceof Error ? err : new Error(String(err));
+} finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/** Trygg JSON-parsing: returnerer string hvis ikke gyldig JSON (for feilmeldinger) */
+export async function parseJsonSafe(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text; // råtekst ved ikke-JSON svar
+  }
+}
+
+/** Les feilkropp som tekst uten å kaste videre feil */
+async function safeReadText(res: Response): Promise<string> {
+  try {
+    return await res.text();
+  } catch {
+    return "";
+  }
+}
+
+/** Bygg URL til analyze_session */
+function buildAnalyzeUrl(base: string, id: string): string {
+  return `${base}/api/analyze_session?id=${encodeURIComponent(id)}`;
+}
+
 /**
  * Hent en session:
- * - id === "mock" eller BASE mangler → bruk mockSession
- * - ellers → GET {BASE}/api/analyze_session?id={id}
+ * - id === "mock" eller BASE mangler → bruk mockSession (kilde: "mock")
+ * - ellers → GET {BASE}/api/analyze_session?id={id} (kilde: "live")
  * Validerer alltid med Zod + semver.
+ * Støtter timeout og ekstern AbortSignal.
  */
-export async function fetchSession(id: string): Promise<FetchSessionResult> {
+export async function fetchSession(
+  id: string,
+  options?: { timeoutMs?: number; signal?: AbortSignal }
+): Promise<FetchSessionResult> {
   try {
     const base = normalizeBase(BASE);
 
@@ -78,10 +143,16 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
     }
 
     // LIVE
-    const url = `${base}/api/analyze_session?id=${encodeURIComponent(id)}`;
-    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    const url = buildAnalyzeUrl(base, id);
+    const resp = await fetchWithTimeout(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      timeoutMs: options?.timeoutMs ?? 10_000,
+      signal: options?.signal,
+    });
 
     if (!resp.ok) {
+      // Prøv å hente feilkropp (tekst) for mer nyttig tilbakemelding
       const text = await safeReadText(resp);
       return {
         ok: false,
@@ -93,10 +164,9 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
     }
 
     // Forsøk å parse JSON
-    let json: unknown;
-    try {
-      json = await resp.json();
-    } catch {
+    const json = await parseJsonSafe(resp);
+    if (typeof json === "string") {
+      // parseJsonSafe returnerer string når backend ikke sendte JSON
       return {
         ok: false,
         error: "Kunne ikke parse JSON fra backend.",
@@ -134,14 +204,10 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
     return { ok: true, data: parsed.data, source: "live" };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: message, source: BASE ? ("live" as const) : ("mock" as const) };
-  }
-}
-
-async function safeReadText(res: Response): Promise<string> {
-  try {
-    return await res.text();
-  } catch {
-    return "";
+    return {
+      ok: false,
+      error: message,
+      source: BASE ? ("live" as const) : ("mock" as const),
+    };
   }
 }

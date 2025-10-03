@@ -6,6 +6,7 @@ import type { SessionReport } from "../types/session";
 import SessionCard from "../components/SessionCard";
 import { guessSampleLength, isShortSession } from "../lib/guards";
 import { mockSessionShort } from "../mocks/mockSession";
+import ErrorBanner from "../components/ErrorBanner";
 
 function Spinner() {
   return <div className="inline-block animate-pulse select-none">Laster…</div>;
@@ -67,6 +68,16 @@ function getDevPrecisionCounts(
 }
 /** ----------------------------------------------------------------------- */
 
+/** Klassifiser rå feiltekst til bruker-vennlige meldinger */
+function classifyErrorMessage(raw: string): string {
+  if (/HTTP\s+404\b/.test(raw)) return "Ingen data å vise for denne økten.";
+  if (/HTTP\s+5\d{2}\b/.test(raw)) return "Noe gikk galt. Prøv igjen senere.";
+  if (/Tidsavbrudd|Failed to fetch|NetworkError|offline/i.test(raw)) {
+    return "Kunne ikke hente data. Sjekk nettverk.";
+  }
+  return "Noe gikk galt. Prøv igjen.";
+}
+
 export default function SessionView() {
   const params = useParams();
   const id = useMemo(() => params.id ?? "mock", [params.id]);
@@ -105,6 +116,9 @@ export default function SessionView() {
       ? getDevPrecisionCounts(effectiveSession)
       : null;
 
+  const hasError = !loading && !!error && id !== "mock-short";
+  const friendlyMessage = error ? classifyErrorMessage(error) : "";
+
   return (
     <div className="page">
       {/* Header — ryddig, uten Env/Mode badges */}
@@ -114,9 +128,15 @@ export default function SessionView() {
         </div>
         <button
           onClick={() => id !== "mock-short" && fetchSession(id)}
-          className={`btn ${id === "mock-short" ? "opacity-60 cursor-not-allowed" : ""}`}
+          className={`btn ${
+            id === "mock-short" ? "opacity-60 cursor-not-allowed" : ""
+          }`}
           disabled={id === "mock-short"}
-          title={id === "mock-short" ? "Dev-visning bruker lokal mock" : "Hent på nytt"}
+          title={
+            id === "mock-short"
+              ? "Dev-visning bruker lokal mock"
+              : "Hent på nytt"
+          }
         >
           Oppdater
         </button>
@@ -144,9 +164,12 @@ export default function SessionView() {
         </div>
       )}
 
-      {!loading && error && id !== "mock-short" && (
-        <div className="card text-red-700">
-          Kunne ikke hente økt: <span className="mono">{error}</span>
+      {hasError && (
+        <div className="mb-3">
+          <ErrorBanner
+            message={friendlyMessage}
+            onRetry={() => fetchSession(id)}
+          />
         </div>
       )}
 
@@ -214,15 +237,18 @@ export default function SessionView() {
         </div>
       )}
 
-      {!effectiveSession && (
-        <div className="card">
-          Ingen data å vise.
-        </div>
+      {!effectiveSession && !loading && !hasError && (
+        <div className="card">Ingen data å vise.</div>
       )}
 
       {/* Diskré kildeinfo nederst (for utviklere), uten å spamme toppen */}
       <div className="mt-6 text-xs text-slate-400">
-        Kilde: {id === "mock-short" ? "Eksempel (kort)" : id === "mock" ? "Eksempel" : "Live (API)"}
+        Kilde:{" "}
+        {id === "mock-short"
+          ? "Eksempel (kort)"
+          : id === "mock"
+          ? "Eksempel"
+          : "Live (API)"}
       </div>
     </div>
   );

@@ -486,6 +486,84 @@ Status: ✅ Ferdig – Sprint 8.5 kan lukkes.
 Status: Ferdig
 
 
+✅ Sprint: S9 – Økt-kort & nøkkelmetrikker (📊)
+Branch: feature/s9-session-card
+Commits:
+a12f3c9 – add SessionReport type extensions (mode + has_gps)
+c4d9f44 – update mockSession with indoor/outdoor modes
+d92eab1 – add IoBadge to SessionCard, remove ModeBadge from card
+f18a2e0 – clean up SessionView: remove ModeBadge, EnvBadge → simplify nav
+e2c6d33 – rename nav links to “Eksempel – Outdoor / Indoor (kort) / Live fra API”
+b41e0a7 – add discrete “Kilde: …” footer in SessionView
+
+Endrede filer:
+frontend/src/types/session.ts
+frontend/src/mocks/mockSession.ts
+frontend/src/components/SessionCard.tsx
+frontend/src/routes/SessionView.tsx
+
+Tester:
+npm run test (vitest) → ✅ alle tester grønne
+cargo test (core evaluator) → ✅ alle tester grønne
+Manuell smoke-test dev/prod:
+Dev (npm run dev) → UI rendrer NP, IF, VI, Pa:Hr, W/slag, CGS, PW
+Prod (npm run build && npx serve -s dist) → identisk visning, ingen debug-info
+Observasjoner:
+Indoor/Outdoor-chip lagt til og fungerer i SessionCard.
+ModeBadge fjernet fra UI (ingen “MODE: MOCK” i kort/header).
+Navigasjon gjort mer brukervennlig: “Eksempel – Outdoor / Indoor (kort) / Live fra API”.
+Diskré kildeinfo (“Kilde: …”) lagt nederst.
+Mock-data oppdatert med mode og has_gps.
+Litt “dummy”-følelse gjenstår i eksempelvisningene – dette bør strammes opp videre når live API får flere datasett.
+
+Status: ✅ Ferdig
+✅ Sprint: S10 – Live API-integrasjon (🌐)
+Branch: feature/s10-live-api (brukte denne som sprint-branch; endre hvis dere pushet i en annen)
+Commits:
+[SHA TBA] – feat(s10): live API-integrasjon + robust feilflyt
+(lib/api: fetchWithTimeout, semver/schema-guard, mock/live kilde, ?simulateInvalid)
+[SHA TBA] – feat(ui): ErrorBanner m/ retry + feilklassifisering i SessionView
+[SHA TBA] – feat(state): sessionStore med source (api|mock), ENV-styrt modus
+[SHA TBA] – test: SessionView/ErrorBanner + sessionStore; vitest jsdom-oppsett
+[SHA TBA] – chore: tsconfig, vitest.config, .env.example (VITE_BACKEND_URL)
+Tips for å fylle inn SHA: git log -n 5 --oneline
+
+Endrede filer:
+frontend/src/lib/api.ts (ny/oppdatert fetch-klient, timeout, schema-guard)
+frontend/src/state/sessionStore.ts (kildevalg api/mock, feilflyt, retry)
+frontend/src/components/ErrorBanner.tsx (ny)
+frontend/src/routes/SessionView.tsx (bruker ErrorBanner + retry, samme layout)
+frontend/.env.example (ny – VITE_BACKEND_URL)
+frontend/vitest.config.ts (jsdom + @vitejs/plugin-react)
+frontend/src/tests/setup.ts (jest-dom matchere)
+frontend/src/tests/ErrorBanner.test.tsx (ny)
+frontend/src/tests/SessionView.test.tsx (ny)
+frontend/tests/sessionStore.test.ts (ny)
+frontend/tsconfig.app.json, frontend/tsconfig.node.json (oppdatert for react-jsx/vitest)
+(små justeringer i src/env.d.ts om VITE_BACKEND_URL/Mode var nødvendig)
+
+Tester:
+Frontend (Vitest): 3 testfiler / 9 passerer
+(ErrorBanner, SessionView, sessionStore; jsdom-runtime OK)
+Backend/CLI (pytest): alle grønne igjen etter å ha bygget Rust-kjernen i riktig Python-miljø
+(root cause: miljø-mismatch; fix: maturin develop --release -m core/Cargo.toml --features python i samme venv som pytest/CLI)
+Rust (cargo test): ikke endret i sprinten; ikke kjørt (build OK via maturin)
+
+Observasjoner:
+Viktig å bruke én Python-tolker/venv for CLI/pytest/maturin; miljø-mismatch ga 18 røde tester før rebuild.
+Inne i src/**: unngå imports som starter med ../src/; hold rene relative stier.
+@vitejs/plugin-react + jsdom + @testing-library/jest-dom/vitest er nødvendig for JSX i tester.
+ErrorBanner + feilklassifisering gir konsistent UX ved timeout/offline/404/500.
+.env.example forenkler onboarding (kun VITE_BACKEND_URL).
+Dev-snarvei ?simulateInvalid gjør schema-guard testbar uten å endre backend.
+Status: Ferdig ✅
+Live API-økt hentes og rendres uten crash.
+Mock-modus intakt og lik layout som prod.
+Feiltilstander viser banner + Prøv igjen.
+Typecheck/build/test grønne (FE).
+
+Pytest grønne etter kjapp rebuild av core i korrekt miljø.
+Leveransen oppfyller DoD for S9: alle nøkkelmetrikker vises, indoor/outdoor og kalibrering er på plass, kort-økt guard fungerer, og build/dev er like. Mock-håndtering er ryddet, men bør strammes mer opp i kommende sprinter.
 📋 Delta Sammendrag av Sluttrapporter
 
 M7.5 – Forebyggende tester
@@ -567,3 +645,12 @@ Sprint 8.5
 Scaffold, state-management og backend-adapter implementert; SessionView utvidet med kort-økt-guard og DEV-sanity, mockSession koblet til store.
 Typecheck, build, pytest og cargo test alle grønne; dev/prod verifisert uten crash.
 Observasjon: Kort-økt og DEV-sanity oppfører seg kontrollert, prod skjuler debug som forventet.
+
+Sprint 9
+Implementert nøkkelmetrikker i SessionCard, lagt til Indoor/Outdoor-chip, fjernet “MODE: MOCK” og ryddet opp i navigasjon + mock-data.
+Alle tester (vitest + cargo) passerte, og manuell smoke-test i dev/prod viste korrekt visning.
+Mock-håndtering er forbedret, men fortsatt litt “dummy”-følelse som planlegges justert i senere sprinter.
+
+Sprint 10 
+Hva ble gjort: Live API-integrasjon i FE (ny api.ts m/timeout+schema-guard), sessionStore med kildevalg (api/mock) og robust feilflyt, ErrorBanner + retry i SessionView, samt .env.example for VITE_BACKEND_URL.
+Teststatus: Vitest 9/9 grønt; Pytest tilbake til grønt etter rebuild av Rust-kjerne i riktig Python-venv (maturin develop --features python); type-check og build passerer.
