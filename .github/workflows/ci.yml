@@ -17,6 +17,15 @@ jobs:
       - name: Show commit
         run: git rev-parse HEAD
 
+      # Debugger faktisk mappeoppsett i runneren (trygt å la stå en stund)
+      - name: Debug workspace layout
+        shell: bash
+        run: |
+          echo "pwd:" && pwd
+          echo "--- root ls ---" && ls -la
+          echo "--- core ls ---" && ls -la core || true
+          echo "--- find Cargo.toml ---" && find . -maxdepth 3 -name Cargo.toml -print
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -41,8 +50,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3.12-dev
 
-      - name: Cargo clean
-        run: cargo clean
+      # Endret: eksplisitt cd til core før cargo clean
+      - name: Cargo clean (core)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd core
+          cargo clean
 
       - name: Build Rust wheel
         working-directory: core
