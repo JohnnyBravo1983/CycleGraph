@@ -7,6 +7,8 @@ description = "CycleGraph core (Rust+pyo3) for analysis metrics and CGS scoring"
 readme = "../README.md"
 
 [lib]
+# Vær eksplisitt på lib-navnet (matcher Python-modul & #[pymodule])
+name = "cyclegraph_core"
 # Bygg både rlib (for cargo test) og cdylib (for Python wheel)
 crate-type = ["cdylib", "rlib"]
 
@@ -16,8 +18,9 @@ python = ["pyo3/extension-module","pyo3/abi3-py39"]
 default = []
 
 [dependencies]
-# Viktig: ikke ha "extension-module" her — styres av feature over
-pyo3 = { version = "0.20" }
+# Ikke ha "extension-module" her — styres av feature over
+# Sett abi3 her så maturin lett ser ABI-støtte uansett
+pyo3 = { version = "0.20", features = ["abi3"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

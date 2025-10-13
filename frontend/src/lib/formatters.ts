@@ -1,4 +1,5 @@
 // frontend/src/lib/formatters.ts
+
 type Opts = { fallback?: string };
 const Fallback = "—";
 
@@ -70,4 +71,70 @@ export function formatCGS(
 ): string {
   if (!isNum(value)) return pickFallback(opts);
   return dec1.format(value);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Nye formattere for Sprint 11 (tid, tooltip, CI)
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+export type DataSource = "mock" | "api";
+
+/**
+ * Konverterer sekunder → hh:mm:ss (eller mm:ss hvis < 1 time).
+ *  - 0  → "00:00"
+ *  - 75 → "01:15"
+ *  - 3661 → "01:01:01"
+ */
+export function formatTime(
+  seconds: number | null | undefined,
+  opts?: Opts,
+): string {
+  if (!isNum(seconds)) return pickFallback(opts);
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const hh = h.toString().padStart(2, "0");
+  const mm = m.toString().padStart(2, "0");
+  const s2 = ss.toString().padStart(2, "0");
+  return h > 0 ? `${hh}:${mm}:${s2}` : `${mm}:${s2}`;
+}
+
+/**
+ * Tooltip-header som matcher badge-logikken.
+ * Eksempel:
+ *  - source="api", calibrated=true   → "Kilde: API – Kalibrert: Ja"
+ *  - source="mock", calibrated=false → "Kilde: Mock – Kalibrert: Nei"
+ */
+export function formatTooltip(source: DataSource, calibrated: boolean): string {
+  const src = source === "api" ? "API" : "Mock";
+  const cal = calibrated ? "Ja" : "Nei";
+  return `Kilde: ${src} – Kalibrert: ${cal}`;
+}
+
+/**
+ * CI-tekst fra nedre/øvre konfidensbånd.
+ * Viser "±X watt" hvor X = (upper - lower) / 2, avrundet til nærmeste heltall.
+ * Returnerer "Mangler" hvis verdier er ugyldige eller mangler.
+ */
+export function formatCI(
+  lower?: number | null,
+  upper?: number | null,
+): string {
+  const hasLower = isNum(lower);
+  const hasUpper = isNum(upper);
+  if (!hasLower || !hasUpper) return "Mangler";
+
+  let lo = lower as number;
+  let hi = upper as number;
+  if (hi < lo) {
+    const tmp = hi;
+    hi = lo;
+    lo = tmp;
+  }
+  const half = (hi - lo) / 2;
+  if (!Number.isFinite(half) || half < 0) return "Mangler";
+  const x = Math.round(half);
+  return `±${int0.format(x)} watt`;
 }

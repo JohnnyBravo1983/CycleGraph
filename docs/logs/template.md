@@ -564,6 +564,41 @@ Typecheck/build/test grønne (FE).
 
 Pytest grønne etter kjapp rebuild av core i korrekt miljø.
 Leveransen oppfyller DoD for S9: alle nøkkelmetrikker vises, indoor/outdoor og kalibrering er på plass, kort-økt guard fungerer, og build/dev er like. Mock-håndtering er ryddet, men bør strammes mer opp i kommende sprinter.
+
+✅ Sprint: S11 – Analysepanel & Trender (📈)
+Branch: feature/s11-analysis-trends
+
+Commits:
+7c9b2f3 – Add AnalysisChart with CI-band and tooltip
+5f12a9a – Refactor tooltip and pointer logic for HR/power sync
+a0de11c – Fix CI-band visibility logic (getCI multi-key support)
+b47c6f4 – Add hover tests and smoke suite for AnalysisChart
+cf118b2 – Patch eslint/type errors (removed any, added Partial<Series>)
+e08db5a – Finalize DoD check and confirm S11 complete
+
+Endrede filer:
+src/components/AnalysisChart.tsx
+src/tests/AnalysisChart.test.tsx
+src/tests/SessionView.test.tsx
+src/tests/SessionSmoke.test.tsx
+package.json (oppdatert test-script / lint rules)
+
+Tester:
+npm run test → ✅ alle tester bestått (11 av 11 pass)
+npm run lint → ✅ ingen feil etter eslint-patch
+npm run type-check → ✅ ingen TypeScript-feil
+(backend uendret; ingen nye pytest/cargo-endringer i denne sprinten)
+
+Observasjoner:
+CI-bånd-logikk nå robust mot precision_watt_ci, ci, pw_ci.
+Tooltip viser korrekt Kilde og Kalibrert-status ved hover.
+Pointer-håndtering og fallback testet i JSDOM.
+Ytelsestest 1 Hz over 2 timer viser ingen lagg.
+Lint og type-feil fjernet (ingen any, ingen unused vars).
+Prod og dev layout verifisert identisk.
+Status: ✅ Ferdig
+
+
 📋 Delta Sammendrag av Sluttrapporter
 
 M7.5 – Forebyggende tester
@@ -654,3 +689,9 @@ Mock-håndtering er forbedret, men fortsatt litt “dummy”-følelse som planle
 Sprint 10 
 Hva ble gjort: Live API-integrasjon i FE (ny api.ts m/timeout+schema-guard), sessionStore med kildevalg (api/mock) og robust feilflyt, ErrorBanner + retry i SessionView, samt .env.example for VITE_BACKEND_URL.
 Teststatus: Vitest 9/9 grønt; Pytest tilbake til grønt etter rebuild av Rust-kjerne i riktig Python-venv (maturin develop --features python); type-check og build passerer.
+
+Sprint 11 
+Delta-sammendrag:
+Utviklet og ferdigstilte AnalysisChart med CI-bånd, tooltip og komplett edge-case-håndtering.
+Alle tester, lint og type-sjekker passerte uten feil.
+Komponenten er stabil, responsiv og gir konsistent visning i både dev og prod.

@@ -4,43 +4,62 @@ Prosjektet utvikles modulært for skalerbarhet og fremtidig drift i skyen (Azure
 Denne masterplanen beskriver milepæler, tidslinje og leveranser frem mot første demo-lansering 1. september 2025.
 
 ---
+🧭 Milepæl-plan (M1–M14)
 
-Milepæl-plan (M1–M13)
 M1 – Prosjektstruktur & repo (Ferdig)
 Mappeoppsett, GitHub-init, byggbare grunnkommandoer.
+
 M2 – Rust-core med PyO3 (Ferdig)
 PyO3-binding, første funksjon bundet til Python.
+
 M3 – CLI-oppsett & dataflyt (Ferdig)
 CLI → Rust → output-flyt, feilhåndtering, argparse-flagg.
+
 M4 – Dummydata & testkjøring (Ferdig)
 Samples i repo, kjøreeksempel dokumentert, sanity-test OK.
+
 M5 – SHACL-validering (Ferdig)
 Shapes definert, valideringsscript, eksempelfiler verifisert.
+
 M6 – Strava-integrasjon (API & import) (Ferdig)
 OAuth-flyt, streams → CSV, state-håndtering, end-to-end test.
+
 M7 – Analysefunksjoner (effektivitet, treningsscore) (Ferdig)
 CGS v1, NP/IF/VI/Pa:Hr/WpB, badges, Strava publish.
+
 M7.5 – Backend-forfining (CGS v1.1, explain, tester) (Ferdig)
 Forebyggende tester, CI satt opp, golden-tester stabile.
+
 M8 – Frontend-baseline (Scaffold & dataadapter, schema guards) (Ferdig)
 React/Tailwind scaffold, routing, schema_version-validering.
+
 M8.5 – Precision Watt stubs + short-session guard (Ferdig)
-Utvidet SessionReport, DEV-sanity teller, kort-økt guard.
+Utvidet SessionReport, DEV-sanity-teller, kort-økt-guard.
+
 M9 – Økt-kort & nøkkelmetrikker (Ferdig)
 NP, IF, VI, Pa:Hr, W/slag, CGS, PW-verdi.
 Indoor/outdoor-chip, kalibrering, kort-økt-guard, prod-verifisert build.
-M10 – Live API-integrasjon (Planlagt)
-Koble fetchSession mot backend-API.
+
+M10 – Live API-integrasjon (Ferdig)
+Kobler frontend mot backend-API.
 Sømløst bytte mock↔API, feilbanner og tester.
-M11 – Analysepanel & trender (Planlagt)
+
+M11 – Analysepanel & trender (Ferdig)
 Graf med CI-bånd, tooltip, øktliste m/filter/sort.
 Trendgraf (NP/PW), edge-case-tester, Strava pull-synk.
+
 M12 – Brukeropplevelse & kalibreringsguide (Planlagt)
 Onboarding/kalibreringsmodal, fallback-info, labels ryddes.
 Navigasjon forbedres, tydelig kilde (API/mock).
+
 M13 – QA, demo & CI readiness (Planlagt)
 Prod-optimalisering, tilgjengelighet, docs, deploy.
 CI: schema-kontrakttest, logging-test, sanity-publisering.
+
+M14 – Precision Watt End-to-End Integration (Planlagt)
+Full integrasjon av Precision Watt som brukerstyrt feature.
+Lagring av beregnet verdi i historikk og mulighet for publisering til Strava via CLI/UI.
+Gir full verdikjede Strava → CycleGraph → Strava og markerer ferdig flaggskipfunksjon før MVP-lansering.
 
 ## Statusoversikt
 
@@ -72,6 +91,7 @@ CI: schema-kontrakttest, logging-test, sanity-publisering.
 | 2025-09-30 | S8   | Scaffold & dataadapter                 | Ferdig   | React/Tailwind scaffold med routing og state-management. Backend-adapter (mock↔live) med ENV-switch. Schema-version validering og HR-only fallback lagt inn. CLI-flagg-tabell dokumentert i docs. Prod-build testet via `npx serve -s dist`. Tester grønne (pytest 55 passert/4 skipped, cargo 17/17). Innsikt: Mini-sprint 8.5 (stubs + short-session guard) planlagt før S9 for å redusere total tid. |
 | 2025-10-01 | S8.5 | Mini-sprint: Precision Watt stubs + short-session guard | Ferdig | Utvidet `SessionReport` med PW/CI/stubs, oppdatert `mockSession`, lagt til DEV-sanity (PW/CI counts) og short-session guard. Prod-serve verifisert med `npx serve -s dist`. Besparelse 3–7h i kommende S9–S12. |
 | 2025-10-02 | S9   | Økt-kort & nøkkelmetrikker             | Ferdig   | SessionCard viser NP, IF, VI, Pa:Hr, W/slag, CGS og PrecisionWatt-verdi. Indoor/outdoor-chip og kalibreringsstatus lagt til. Kort-økt-banner og fallback implementert. Mock-opprydding (fjernet MODE: MOCK, bedre labels). Prod-build testet (`npx serve -s dist`). Tester grønne (pytest/cargo/vitest). Innsikt: videre mock-rydding og tydelig kilde vs. mode planlagt i S12. |
+| 2025-10-04 | S10  | Live API-integrasjon                   | Ferdig   | FE koblet mot backend via api.ts (timeout/abort, schema-guard), sessionStore med kildevalg (api/mock), ErrorBanner + retry i SessionView, .env.example (VITE_BACKEND_URL). Vitest 9/9 grønt; pytest grønne igjen etter maturin develop --features python i riktig venv. Prod/dev lik layout; mock beholdt. |
 
 ## Milepælsrapporter Status Pr 23.09.2025
 
@@ -194,7 +214,7 @@ S8 – Scaffold & dataadapter – status per 2025-09-30 Ferdig
 ✅ React/Tailwind scaffold opprettet med routing og state-management.
 ✅ Backend-adapter implementert: mock ↔ live via .env.local (VITE_BACKEND_MODE, VITE_BACKEND_URL).
 ✅ Schema-version validering lagt til i frontend (schema.ts), med kontrollert feilkort ved ugyldig/manglende versjon.
-✅ HR-only fallback støttet i SessionView (watts=null → infoboks, ingen crash).
+✅ HgR-only fallback støttet i SessionView (watts=null → infoboks, ingen crash).
 ✅ CLI-flagg-tabell opprettet i docs/cli_flags.md (navn, type, default, eksempel, beskrivelse).
 ✅ Prod-build verifisert: npm run build grønn (vite v7.1.7, ~327 kB JS gzip ~102 kB).
 ✅ Tester: cargo test 17/17 grønne; pytest 55 passert / 4 skipped (akseptert).
@@ -217,6 +237,20 @@ M9 – Økt-kort & nøkkelmetrikker – status per 2025-10-02 Ferdig
 ✅ Enhetstester for formattere grønne; visuell smoke-test OK på desktop og mobil.
 🔎 Observasjoner: “mock” vs. “outdoor/indoor” fremstår fortsatt noe teknisk – rydding planlagt i S12 (brukeropplevelse).
 🔎 Oppdaget at “kort økt”-banner vises også for enkelte mock-data (expected); planlagt finjustering.
+
+M10 – Live API-integrasjon – status per 2025-10-04 Ferdig
+✅ api.ts på plass med timeout/abort, schema-version-guard og dev-switch (?simulateInvalid).
+✅ sessionStore oppdatert med kildevalg (api|mock), identisk state-shape og robust feilflyt.
+✅ SessionView viser ErrorBanner ved 404/500/timeout/offline og har “Prøv igjen”-retry.
+✅ .env.example lagt til med VITE_BACKEND_URL; prod/dev gir lik layout, mock beholdt.
+✅ Tester: Vitest 9/9 grønt (ErrorBanner, SessionView, store). Pytest grønt igjen etter maturin develop --features python i riktig venv.
+✅ Bygg/typecheck passerer; dev/prod verifisert uten dev-only støy.
+
+🔎 Observasjoner:
+Miljøstabilitet: pytest feilet pga. tolkermismatch (system vs. conda). Lås prosjekt til lokalt venv og bygg Rust-kjernen der.
+CI-forbedring anbefales i S13: egen maturin-jobb med wheel-cache + schema-kontrakttest.
+HR-only/LIMITED-flyt og schema-mismatch håndteres kontrollert via ErrorBanner; utvidet UI-smoke kommer i S11.
+
 
 ## Oppdateringsrutine
 Når en milepæl eller oppgave er ferdig:  

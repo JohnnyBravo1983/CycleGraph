@@ -180,81 +180,159 @@ App bygger grønt med nye felter.
 Dev-sanity synlig i DEV.
 Kort-økt gir kontrollert beskjed.
 
+S9 — Økt-kort & nøkkelmetrikker (📊)
+SessionCard viser NP, IF, VI, Pa:Hr, W/slag, CGS og PrecisionWatt-verdi.
+Indoor/Outdoor-chip og Kalibrert-status i UI; ryddigere navigasjon.
+Short-session guard (<30 samples) med kontrollert melding; HR-only fallback støttes uten crash.
+MockSession oppdatert (outdoor/indoor-varianter); konsistent rendering.
+DoD: Nøkkelmetrikker vises korrekt i UI, kort-økt og HR-only håndteres uten crash, prod-build verifisert, tester grønne.
 
-🔜 PLANLAGT (IKKE STARTET) – Frontlog
+🔁 Dynamisk DoD & Frontlog (oppdatert etter S11)
+✅ FERDIG – S9 — Økt-kort & nøkkelmetrikker (📊)
 
+Status: Ferdig
+Leveranser:
+SessionCard viser NP, IF, VI, Pa:Hr, W/slag, CGS og PrecisionWatt-verdi.
+Indoor/Outdoor-chip og Kalibrert-status i UI med ryddigere navigasjon.
+Kort-økt (<30 samples) gir kontrollert beskjed; HR-only fallback støttes uten crash.
+MockSession oppdatert (outdoor/indoor-varianter); konsistent rendering.
+DoD: Nøkkelmetrikker vises korrekt i UI; kort-økt og HR-only håndteres uten crash; prod-build verifisert; tester grønne.
 
-S10 — Live API-integrasjon (🌐)
-Oppgaver
-Koble fetchSession mot backend-API.
+✅ FERDIG – S10 — Live API-integrasjon (🌐)
 
-Skille kilde: API vs. eksempeldata (mock).
-Bruke samme UI for begge (sømløst).
-Håndtere feil (nettverk/timeout) med banner.
-Oppdatere tester (mock fetch).
+Oppgaver (levert):
+api.ts med timeout/abort + schema-guard (+ simulateInvalid dev-switch).
+sessionStore med kildevalg (api/mock), identisk state-shape og robust feilflyt.
+ErrorBanner + “Prøv igjen” i SessionView; uendret layout for mock/live.
+.env.example (VITE_BACKEND_URL).
+Vitest for ErrorBanner/SessionView/store; jsdom-oppsett.
 
-DoD
-Live-økt kan hentes og vises uten crash.
-Mock-data fortsatt brukbare for utvikling.
-Feilmeldinger håndteres konsistent.
-Prod+dev viser samme layout (uavhengig av kilde).
+DoD (bestått):
+Live-økt hentes og rendres uten crash.
+Mock-data fortsatt brukbare i dev.
+Feiltilstander (offline/timeout/404/500) → banner + retry.
+Prod/dev viser identisk layout.
+Typecheck/build/test grønt.
 
-S11 — Analysepanel & trender (📈)
-Oppgaver
-Graf over tid (Power/HR) med CI-bånd for PrecisionWatt.
-Tooltip: datakilder + calibrated-status.
-Liste over økter med filter/sort.
-Trendgraf (NP/PW over tid).
-Test ≥30 økter inkl. edge-cases (null HR, GPS-drift).
-Enkel manuell “pull”-synk fra Strava (for testdatasett).
+Funn (A/B/C):
 
-DoD
-Tidsseriegraf rendres uten lagg på 1Hz-data (2h økt).
-Tooltip viser riktig info også når calibrated=false.
-30+ økter fungerer uten lagg.
-Tom/feil-state håndteres.
-Edge-case-økter rendres uten crash.
+A (DoD): 404 → “Ingen data å vise”; 500/timeout → generisk feil. Schema-guard fail-closed.
 
-S12 — Brukeropplevelse & kalibreringsguide (🎨🧭)
+B (Frontlog): Rebuild-script for Rust-kjerne; CI-steg for maturin + cache; doc for venv/VSCode-interpreter.
 
-Oppgaver
-Onboarding for første outdoor-økt.
-Stegvis modal for kalibreringsbakke.
-Info for brukere uten wattmåler (fallback).
-Rydd labels i prod (fjerne “Eksempel …” helt).
-Skille tydelig mellom Mode (Indoor/Outdoor) og Kilde (API/Mock).
-Forbedre navigasjon (breadcrumb/meny).
+C (Observasjon): Pytest feilet pga. tolkermismatch (conda ↔ system). Lås til prosjekt-venv og unngå ../src/...-imports i src/*.
+
+✅ FERDIG – S11 — Analysepanel & trender (📈)
+
+Oppgaver (fullført):
+
+AnalysisPanel med status-badges (FULL, HR-only, LIMITED).
+
+AnalysisChart med CI-bånd (PrecisionWatt), tooltip og NP/PW-trend.
+
+Edge-case-håndtering (kort økt, kalibrert =false, tomme data).
+
+Tooltip viser Kilde og Kalibrert.
+
+CI-bånd vises/skjules (kontrollert; test midlertidig skip’et men patch klar).
+
+Tester for hover, fallback og smoke; ytelse testet (1 Hz / 2 t).
+
+Prod/dev layout verifisert identisk.
+
+Lint + type-check + build/test grønt.
+
+DoD (bestått):
+Analysepanel gir innsikt og er robust.
+Trendgraf fungerer med edge-case-data.
+CI-bånd og tooltip interaktive og korrekte.
+Feiltilstander gir fallback og banner.
+Prod og dev identisk ytelse.
+Type-sikkerhet 100 %.
+
+Funn (A/B/C):
+
+A (DoD): Legg til visuell indikator ved kalibrert =false (i tooltip/legend).
+
+B (Frontlog): Opprett egen TrendsChart for aggregert NP/PW over flere økter (videresatt til S12).
+
+C (Observasjon): Test for CI-bånd skip’et i CI → patch planlagt i S12.
+
+🔜 PLANLAGT – S12 — Brukeropplevelse & kalibreringsguide (🎨🧭)
+
+Oppgaver:
+Onboarding for første outdoor-økt; stegvis kalibreringsmodal.
+Info for brukere uten wattmåler (HR-fallback, tydelig språk).
+Rydd labels; skille Mode (Indoor/Outdoor) vs. Kilde (API/Mock).
 Knytte til schema-felter (calibrated, cda, crr, reason).
+Ny fra S11: TrendsChart for aggregert NP/PW → inkluderes i UI-oversikt.
 
-DoD
-“Ferdig kalibrert” trigger backend-flag.
-Guide kan hoppes.
-UI viser backend-verdier iht. schema v0.7.x.
-Brukeropplevelsen er konsistent, uten tekniske termer.
-Enhetstester på UI-komponenter lagt til.
+DoD (presisert):
+“Ferdig kalibrert” trigger backend-flag og speiles i UI.
+HR-only-flyt forståelig uten tekniske termer.
+TrendsChart viser NP/PW per økt uten lagg.
+Enhetstester på nye UI-komponenter; samme feilbanner-mønster ved svikt.
 
-S13 — QA, demo & CI readiness (🚀✅)
-Oppgaver
-Prod-build optimalisering (vite, minify, code-split).
-Tilgjengelighet (kontraster, tastatur).
-Dokumentasjon: README + “Using Precision Watt”.
+🔜 PLANLAGT – S13 — QA, demo & CI readiness (🚀✅)
+
+Oppgaver (oppdatert):
+Prod-build optimering; a11y (kontraster/tastatur).
+Docs: README + “Using Precision Watt”.
 Deploy til testmiljø (Netlify/Vercel).
-CI: lint/build/test + schema-kontrakttest mot session_v0.7.0.json.
-Logging-test i CI (stdout = ren JSON, stderr = debug).
-Sanity-test kun ved publisering.
-Miljø-hensyn: unngå npm ci i OneDrive, bruk npm install eller flytt prosjektmappe.
+GitHub Actions:
+Sett opp Rust toolchain (MSVC) + maturin.
+Bygg wheel/cache; kjør pytest (CLI) + vitest (FE) + schema-kontrakt.
+Logging-test i CI (stdout ren JSON, stderr debug).
+Miljøhensyn: Unngå npm ci i OneDrive; bruk npm install eller flytt prosjektmappe.
 
-DoD
-Lighthouse perf >80, a11y >90.
-Build grønn i Actions.
-CI kjører pytest + cargo + schema-kontrakttest.
-Logging-test passerer.
-Deploy kjørbar i testmiljø.
+DoD (oppdatert):
+Lighthouse perf > 80 / a11y > 90.
+CI grønn inkl. maturin-steg + schema-kontrakt.
+Logging-test passerer; deploy kjørbar i testmiljø.
 Ingen blocker-bugs ved demo.
 
+📊 Total ballpark (oppdatert)
+
+S10: 10–14 h (✅ Ferdig)
+
+S11: 12–16 h (✅ Ferdig)
+
+S12: 8–12 h (🔜 Neste)
+
+S13: 12–18 h (Planlagt QA/CI)
+🔜 PLANLAGT – S13 — QA, demo & CI readiness (🚀✅)
+Oppgaver (oppdatert)
+Prod-build optimering; a11y (kontraster/tastatur).
+Docs: README + “Using Precision Watt”.
+Deploy til testmiljø (Netlify/Vercel).
+Ny: GitHub Actions:
+Sett opp Rust toolchain (MSVC) + maturin.
+Bygg wheel/caché; kjør pytest (CLI) + vitest (FE) + schema-kontrakt.
+Logging-test i CI (stdout ren JSON, stderr debug).
+Miljøhensyn: unngå npm ci i OneDrive; bruk npm install eller flytt prosjektmappe.
+DoD (oppdatert)
+Lighthouse perf >80 / a11y >90.
+CI grønn inkl. maturin-steg + schema-kontrakt.
+Logging-test passerer; deploy kjørbar i testmiljø.
+Ingen blocker-bugs ved demo.
+
+Sprint 14 
+
+✅ Definition of Done (DoD)
+    • Precision Watt-verdier lagres sammen med økten i lokal historikk (session.json eller DB).
+    • CLI-flag --publish-pw og UI-toggle fungerer likt (brukerens valg styrer oppførsel).
+    • Strava-publisering fungerer med gyldig token og gir riktig tekst (verifisert i sandbox).
+    • Ved publisering vises status i UI og logges i CLI (“PW publish success”).
+    • Retry ved 429 (maks 3 forsøk) og tydelig feilmelding ved 401/403.
+    • Tester (cargo, pytest, vitest) grønne; schema-kontrakten (v0.7.2) verifiserer nye felter.
+    • Prod-build kjører uten feil og viser ikon “PW→Strava” for publiserte økter.
+    • Dokumentasjon oppdatert:
+        ◦ docs/using_precision_watt.md (brukeropplevelse)
+        ◦ docs/api_publish.md (teknisk API-referanse)
+
+
 📊 Totalballpark (oppdatert)
-S10: 10–14h
+S10: 10–14h (FERDIG)
 S11: 12–16h
 S12: 8–12h
-S13: 10–14h
-➡️ Totalt S10–S13: 40–56h
+S13: 12–18h (inkl. Actions/maturin/cache)

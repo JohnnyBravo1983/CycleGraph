@@ -6,12 +6,26 @@
   "description": "CycleGraph frontend (Vite 7 + React 19 + TS + Tailwind v4, flat ESLint).",
   "main": "eslint.config.js",
   "scripts": {
+    "predev": "node scripts/make-2h-fixture.cjs",
+    "prebuild": "node scripts/make-2h-fixture.cjs",
+    "make:2h": "node scripts/make-2h-fixture.cjs",
+
     "dev": "vite",
+    "dev:full": "npm run make:2h -- full && vite",
+    "dev:uncal": "npm run make:2h -- uncal && vite",
+    "dev:hr": "npm run make:2h -- hr && vite",
+    "dev:limited": "npm run make:2h -- limited && vite",
+    "dev:ci-missing": "npm run make:2h -- ci-missing && vite",
+    "dev:empty": "npm run make:2h -- empty && vite",
+
     "build": "tsc -b && vite build",
+    "build:full": "npm run make:2h -- full && tsc -b && vite build",
     "preview": "vite preview",
+
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
+
     "test": "vitest run",
     "test:watch": "vitest"
   },
