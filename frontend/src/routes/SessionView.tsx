@@ -1,5 +1,6 @@
+// frontend/src/routes/SessionView.tsx
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
 import SessionCard from "../components/SessionCard";
@@ -7,6 +8,107 @@ import { guessSampleLength, isShortSession } from "../lib/guards";
 import { mockSessionShort } from "../mocks/mockSession";
 import ErrorBanner from "../components/ErrorBanner";
 import AnalysisPanel from "../components/AnalysisPanel";
+import CalibrationGuide from "../components/CalibrationGuide";
+import TrendsChart from "../components/TrendsChart";
+
+// NEW: helpers for HR-only & modal
+import { isHROnly as isHROnlyHelper, shouldShowCalibrationModal } from "../lib/state";
+
+/** ────────────────────────────────────────────────────────────────────────
+ *  DEV fetch-proxy guard:
+ *  I dev ender mange gamle stier ("/trends", "/session") på SPA-HTML.
+ *  Denne hooken omskriver slike kall til "/api/..." og prefikser med
+ *  VITE_BACKEND_URL hvis den er satt. Ryddes opp ved unmount.
+ * ──────────────────────────────────────────────────────────────────────── */
+function useDevFetchApiRewrite() {
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
+    const backend = (import.meta as unknown as { env: Record<string, string | undefined> }).env
+      .VITE_BACKEND_URL || "";
+
+    const origFetch = window.fetch.bind(window);
+
+    function rewrite(url: string): string {
+      let u = url;
+
+      // Normaliser ledende host til kun path for enklere matching i dev
+      try {
+        // Hvis full URL med samme origin, trekk ut pathname+search
+        const asUrl = new URL(url, window.location.origin);
+        if (asUrl.origin === window.location.origin) {
+          u = asUrl.pathname + asUrl.search;
+        }
+      } catch {
+        // ignorer
+      }
+
+      // Omskriv gamle stier → /api/...
+      if (u.startsWith("/trends")) u = "/api" + u;
+      if (u.startsWith("/session")) u = "/api" + u;
+      if (u.startsWith("/stats")) u = "/api" + u;
+
+      // Hvis vi allerede har /api/ og backend-base er satt, prefiks med base
+      if (backend && u.startsWith("/api/")) {
+        u = backend.replace(/\/+$/, "") + u; // unngå doble skråstreker
+      }
+
+      return u;
+    }
+
+// erstatt hele window.fetch-delen i useDevFetchApiRewrite med dette
+// (samme logikk, men uten `any` og med bedre typing)
+
+window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  if (typeof input === "string") {
+    return origFetch(rewrite(input), init);
+  }
+  if (input instanceof URL) {
+    return origFetch(rewrite(input.toString()), init);
+  }
+
+  try {
+    const req = input as Request;
+    const newUrl = rewrite(req.url);
+
+    const requestInit: RequestInit = {
+      method: req.method,
+      headers: req.headers,
+      body: req.body as BodyInit | null | undefined,
+      mode: req.mode,
+      credentials: req.credentials,
+      cache: req.cache,
+      redirect: req.redirect,
+      referrer: req.referrer,
+      referrerPolicy: req.referrerPolicy,
+      signal: req.signal,
+    };
+
+    // legg til opsjonelle felter hvis de finnes – uten any
+    const integrity = (req as Partial<Request> & { integrity?: string }).integrity;
+    if (integrity !== undefined) {
+      requestInit.integrity = integrity;
+    }
+
+    const keepalive = (req as Partial<Request> & { keepalive?: boolean }).keepalive;
+    if (typeof keepalive === "boolean") {
+      requestInit.keepalive = keepalive;
+    }
+
+    return origFetch(newUrl, init ?? requestInit);
+  } catch {
+    return origFetch(input, init);
+  }
+};
+
+
+
+    return () => {
+      
+      window.fetch = origFetch;
+    };
+  }, []);
+}
 
 function Spinner() {
   return <div className="inline-block animate-pulse select-none">Laster…</div>;
@@ -75,6 +177,9 @@ function classifyErrorMessage(raw: string): string {
   if (/Tidsavbrudd|Failed to fetch|NetworkError|offline/i.test(raw)) {
     return "Kunne ikke hente data. Sjekk nettverk.";
   }
+  if (/Unexpected token '<'|<!DOCTYPE/i.test(raw)) {
+    return "Kunne ikke laste data (fikk HTML i stedet for JSON). Sjekk API-sti/proxy.";
+  }
   return "Noe gikk galt. Prøv igjen.";
 }
 
@@ -129,6 +234,20 @@ function getStrKey(rec: unknown, key: string): string | undefined {
   return isRecord(rec) && typeof rec[key] === "string" ? (rec[key] as string) : undefined;
 }
 
+function getNestedStr(rec: unknown, parentKey: string, key: string): string | undefined {
+  if (!isRecord(rec)) return undefined;
+  const child = rec[parentKey];
+  if (!isRecord(child)) return undefined;
+  return typeof child[key] === "string" ? (child[key] as string) : undefined;
+}
+
+function getNestedBool(rec: unknown, parentKey: string, key: string): boolean | undefined {
+  if (!isRecord(rec)) return undefined;
+  const child = rec[parentKey];
+  if (!isRecord(child)) return undefined;
+  return typeof child[key] === "boolean" ? (child[key] as boolean) : undefined;
+}
+
 function getBackendSource(): "mock" | "api" {
   const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
   return env.VITE_BACKEND_MODE === "mock" ? "mock" : "api";
@@ -141,12 +260,15 @@ type LocalFixture = SessionReport & {
 };
 
 export default function SessionView() {
+  useDevFetchApiRewrite(); // <<— Viktig for å fikse trend-kallet i dev
+
   const params = useParams();
+  const location = useLocation(); // for query-param
   const id = useMemo(() => params.id ?? "mock", [params.id]);
 
   const { session, loading, error, fetchSession } = useSessionStore();
 
-  // 🔹 TRINN 4/5: kort-økt guard state
+  // TRINN 4/5: kort-økt guard state
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [shortSession, setShortSession] = useState<boolean>(false);
 
@@ -189,7 +311,7 @@ export default function SessionView() {
     id === "mock-2h" ? (local2h as unknown as SessionReport) :
     session ?? null;
 
-  // 🔹 Beregn samples + kort-økt når data endrer seg (inkl. mock-short/2h)
+  // Beregn samples + kort-økt når data endrer seg (inkl. mock-short/2h)
   useEffect(() => {
     const s = effectiveSession;
     if (!s) {
@@ -214,7 +336,7 @@ export default function SessionView() {
   const hasError = !loadingNow && !!effectiveError && id !== "mock-short";
   const friendlyMessage = effectiveError ? classifyErrorMessage(effectiveError) : "";
 
-  /** ── For Analysepanel: trekk ut arrays og CI, og bygg series-prop ── */
+  /** For Analysepanel: trekk ut arrays og CI, og bygg series-prop */
   const wattsArr = useMemo<NumArray | undefined>(() => {
     const w = effectiveSession?.watts;
     return Array.isArray(w) && w.length > 0
@@ -251,18 +373,41 @@ export default function SessionView() {
 
   const tArr = useMemo(() => Array.from({ length: nForT }, (_, i) => i), [nForT]);
 
-  const source = useMemo(() => getBackendSource(), []);
+  const backendSource = useMemo(() => getBackendSource(), []);
+  const sourceLabel: string = useMemo(
+    () =>
+      getStrKey(effectiveSession, "source") ??
+      getNestedStr(effectiveSession, "session", "source") ??
+      (backendSource === "api" ? "API" : "Mock"),
+    [effectiveSession, backendSource]
+  );
+  const isMock = useMemo(() => sourceLabel.toLowerCase() !== "api", [sourceLabel]);
+  const sourceForChart = isMock ? "Mock" : "API";
+
   const calibrated = useMemo(
-    () => getBoolKey(effectiveSession, "calibrated") ?? false,
+    () =>
+      getBoolKey(effectiveSession, "calibrated") ??
+      getNestedBool(effectiveSession, "session", "calibrated") ??
+      false,
     [effectiveSession]
   );
+
   const statusRaw = useMemo(
     () => getStrKey(effectiveSession, "status"),
     [effectiveSession]
   );
   const status =
-    statusRaw ??
-    ((hrArr && !wattsArr) ? "HR-only" : (wattsArr && hrArr) ? "FULL" : "LIMITED");
+    statusRaw ?? ((hrArr && !wattsArr) ? "HR-only" : (wattsArr && hrArr) ? "FULL" : "LIMITED");
+
+  // NEW: bruk helper for HR-only (robust)
+  const hrOnly = useMemo(
+    () =>
+      isHROnlyHelper({
+        series: { hr: hrArr ?? [], watts: wattsArr ?? [] },
+        flags: { hr_only: status === "HR-only" },
+      }),
+    [hrArr, wattsArr, status]
+  );
 
   const panelSeries = useMemo(
     () => ({
@@ -270,16 +415,109 @@ export default function SessionView() {
       watts: wattsArr,
       hr: hrArr,
       precision_watt_ci: { lower: ciLower, upper: ciUpper },
-      source,
+      source: backendSource,
       calibrated,
       status,
     }),
-    [tArr, wattsArr, hrArr, ciLower, ciUpper, source, calibrated, status]
+    [tArr, wattsArr, hrArr, ciLower, ciUpper, backendSource, calibrated, status]
   );
+
+  /** Kalibreringsmodal (integrasjon) */
+
+  // sessionId (robust): params.id → report.id → fallback
+  const sessionId = useMemo(
+    () =>
+      (getStrKey(effectiveSession, "id") ??
+        getNestedStr(effectiveSession, "session", "id")) ||
+      id,
+    [effectiveSession, id]
+  );
+
+  const mode: string = useMemo(
+    () =>
+      getStrKey(effectiveSession, "mode") ??
+      getNestedStr(effectiveSession, "session", "mode") ??
+      "outdoor",
+    [effectiveSession]
+  );
+
+  const isFirstOutdoor = useMemo(
+    () =>
+      // støtter både meta.is_first_outdoor og context.first_outdoor hvis de finnes
+      getNestedBool(effectiveSession, "meta", "is_first_outdoor") === true ||
+      getNestedBool(effectiveSession, "context", "first_outdoor") === true ||
+      false,
+    [effectiveSession]
+  );
+
+  // NEW: Bruk helperen for å avgjøre om vi bør vise modalen
+  const allowCalibrationByHelper = useMemo(
+    () =>
+      shouldShowCalibrationModal({
+        type: mode, // string er tillatt av helper-typen
+        calibrated,
+        meta: { is_first_outdoor: isFirstOutdoor },
+        series: { hr: hrArr ?? [], watts: wattsArr ?? [] },
+        flags: { hr_only: hrOnly },
+      }),
+    [mode, calibrated, isFirstOutdoor, hrArr, wattsArr, hrOnly]
+  );
+
+  // FORCE via query-param (?calibrate=1)
+  const forceCalibrate = useMemo(() => {
+    const qs = new URLSearchParams(location.search);
+    return qs.get("calibrate") === "1";
+  }, [location.search]);
+
+  // Vis den kun én gang per økt (med mindre force)
+  const calibSeenKey = useMemo(() => `cg_calib_seen_${sessionId}`, [sessionId]);
+  const alreadySeen = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return !!localStorage.getItem(calibSeenKey);
+    } catch {
+      return false;
+    }
+  }, [calibSeenKey]);
+
+  // Start-verdi for modalen:
+  const [showCalibration, setShowCalibration] = useState<boolean>(
+    forceCalibrate || (allowCalibrationByHelper && !alreadySeen)
+  );
+
+  // Hold modalen i sync når betingelser endrer seg
+  useEffect(() => {
+    if (forceCalibrate) {
+      setShowCalibration(true);
+      return;
+    }
+    setShowCalibration(allowCalibrationByHelper && !alreadySeen);
+  }, [forceCalibrate, allowCalibrationByHelper, alreadySeen, sessionId]);
+
+  function handleCloseCalibration() {
+    if (!forceCalibrate) {
+      try {
+        localStorage.setItem(calibSeenKey, "1");
+      } catch {
+        // ignored
+      }
+    }
+    setShowCalibration(false);
+  }
+
+  function handleCalibrated() {
+    try {
+      localStorage.setItem(calibSeenKey, "1");
+    } catch {
+      // ignored
+    }
+    setShowCalibration(false);
+    // evt. fetchSession(id) om du vil refetche
+  }
 
   return (
     <div className="page">
-      {/* Header — ryddig, uten Env/Mode badges */}
+      {/* Header */}
       <div className="page-header">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Økt</h1>
@@ -302,7 +540,7 @@ export default function SessionView() {
         </button>
       </div>
 
-      {/* Navigasjon — tydelig skille mellom eksempler og live */}
+      {/* Navigasjon */}
       <nav className="text-sm text-slate-600 mb-2">
         <span>Velg datasett: </span>
         <Link className="underline" to="/session/mock" title="Vis eksempeløkt (outdoor)">
@@ -317,9 +555,21 @@ export default function SessionView() {
           Eksempel – 2h (stor)
         </Link>
         <span> · </span>
-        <Link className="underline" to="/session/ABC123" title="Hent live-økt fra API">
+        <Link className="underline" to={`/session/${encodeURIComponent("ABC123")}`} title="Hent live-økt fra API">
           Live fra API
         </Link>
+        {import.meta.env.DEV && (
+          <>
+            <span> · </span>
+            <button
+              className="underline text-emerald-700"
+              onClick={() => setShowCalibration(true)}
+              title="Åpne kalibreringsveiledning (dev)"
+            >
+              Åpne kalibrering
+            </button>
+          </>
+        )}
       </nav>
 
       {loadingNow && id !== "mock-short" && (
@@ -347,7 +597,23 @@ export default function SessionView() {
             <AnalysisPanel series={panelSeries} />
           )}
 
-          {/* 🔹 DEV-sanity for Precision Watt (kun i dev, lint-safe) */}
+          {/* Trender — vis alltid (TrendsChart håndterer fallback selv) */}
+          <div className="card">
+            <div className="k">Trender</div>
+            <div className="mt-2">
+              <TrendsChart
+                sessionId={sessionId}
+                isMock={isMock}
+                // NEW: send data ned til grafen
+                series={{ t: tArr, watts: wattsArr, hr: hrArr }}
+                calibrated={calibrated}
+                source={sourceForChart}
+                hrOnly={hrOnly}
+              />
+            </div>
+          </div>
+
+          {/* DEV-sanity for Precision Watt (kun i dev) */}
           {devCounts && (
             <div className="mt-0 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-800 text-xs">
               <span className="mr-2 rounded bg-slate-200 px-2 py-0.5 font-mono">
@@ -358,7 +624,7 @@ export default function SessionView() {
             </div>
           )}
 
-          {/* 🔹 kort-økt info-kort */}
+          {/* kort-økt info-kort */}
           {shortSession && (
             <div className="mt-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
               <div className="font-medium">Kort økt – viser begrenset visning</div>
@@ -368,13 +634,13 @@ export default function SessionView() {
             </div>
           )}
 
-          {/* Ekstra: schema_version */}
+          {/* schema_version */}
           <div className="card">
             <div className="k">schema_version</div>
             <div className="mono">{effectiveSession.schema_version}</div>
           </div>
 
-          {/* Ekstra: watt-data (rå visning) */}
+          {/* watt-data (rå visning) */}
           <div className="card">
             <div className="k">watt-data</div>
             {hasWattsValue(effectiveSession.watts) ? (
@@ -388,7 +654,7 @@ export default function SessionView() {
             )}
           </div>
 
-          {/* Ekstra: wind_rel / v_rel */}
+          {/* wind_rel / v_rel */}
           <div className="card grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <div className="k">wind_rel</div>
@@ -410,7 +676,7 @@ export default function SessionView() {
         <div className="card">Ingen data å vise.</div>
       )}
 
-      {/* Diskré kildeinfo nederst (for utviklere), uten å spamme toppen */}
+      {/* Kildeinfo nederst */}
       <div className="mt-6 text-xs text-slate-400">
         Kilde:{" "}
         {id === "mock-short"
@@ -419,8 +685,24 @@ export default function SessionView() {
           ? "Eksempel (2h stor)"
           : id === "mock"
           ? "Eksempel"
-          : "Live (API)"}
+          : "Live (API)"}{" "}
+        {import.meta.env.DEV && (
+          <>
+            — Tips: legg til <code>?calibrate=1</code> i URL for å åpne modalen.
+          </>
+        )}
       </div>
+
+      {/* Kalibreringsmodal på topp */}
+      {showCalibration && (
+        <CalibrationGuide
+          sessionId={sessionId}
+          isOpen={showCalibration}
+          onClose={handleCloseCalibration}
+          onCalibrated={handleCalibrated}
+          isMock={isMock}
+        />
+      )}
     </div>
   );
 }

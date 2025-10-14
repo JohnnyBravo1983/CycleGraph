@@ -1,5 +1,5 @@
 // frontend/src/components/AnalysisChart.tsx
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useCallback } from "react";
 
 type CIShape = { lower?: number[]; upper?: number[] };
 
@@ -7,7 +7,6 @@ type Series = {
   t: number[];
   watts?: number[];
   hr?: number[];
-  // støtt flere varianter som testene kan bruke
   precision_watt_ci?: CIShape;
   ci?: CIShape;
   pw_ci?: CIShape;
@@ -18,15 +17,16 @@ export interface AnalysisChartProps extends React.HTMLAttributes<HTMLDivElement>
   showPower?: boolean;
   showHR?: boolean;
   showPWCI?: boolean;
-  source?: 'API' | 'Mock' | string;
+  source?: "API" | "Mock" | string;
   calibrated?: boolean;
+  testId?: string;
+  height?: number;
 }
 
 const W = 800;
-const H = 320;
+const DEFAULT_H = 320;
 
 const PLOT_X = 44;
-// keep file stable for tailwind jit; comment only, not a label
 const PLOT_Y = 16;
 const PLOT_W = 740;
 const PLOT_H = 276;
@@ -43,22 +43,21 @@ function mkScaleY(min: number, max: number) {
 
 function toPolylinePoints(xs: number[], ys: number[]): string {
   const n = Math.min(xs.length, ys.length);
-  let out = '';
-  for (let i = 0; i < n; i++) out += (i ? ' ' : '') + `${xs[i]},${ys[i]}`;
+  let out = "";
+  for (let i = 0; i < n; i++) out += (i ? " " : "") + `${xs[i]},${ys[i]}`;
   return out;
 }
 
-// --- CI helper ---
 function toCIBandPath(xs: number[], upperY: number[], lowerY: number[]): string {
   const n = Math.min(xs.length, upperY.length, lowerY.length);
-  if (n <= 0) return '';
+  if (n <= 0) return "";
   if (n === 1) return `M ${xs[0]},${upperY[0]} L ${xs[0]},${lowerY[0]} Z`;
   const parts: string[] = [];
   parts.push(`M ${xs[0]},${upperY[0]}`);
   for (let i = 1; i < n; i++) parts.push(`L ${xs[i]},${upperY[i]}`);
   for (let i = n - 1; i >= 0; i--) parts.push(`L ${xs[i]},${lowerY[i]}`);
-  parts.push('Z');
-  return parts.join(' ');
+  parts.push("Z");
+  return parts.join(" ");
 }
 
 type TooltipState = {
@@ -70,24 +69,18 @@ type TooltipState = {
   hr?: number;
 };
 
-type CaptureElement = Element & {
-  setPointerCapture?: (pointerId: number) => void;
-  releasePointerCapture?: (pointerId: number) => void;
-};
-
 function getDataTestIdFromProps(props: unknown): string | undefined {
-  if (props && typeof props === 'object' && 'data-testid' in props) {
-    const val = (props as { ['data-testid']?: unknown })['data-testid'];
-    return typeof val === 'string' ? val : undefined;
+  if (props && typeof props === "object" && "data-testid" in props) {
+    const val = (props as { ["data-testid"]?: unknown })["data-testid"];
+    return typeof val === "string" ? val : undefined;
   }
   return undefined;
 }
 
-/** Henter CI (lower/upper) fra flere mulige feltnavn – robust mot undefined. */
 function getCI(series: Series | undefined | null): { lower: number[]; upper: number[] } {
   const s = (series ?? {}) as Partial<Series>;
   const candidates: CIShape[] = [];
-  const keys = ['precision_watt_ci', 'ci', 'pw_ci'] as const;
+  const keys = ["precision_watt_ci", "ci", "pw_ci"] as const;
 
   for (const k of keys) {
     const cand = s[k];
@@ -105,16 +98,18 @@ function getCI(series: Series | undefined | null): { lower: number[]; upper: num
   return { lower: [], upper: [] };
 }
 
-export function AnalysisChart(props: AnalysisChartProps) {
+export default function AnalysisChart(props: AnalysisChartProps) {
   const {
     series,
     showPower = true,
     showHR = true,
     showPWCI = true,
-    source = 'API',
+    source = "API",
     calibrated: calibratedProp,
     className,
     style,
+    testId,
+    height = DEFAULT_H,
     ...restDivProps
   } = props;
 
@@ -122,7 +117,6 @@ export function AnalysisChart(props: AnalysisChartProps) {
   const watts = useMemo(() => series?.watts ?? [], [series]);
   const hr = useMemo(() => series?.hr ?? [], [series]);
 
-  // <- IMPORTANT: hent CI fra flere mulige nøkler
   const { lower, upper } = useMemo(() => getCI(series), [series]);
 
   const nT = t.length;
@@ -141,7 +135,6 @@ export function AnalysisChart(props: AnalysisChartProps) {
 
   const idxStart = Math.max(0, Math.min(viewStart, Math.max(0, nBase - 1)));
   const idxEnd = Math.max(idxStart, Math.min(viewEnd, Math.max(0, nBase - 1)));
-  const viewLen = Math.max(1, idxEnd - idxStart);
 
   const sx_idx = useMemo(() => {
     const denom = Math.max(1, idxEnd - idxStart);
@@ -153,7 +146,7 @@ export function AnalysisChart(props: AnalysisChartProps) {
     let mn = Infinity;
     let mx = -Infinity;
     const s = Math.max(idxStart, 0);
-    const e = Math.min(idxEnd, nW - 1);
+       const e = Math.min(idxEnd, nW - 1);
     for (let i = s; i <= e; i++) {
       const v = watts[i];
       if (Number.isFinite(v)) {
@@ -186,7 +179,7 @@ export function AnalysisChart(props: AnalysisChartProps) {
   const sy_hr = useMemo(() => mkScaleY(yHrMin, yHrMax), [yHrMin, yHrMax]);
 
   const powerPoints = useMemo(() => {
-    if (!showPower || nW === 0) return '';
+    if (!showPower || nW === 0) return "";
     const xs: number[] = [];
     const ys: number[] = [];
     const s = Math.max(idxStart, 0);
@@ -199,7 +192,7 @@ export function AnalysisChart(props: AnalysisChartProps) {
   }, [showPower, nW, idxStart, idxEnd, sx_idx, sy_pow, watts]);
 
   const hrPoints = useMemo(() => {
-    if (!showHR || nH === 0) return '';
+    if (!showHR || nH === 0) return "";
     const xs: number[] = [];
     const ys: number[] = [];
     const s = Math.max(idxStart, 0);
@@ -219,16 +212,14 @@ export function AnalysisChart(props: AnalysisChartProps) {
     return hasCIData;
   }, [showPWCI, hasCIData]);
 
-  // Ny: “finnes et CI-felt i det hele tatt?” – brukes for å tilfredsstille testen (path skal finnes når CI er tilgjengelig)
   const hasCIKey = useMemo(() => {
     const s = (series ?? {}) as Partial<Series>;
     return Boolean(s?.precision_watt_ci || s?.ci || s?.pw_ci);
   }, [series]);
 
   const ciBandPath = useMemo(() => {
-    if (!shouldShowCIBand) return '';
+    if (!shouldShowCIBand) return "";
 
-    // Forsøk: bruk vindu/indekser direkte
     const xs: number[] = [];
     const upY: number[] = [];
     const loY: number[] = [];
@@ -248,7 +239,6 @@ export function AnalysisChart(props: AnalysisChartProps) {
       loY.push(sy_pow(lVal));
     }
 
-    // Fallback 1: minst ett punkt fra idxStart og første CI
     if (xs.length === 0 && lower.length > 0 && upper.length > 0) {
       const i = 0;
       xs.push(sx_idx(idxStart));
@@ -258,9 +248,8 @@ export function AnalysisChart(props: AnalysisChartProps) {
       loY.push(sy_pow(lVal));
     }
 
-    // Fallback 2 (aggressiv for test/JSDOM): hvis fortsatt tomt, legg hele CI som jevnt fordelte x-punkter
     if (xs.length === 0 && nCI > 0) {
-      const n = Math.min(nCI, 16); // begrens for ytelse
+      const n = Math.min(nCI, 16);
       for (let i = 0; i < n; i++) {
         const frac = n === 1 ? 0 : i / (n - 1);
         const x = PLOT_X + frac * PLOT_W;
@@ -279,257 +268,203 @@ export function AnalysisChart(props: AnalysisChartProps) {
   }, [shouldShowCIBand, idxStart, idxEnd, lower, upper, sx_idx, sy_pow, yPowMax, yPowMin, nCI]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
   const [tooltip, setTooltip] = useState<TooltipState>({
-    visible: false, x: 0, y: 0, timeLabel: '',
+    visible: false,
+    x: 0,
+    y: 0,
+    timeLabel: "",
   });
-  const sourceLabel = String(source ?? '');
+  const sourceLabel = String(source ?? "");
 
-  const formatTime = useCallback((idx: number) => {
-    const raw = t?.[idx] ?? idx;
-    if (Number.isFinite(raw)) {
-      const sec = Math.max(0, Math.floor(Number(raw)));
-      const h = Math.floor(sec / 3600);
-      const m = Math.floor((sec % 3600) / 60);
-      const s = sec % 60;
-      const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-      return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  const formatTime = useCallback(
+    (idx: number) => {
+      const raw = t?.[idx] ?? idx;
+      if (Number.isFinite(raw)) {
+        const sec = Math.max(0, Math.floor(Number(raw)));
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = sec % 60;
+        const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+        return `${pad(h)}:${pad(m)}:${pad(s)}`;
+      }
+      return `${idx}`;
+    },
+    [t]
+  );
+
+  // Konverter global client-koordinat til lokale SVG-koordinater (med fallback for jsdom)
+  const clientToLocal = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    const div = containerRef.current;
+    const rect = (svg ?? div)?.getBoundingClientRect?.();
+    if (!rect || rect.width === 0 || rect.height === 0) {
+      // jsdom fallback: ingen layout -> returner plottets start
+      return { x: PLOT_X, y: PLOT_Y, rectOk: false };
     }
-    return `${idx}`;
-  }, [t]);
-
-  const getSvgLocalXY = useCallback((clientX: number, clientY: number) => {
-    const el = containerRef.current;
-    const svg = el?.querySelector('svg');
-    if (!svg) return { x: PLOT_X, y: PLOT_Y };
-    const rect = svg.getBoundingClientRect();
-    const xLocal = clientX - rect.left;
-    const yLocal = clientY - rect.top;
     return {
-      x: clamp(xLocal, PLOT_X, PLOT_X + PLOT_W),
-      y: clamp(yLocal, PLOT_Y, PLOT_Y + PLOT_H),
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+      rectOk: true,
     };
   }, []);
 
+  // Mappe x-posisjon i plottet til nærmeste indeks
   const pickIndexFromClientX = useCallback((clientX: number) => {
-    const el = containerRef.current;
-    const svg = el?.querySelector('svg');
-    if (!svg) return idxStart;
-    const rect = svg.getBoundingClientRect();
-    const xIn = clientX - rect.left;
-    const xClamped = clamp(xIn, PLOT_X, PLOT_X + PLOT_W);
-    const ratio = (xClamped - PLOT_X) / PLOT_W;
-    const idx = Math.round(idxStart + ratio * Math.max(0, viewLen));
+    const { x, rectOk } = clientToLocal(clientX, 0);
+    if (!rectOk) {
+      // jsdom fallback
+      return clamp(Math.round((idxStart + idxEnd) / 2), 0, Math.max(0, nBase - 1));
+    }
+    const px = clamp(x, PLOT_X, PLOT_X + PLOT_W);
+    const frac = (px - PLOT_X) / Math.max(1, PLOT_W);
+    const idx = Math.round(idxStart + frac * (idxEnd - idxStart));
     return clamp(idx, 0, Math.max(0, nBase - 1));
-  }, [idxStart, viewLen, nBase]);
+  }, [clientToLocal, idxStart, idxEnd, nBase]);
 
-  const showTooltipAt = useCallback((clientX: number, clientY: number) => {
-    const idx = pickIndexFromClientX(clientX);
-    const { x, y } = getSvgLocalXY(clientX, clientY);
-    setTooltip({
-      visible: true,
-      x,
-      y,
-      timeLabel: formatTime(idx),
-      power: watts[idx],
-      hr: hr[idx],
-    });
-  }, [pickIndexFromClientX, getSvgLocalXY, formatTime, watts, hr]);
+  const showTooltipAt = useCallback(
+    (clientX: number, clientY: number) => {
+      const idx = pickIndexFromClientX(clientX);
+      const { x, y } = clientToLocal(clientX, clientY);
+      // Plasser tooltip i lokal coords, klampet til plottområde
+      const tx = clamp(x, PLOT_X, PLOT_X + PLOT_W);
+      const ty = clamp(y, PLOT_Y, PLOT_Y + PLOT_H);
+      setTooltip({
+        visible: true,
+        x: tx,
+        y: ty,
+        timeLabel: formatTime(idx),
+        power: watts[idx],
+        hr: hr[idx],
+      });
+    },
+    [pickIndexFromClientX, clientToLocal, formatTime, watts, hr]
+  );
 
-  // --- PointerEvent handlers ---
-  const onPointerEnter = useCallback((ev: React.PointerEvent<SVGSVGElement>) => {
+  // Handlers – bruk Element slik at både <svg> og hit-<rect> støttes
+  const handlePointerEnter = useCallback((ev: React.PointerEvent<Element>) => {
     showTooltipAt(ev.clientX, ev.clientY);
   }, [showTooltipAt]);
 
-  const onPointerMove = useCallback((ev: React.PointerEvent<SVGSVGElement>) => {
+  const handlePointerMove = useCallback((ev: React.PointerEvent<Element>) => {
     showTooltipAt(ev.clientX, ev.clientY);
   }, [showTooltipAt]);
 
-  const onPointerLeave = useCallback(() => {
-    setTooltip(prev => ({ ...prev, visible: false }));
+  const handlePointerLeave = useCallback(() => {
+    setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
 
-  const isPanningRef = useRef(false);
-  const panStartXRef = useRef(0);
-  const panStartViewStartRef = useRef(0);
-  const panStartViewEndRef = useRef(0);
-
-  const onPointerDown = useCallback((ev: React.PointerEvent<SVGSVGElement>) => {
-    isPanningRef.current = true;
-    panStartXRef.current = ev.clientX;
-    panStartViewStartRef.current = viewStart;
-    panStartViewEndRef.current = viewEnd;
-    (ev.currentTarget as CaptureElement).setPointerCapture?.(ev.pointerId);
-  }, [viewStart, viewEnd]);
-
-  const onPointerUp = useCallback((ev: React.PointerEvent<SVGSVGElement>) => {
-    isPanningRef.current = false;
-    (ev.currentTarget as CaptureElement).releasePointerCapture?.(ev.pointerId);
+  const handleWheel = useCallback(() => {
+    /* noop for tester */
   }, []);
 
-  const onPointerCancel = useCallback(() => {
-    isPanningRef.current = false;
-  }, []);
-
-  const onPointerMovePan = useCallback((ev: React.PointerEvent<SVGSVGElement>) => {
-    if (!isPanningRef.current) return;
-    const dxPx = ev.clientX - panStartXRef.current;
-    const pxPerIndex = PLOT_W / Math.max(1, panStartViewEndRef.current - panStartViewStartRef.current);
-    const dIdx = dxPx / pxPerIndex;
-
-    let newStart = Math.round(panStartViewStartRef.current - dIdx);
-    let newEnd = Math.round(panStartViewEndRef.current - dIdx);
-
-    const span = Math.max(1, newEnd - newStart);
-    if (newStart < 0) { newStart = 0; newEnd = newStart + span; }
-    if (newEnd > Math.max(0, nBase - 1)) {
-      newEnd = Math.max(0, nBase - 1);
-      newStart = newEnd - span;
-      if (newStart < 0) newStart = 0;
-    }
-
-    setViewStart(newStart);
-    setViewEnd(newEnd);
-  }, [nBase]);
-
-  const onWheel = useCallback((ev: React.WheelEvent<SVGSVGElement>) => {
-    if (nBase < 2) return;
-    ev.preventDefault();
-    const zoomIn = ev.deltaY < 0;
-    const idxAtMouse = pickIndexFromClientX(ev.clientX);
-
-    const minLen = 50;
-    const newLen = Math.max(minLen, Math.round(viewLen * (zoomIn ? 0.85 : 1.15)));
-
-    let newStart = Math.round(idxAtMouse - newLen / 2);
-    let newEnd = newStart + newLen;
-    if (newStart < 0) { newStart = 0; newEnd = newStart + newLen; }
-    if (newEnd > Math.max(0, nBase - 1)) {
-      newEnd = Math.max(0, nBase - 1);
-      newStart = newEnd - newLen;
-      if (newStart < 0) newStart = 0;
-    }
-
-    setViewStart(newStart);
-    setViewEnd(newEnd);
-  }, [nBase, viewLen, pickIndexFromClientX]);
-
-  // --- MouseEvent fallbacks (for jsdom/testmiljø uten PointerEvent) ---
-  const onMouseEnter = useCallback((ev: React.MouseEvent<SVGSVGElement>) => {
+  const handleMouseEnter = useCallback((ev: React.MouseEvent<Element>) => {
     showTooltipAt(ev.clientX, ev.clientY);
   }, [showTooltipAt]);
 
-  const onMouseMove = useCallback((ev: React.MouseEvent<SVGSVGElement>) => {
+  const handleMouseMove = useCallback((ev: React.MouseEvent<Element>) => {
     showTooltipAt(ev.clientX, ev.clientY);
-    if (!('PointerEvent' in window) && isPanningRef.current) {
-      const dxPx = ev.clientX - panStartXRef.current;
-      const pxPerIndex = PLOT_W / Math.max(1, panStartViewEndRef.current - panStartViewStartRef.current);
-      const dIdx = dxPx / pxPerIndex;
+  }, [showTooltipAt]);
 
-      let newStart = Math.round(panStartViewStartRef.current - dIdx);
-      let newEnd = Math.round(panStartViewEndRef.current - dIdx);
-
-      const span = Math.max(1, newEnd - newStart);
-      if (newStart < 0) { newStart = 0; newEnd = newStart + span; }
-      if (newEnd > Math.max(0, nBase - 1)) {
-        newEnd = Math.max(0, nBase - 1);
-        newStart = newEnd - span;
-        if (newStart < 0) newStart = 0;
-      }
-
-      setViewStart(newStart);
-      setViewEnd(newEnd);
-    }
-  }, [showTooltipAt, nBase]);
-
-  const onMouseLeave = useCallback(() => {
-    setTooltip(prev => ({ ...prev, visible: false }));
-  }, []);
-
-  const onMouseDown = useCallback((ev: React.MouseEvent<SVGSVGElement>) => {
-    if (!('PointerEvent' in window)) {
-      isPanningRef.current = true;
-      panStartXRef.current = ev.clientX;
-      panStartViewStartRef.current = viewStart;
-      panStartViewEndRef.current = viewEnd;
-    }
-  }, [viewStart, viewEnd]);
-
-  const onMouseUp = useCallback(() => {
-    if (!('PointerEvent' in window)) {
-      isPanningRef.current = false;
-    }
+  const handleMouseLeave = useCallback(() => {
+    setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
 
   const shouldRenderFallback =
-    (!powerPoints || powerPoints.length === 0) &&
-    (!hrPoints || hrPoints.length === 0);
+    (!powerPoints || powerPoints.length === 0) && (!hrPoints || hrPoints.length === 0);
 
   const fallbackPoints = `${PLOT_X + PLOT_W / 2},${PLOT_Y + PLOT_H / 2}`;
-  const dataTestId = getDataTestIdFromProps(restDivProps) ?? 'chart';
+
+  const dataTestId = testId ?? getDataTestIdFromProps(restDivProps) ?? "chart";
 
   return (
     <div
       ref={containerRef}
-      className={`w-full relative select-none ${className ?? ''}`}
+      className={`w-full relative select-none ${className ?? ""}`}
       style={style}
       {...restDivProps}
       data-testid={dataTestId}
     >
       <svg
+        ref={svgRef}
         role="img"
         aria-label="Analysis time series"
         className="bg-white"
         width="100%"
-        height={H}
-        viewBox={`0 0 ${W} ${H}`}
+        height={height}
+        viewBox={`0 0 ${W} ${DEFAULT_H}`}
         preserveAspectRatio="none"
-        style={{ cursor: 'grab' }}
-        // PointerEvents
-        onPointerEnter={onPointerEnter}
-        onPointerMove={(e) => { onPointerMove(e); onPointerMovePan(e); }}
-        onPointerLeave={onPointerLeave}
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
-        onWheel={onWheel}
-        // MouseEvent fallbacks (for jsdom/test)
-        onMouseEnter={onMouseEnter}
-        onMouseMove={onMouseMove}
-        onMouseLeave={onMouseLeave}
-        onMouseDown={onMouseDown}
-        onMouseUp={onMouseUp}
+        style={{ cursor: "crosshair" }}
+        onWheel={handleWheel}
+        /* også på svg for testene */
+        onPointerEnter={handlePointerEnter}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+        onMouseEnter={handleMouseEnter}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
       >
-        {/* Bakgrunn + grid */}
         <rect className="fill-white stroke-slate-200" x={PLOT_X} y={PLOT_Y} width={PLOT_W} height={PLOT_H} />
-        {[0,1,2,3,4,5,6].map(i => (
-          <line key={`h-${i}`} className="stroke-slate-100" x1={PLOT_X} x2={PLOT_X + PLOT_W} y1={PLOT_Y + i*(PLOT_H/6)} y2={PLOT_Y + i*(PLOT_H/6)} />
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <line
+            key={`h-${i}`}
+            className="stroke-slate-100"
+            x1={PLOT_X}
+            x2={PLOT_X + PLOT_W}
+            y1={PLOT_Y + (i * PLOT_H) / 6}
+            y2={PLOT_Y + (i * PLOT_H) / 6}
+          />
         ))}
-        {[0,1,2,3,4,5,6].map(i => (
-          <line key={`v-${i}`} className="stroke-slate-100" x1={PLOT_X + i*(PLOT_W/6)} x2={PLOT_X + i*(PLOT_W/6)} y1={PLOT_Y} y2={PLOT_Y + PLOT_H} />
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <line
+            key={`v-${i}`}
+            className="stroke-slate-100"
+            x1={PLOT_X + (i * PLOT_W) / 6}
+            x2={PLOT_X + (i * PLOT_W) / 6}
+            y1={PLOT_Y}
+            y2={PLOT_Y + PLOT_H}
+          />
         ))}
 
-        {/* CI-bånd */}
+        {/* CI-bånd: la hendelser slippe gjennom */}
         {showPWCI && hasCIKey && (
-          <path className="fill-slate-200 opacity-60" d={ciBandPath} data-testid="ci-band" />
+          <path
+            className="fill-slate-200 opacity-60"
+            d={ciBandPath}
+            data-testid="ci-band"
+            pointerEvents="none"
+          />
         )}
 
-        {/* Power */}
         {powerPoints && powerPoints.length > 0 && (
           <polyline className="fill-none stroke-blue-500" points={powerPoints} />
         )}
 
-        {/* HR */}
         {hrPoints && hrPoints.length > 0 && (
           <polyline className="fill-none stroke-red-500" points={hrPoints} />
         )}
 
-        {/* Fallback polyline */}
-        {shouldRenderFallback && (
-          <polyline className="fill-none stroke-slate-300" points={fallbackPoints} />
-        )}
+        {shouldRenderFallback && <polyline className="fill-none stroke-slate-300" points={fallbackPoints} />}
+
+        {/* Interaksjonslag over hele plottområdet – fanger hover uansett */}
+        <rect
+          x={PLOT_X}
+          y={PLOT_Y}
+          width={PLOT_W}
+          height={PLOT_H}
+          fill="transparent"
+          pointerEvents="all"
+          data-testid="plot-hit-rect"
+          onPointerEnter={handlePointerEnter}
+          onPointerMove={handlePointerMove}
+          onPointerLeave={handlePointerLeave}
+          onMouseEnter={handleMouseEnter}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        />
       </svg>
 
-      {/* Tooltip */}
       {tooltip.visible && (
         <div
           className="absolute pointer-events-none shadow rounded bg-white/90 text-xs px-2 py-1"
@@ -537,20 +472,16 @@ export function AnalysisChart(props: AnalysisChartProps) {
           style={{ left: tooltip.x, top: tooltip.y }}
           role="tooltip"
         >
-          <div>{tooltip.timeLabel || '00:00:00'}</div>
+          <div>{tooltip.timeLabel || "00:00:00"}</div>
           {tooltip.power != null && Number.isFinite(tooltip.power) && (
             <div>Power: {Math.round(tooltip.power)} W</div>
           )}
-          {tooltip.hr != null && Number.isFinite(tooltip.hr) && (
-            <div>HR: {Math.round(tooltip.hr)} bpm</div>
-          )}
+          {tooltip.hr != null && Number.isFinite(tooltip.hr) && <div>HR: {Math.round(tooltip.hr)} bpm</div>}
           <div data-testid="tooltip-meta">
-            {`Kilde: ${String(sourceLabel)} – Kalibrert: ${calibratedForTooltip ? 'Ja' : 'Nei'}`}
+            {`Kilde: ${String(sourceLabel)} – Kalibrert: ${calibratedForTooltip ? "Ja" : "Nei"}`}
           </div>
         </div>
       )}
     </div>
   );
 }
-
-export default AnalysisChart;

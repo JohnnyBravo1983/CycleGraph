@@ -1,11 +1,18 @@
 // frontend/src/main.tsx
 import "./index.css";
+import "./devFetchShim";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 
 import App from "./App";
 import SessionView from "./routes/SessionView";
+import { installAxiosDevRewrite } from "./lib/axiosDevRewrite";
+
+// Installer dev-rewrite for axios FØR appen starter (kun i dev)
+if (import.meta.env.DEV) {
+  installAxiosDevRewrite();
+}
 
 /**
  * Router:

@@ -1,4 +1,5 @@
 // frontend/src/lib/formatters.ts
+// Samlet og renset versjon – inneholder eksisterende + Sprint 12-formatters.
 
 type Opts = { fallback?: string };
 const Fallback = "—";
@@ -27,13 +28,18 @@ const pct1 = nf("nb-NO", {
   maximumFractionDigits: 1,
 });
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Grunnformatterere (eksisterende)
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
 /** Normalized Power, e.g. "206 W" */
 export function formatNP(value: number | null | undefined, opts?: Opts): string {
   if (!isNum(value)) return pickFallback(opts);
   return `${int0.format(Math.round(value))} W`;
 }
 
-/** Intensity Factor (ratio), e.g. "0,65" (nb-NO uses comma) */
+/** Intensity Factor (ratio), e.g. "0,65" */
 export function formatIF(value: number | null | undefined, opts?: Opts): string {
   if (!isNum(value)) return pickFallback(opts);
   return dec2.format(value);
@@ -51,7 +57,7 @@ export function formatPaHr(
   opts?: Opts,
 ): string {
   if (!isNum(value)) return pickFallback(opts);
-  // Input forventes som prosentpoeng (f.eks. 1.0 betyr 1.0%)
+  // Input forventes som prosentpoeng (f.eks. 1.0 betyr 1.0 %)
   return pct1.format(value / 100);
 }
 
@@ -74,7 +80,7 @@ export function formatCGS(
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Nye formattere for Sprint 11 (tid, tooltip, CI)
+ * Nye formattere (Sprint 11 + Sprint 12)
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -82,7 +88,7 @@ export type DataSource = "mock" | "api";
 
 /**
  * Konverterer sekunder → hh:mm:ss (eller mm:ss hvis < 1 time).
- *  - 0  → "00:00"
+ *  - 0 → "00:00"
  *  - 75 → "01:15"
  *  - 3661 → "01:01:01"
  */
@@ -103,8 +109,7 @@ export function formatTime(
 
 /**
  * Tooltip-header som matcher badge-logikken.
- * Eksempel:
- *  - source="api", calibrated=true   → "Kilde: API – Kalibrert: Ja"
+ *  - source="api", calibrated=true  → "Kilde: API – Kalibrert: Ja"
  *  - source="mock", calibrated=false → "Kilde: Mock – Kalibrert: Nei"
  */
 export function formatTooltip(source: DataSource, calibrated: boolean): string {
@@ -115,26 +120,68 @@ export function formatTooltip(source: DataSource, calibrated: boolean): string {
 
 /**
  * CI-tekst fra nedre/øvre konfidensbånd.
- * Viser "±X watt" hvor X = (upper - lower) / 2, avrundet til nærmeste heltall.
+ * Viser "±X watt" hvor X = (upper − lower)/2, avrundet til nærmeste heltall.
  * Returnerer "Mangler" hvis verdier er ugyldige eller mangler.
  */
-export function formatCI(
-  lower?: number | null,
-  upper?: number | null,
-): string {
+export function formatCI(lower?: number | null, upper?: number | null): string {
   const hasLower = isNum(lower);
   const hasUpper = isNum(upper);
   if (!hasLower || !hasUpper) return "Mangler";
 
   let lo = lower as number;
   let hi = upper as number;
-  if (hi < lo) {
-    const tmp = hi;
-    hi = lo;
-    lo = tmp;
-  }
+  if (hi < lo) [lo, hi] = [hi, lo];
   const half = (hi - lo) / 2;
   if (!Number.isFinite(half) || half < 0) return "Mangler";
   const x = Math.round(half);
   return `±${int0.format(x)} watt`;
+}
+
+/**
+ * Sprint 12 – Kalibreringsstatus og trend-tid.
+ */
+
+/** Returnerer "Kalibrert" / "Ikke kalibrert" / "Ukjent" */
+export function formatCalibrationStatus(calibrated: boolean | null): string {
+  if (calibrated === true) return "Kalibrert";
+  if (calibrated === false) return "Ikke kalibrert";
+  return "Ukjent";
+}
+
+/** Timestamp for trendgraf (viser klokkeslett eller dato + tid) */
+export function formatTrendTimestamp(ts: string): string {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return Fallback;
+
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  if (sameDay) {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(d);
+  }
+
+  const date = new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(d);
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+  return `${date} ${time}`;
+}
+
+/** W/beat (Precision Watt) – e.g. "3,1 W/beat" eller fallback "—" */
+export function formatPW(value: number | null | undefined): string {
+  if (!isNum(value)) return Fallback;
+  return `${dec1.format(value)} W/beat`;
 }

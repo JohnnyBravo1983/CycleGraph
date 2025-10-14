@@ -266,73 +266,75 @@ Info for brukere uten wattmåler (HR-fallback, tydelig språk).
 Rydd labels; skille Mode (Indoor/Outdoor) vs. Kilde (API/Mock).
 Knytte til schema-felter (calibrated, cda, crr, reason).
 Ny fra S11: TrendsChart for aggregert NP/PW → inkluderes i UI-oversikt.
+[ny prosessforbedring] Legg inn fast bygg- og import-sjekk før push:
+python -m maturin develop --release -F python --manifest-path core/Cargo.toml && python -c "import cyclegraph_core"
+slik at cyclegraph_core alltid kompileres og importeres korrekt før pytest/CI kjører.
 
 DoD (presisert):
 “Ferdig kalibrert” trigger backend-flag og speiles i UI.
 HR-only-flyt forståelig uten tekniske termer.
 TrendsChart viser NP/PW per økt uten lagg.
 Enhetstester på nye UI-komponenter; samme feilbanner-mønster ved svikt.
+Bygg- og import-sjekk for cyclegraph_core må kjøre grønt før merge.
 
 🔜 PLANLAGT – S13 — QA, demo & CI readiness (🚀✅)
 
 Oppgaver (oppdatert):
 Prod-build optimering; a11y (kontraster/tastatur).
-Docs: README + “Using Precision Watt”.
+Docs: README + Using Precision Watt.
 Deploy til testmiljø (Netlify/Vercel).
+
 GitHub Actions:
 Sett opp Rust toolchain (MSVC) + maturin.
 Bygg wheel/cache; kjør pytest (CLI) + vitest (FE) + schema-kontrakt.
 Logging-test i CI (stdout ren JSON, stderr debug).
+
+[ny QA-sjekk] CI validerer at cyclegraph_core kan importeres og at pytest-scope = 52 tester (ingen “missing core”-feil).
 Miljøhensyn: Unngå npm ci i OneDrive; bruk npm install eller flytt prosjektmappe.
 
 DoD (oppdatert):
 Lighthouse perf > 80 / a11y > 90.
 CI grønn inkl. maturin-steg + schema-kontrakt.
+Import-sjekk for cyclegraph_core og pytest-scope består automatisk i CI.
 Logging-test passerer; deploy kjørbar i testmiljø.
 Ingen blocker-bugs ved demo.
 
-📊 Total ballpark (oppdatert)
+🔜 PLANLAGT – S14 — Precision Watt End-to-End Integration (⚡🚴‍♂️)
 
-S10: 10–14 h (✅ Ferdig)
+Mål:
+Gjør Precision Watt til et fullverdig, brukerstyrt feature i CycleGraph – fra beregning til lagring og publisering på Strava. Dette markerer den funksjonelle fullføringen av flaggskipelementet før MVP-lansering.
+Viktig når brukere lagrer sine økter på strava skal allt gå automatisk gjennom Pipelinen til appen så lenge bruker har godkjent og gitt samtykke. 
+Oppgaver:
+Backend (Rust/Python):
+Utvid analyze_session() slik at precision_watt, precision_watt_ci, cda, crr, reason lagres i brukerens historikk (JSON eller SQLite).
+Ny modul publish_precision_watt.py som bruker Strava-token og publiserer kommentar med:
+CycleGraph Precision Watt: {pw:.0f} W (±{ci:.0f} W)
+Vind: {wind} m/s, CdA: {cda:.2f}, Crr: {crr:.3f}
 
-S11: 12–16 h (✅ Ferdig)
+Rebruk strava_publish.py, legg til mal for Precision Watt og rate-limit-håndtering (429 → retry m/backoff).
+Legg til CLI-flagg --publish-pw og miljøvariabel CYCLEGRAPH_PUBLISH_PW=true.
+Logg eventer for pw_publish_success_total og pw_publish_fail_total.
 
-S12: 8–12 h (🔜 Neste)
+Frontend (React):
+Ny toggle i brukerprofil-panelet: “Publisér Precision Watt til Strava”.
+Oppdater SessionCard / AnalysisPanel – viser ikon + status “Publisert”.
+Banner ved førstegangspublisering: “Precision Watt publisert på Strava ✅”.
 
-S13: 12–18 h (Planlagt QA/CI)
-🔜 PLANLAGT – S13 — QA, demo & CI readiness (🚀✅)
-Oppgaver (oppdatert)
-Prod-build optimering; a11y (kontraster/tastatur).
-Docs: README + “Using Precision Watt”.
-Deploy til testmiljø (Netlify/Vercel).
-Ny: GitHub Actions:
-Sett opp Rust toolchain (MSVC) + maturin.
-Bygg wheel/caché; kjør pytest (CLI) + vitest (FE) + schema-kontrakt.
-Logging-test i CI (stdout ren JSON, stderr debug).
-Miljøhensyn: unngå npm ci i OneDrive; bruk npm install eller flytt prosjektmappe.
-DoD (oppdatert)
-Lighthouse perf >80 / a11y >90.
-CI grønn inkl. maturin-steg + schema-kontrakt.
-Logging-test passerer; deploy kjørbar i testmiljø.
-Ingen blocker-bugs ved demo.
+Lagring / Observabilitet:
+Utvid session_storage.py til å persistere feltene precision_watt, precision_watt_ci, published_to_strava, publish_time.
+Ny CLI-kommando cyclegraph sessions list som viser siste 5 økter m/ PW og status.
 
-Sprint 14 
+Testing / CI:
+Unit-tester for publish_precision_watt() med mock-Strava-klient.
+End-to-end-test som simulerer Strava-respons og verifiserer kommentarinnhold.
+Oppdater schema_version → v0.7.2 med nye felt (published_to_strava, publish_time).
+CI kjører pytest test_publish_pw.py + vitest smoke på ny toggle.
+[prosedyresjekk] CI validerer at cyclegraph_core bygger og importeres før tests – samme rutine som fra S12/S13.
 
-✅ Definition of Done (DoD)
-    • Precision Watt-verdier lagres sammen med økten i lokal historikk (session.json eller DB).
-    • CLI-flag --publish-pw og UI-toggle fungerer likt (brukerens valg styrer oppførsel).
-    • Strava-publisering fungerer med gyldig token og gir riktig tekst (verifisert i sandbox).
-    • Ved publisering vises status i UI og logges i CLI (“PW publish success”).
-    • Retry ved 429 (maks 3 forsøk) og tydelig feilmelding ved 401/403.
-    • Tester (cargo, pytest, vitest) grønne; schema-kontrakten (v0.7.2) verifiserer nye felter.
-    • Prod-build kjører uten feil og viser ikon “PW→Strava” for publiserte økter.
-    • Dokumentasjon oppdatert:
-        ◦ docs/using_precision_watt.md (brukeropplevelse)
-        ◦ docs/api_publish.md (teknisk API-referanse)
-
-
-📊 Totalballpark (oppdatert)
-S10: 10–14h (FERDIG)
-S11: 12–16h
-S12: 8–12h
-S13: 12–18h (inkl. Actions/maturin/cache)
+DoD (presisert):
+Precision Watt-felt lagres og lastes riktig i historikk.
+Strava-publisering gjennomføres automatisk ved aktivert toggle.
+Statusbanner og ikon vises konsistent i UI.
+Schema v0.7.2 validerer nye felt uten brudd på bakoverkompabilitet.
+Unit + E2E-tester består (inkl. mock-Strava).
+CI grønn med maturin-build og import-sjekk for cyclegraph_cor

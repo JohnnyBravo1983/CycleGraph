@@ -1,4 +1,3 @@
-// frontend/vitest.config.ts
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
@@ -6,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    setupFiles: './src/tests/setup.ts',
-    css: true,
+    setupFiles: ['./src/tests/setup.ts'],
+    globals: true,
+    restoreMocks: true,
+    clearMocks: true,
+    mockReset: true,
   },
 });
