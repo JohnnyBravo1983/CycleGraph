@@ -24,6 +24,8 @@
       --fg:#ffffff;
       --muted:#c7c9d1;
       --accent:#7aa2ff;
+      --border:#212635;
+      --flag-bg:#111522;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -37,8 +39,9 @@
     }
     main { width: 100%; max-width: 880px; padding: 28px; }
     .card {
+      position: relative; /* for flagbar placement */
       background: color-mix(in srgb, var(--panel) 96%, transparent);
-      border: 1px solid #212635;
+      border: 1px solid var(--border);
       border-radius: 16px;
       padding: 28px;
       box-shadow: 0 10px 30px rgba(0,0,0,.25);
@@ -91,44 +94,81 @@
       margin-top: 18px;
     }
 
-    /* Språk-knapper (øverst til høyre) */
+    /* Språk-knapper (inn på kortet, alltid synlige) */
     .flagbar {
-      position: fixed;
+      position: absolute;
       top: 12px;
       right: 12px;
       display: flex;
-      gap: 8px;
-      z-index: 20;
+      gap: 10px;
+      z-index: 5;
     }
     .flagbtn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 42px;
-      height: 42px;
-      border-radius: 12px;
-      border: 1px solid #2b3243;
-      background: #111522;
+      width: 44px;
+      height: 32px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--flag-bg);
       cursor: pointer;
-      font-size: 22px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-      color: #fff;
+      padding: 0;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.25);
+      transition: transform .12s ease, box-shadow .12s ease, outline-color .12s ease, background .12s ease;
     }
-    .flagbtn[aria-pressed="true"] {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
+    .flagbtn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(0,0,0,0.28); }
+    .flagbtn:active { transform: translateY(0); box-shadow: 0 6px 14px rgba(0,0,0,0.2); }
+    .flagbtn[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .flagbtn svg { display:block; width: 28px; height: 20px; border-radius: 4px; }
+
+    /* Litt større på brede skjermer */
+    @media (min-width: 1100px) {
+      .flagbtn { width: 52px; height: 36px; }
+      .flagbtn svg { width: 32px; height: 22px; }
     }
   </style>
 </head>
 <body>
-  <!-- 🇳🇴 / 🇬🇧 språkvalg -->
-  <div class="flagbar" role="group" aria-label="Language selection">
-    <button class="flagbtn" id="btn-no" aria-pressed="true" aria-label="Norsk">🇳🇴</button>
-    <button class="flagbtn" id="btn-en" aria-pressed="false" aria-label="English">🇬🇧</button>
-  </div>
-
   <main>
     <div class="card">
+      <!-- 🇳🇴 / 🇬🇧 språkvalg (SVG for konsistent visning på PC) -->
+      <div class="flagbar" role="group" aria-label="Language selection">
+        <button class="flagbtn" id="btn-no" aria-pressed="true" aria-label="Norsk" title="Norsk (NO)">
+          <!-- Norsk flagg (SVG) -->
+          <svg viewBox="0 0 22 16" aria-hidden="true">
+            <defs>
+              <clipPath id="clip-no"><rect x="0" y="0" width="22" height="16" rx="2" ry="2"/></clipPath>
+            </defs>
+            <g clip-path="url(#clip-no)">
+              <rect width="22" height="16" fill="#EF2B2D"/>
+              <rect x="5" width="3" height="16" fill="#fff"/>
+              <rect y="6" width="22" height="3" fill="#fff"/>
+              <rect x="6" width="1" height="16" fill="#00205B"/>
+              <rect y="7" width="22" height="1" fill="#00205B"/>
+            </g>
+          </svg>
+        </button>
+        <button class="flagbtn" id="btn-en" aria-pressed="false" aria-label="English" title="English (EN)">
+          <!-- UK flagg (Union Jack simplified SVG) -->
+          <svg viewBox="0 0 22 16" aria-hidden="true">
+            <defs>
+              <clipPath id="clip-gb"><rect x="0" y="0" width="22" height="16" rx="2" ry="2"/></clipPath>
+            </defs>
+            <g clip-path="url(#clip-gb)">
+              <rect width="22" height="16" fill="#012169"/>
+              <path d="M0,0 L22,16 M22,0 L0,16" stroke="#fff" stroke-width="3"/>
+              <path d="M0,-1 L-1,0 9,7 11,9 23,17 22,16 13,10 9,7 0,1" fill="#C8102E"/>
+              <path d="M23,-1 L22,0 13,6 11,7 9,9 0,15 -1,16 0,17 11,9 13,8 22,2 23,1" fill="#C8102E"/>
+              <rect x="9.5" width="3" height="16" fill="#fff"/>
+              <rect y="6.5" width="22" height="3" fill="#fff"/>
+              <rect x="10.25" width="1.5" height="16" fill="#C8102E"/>
+              <rect y="7.25" width="22" height="1.5" fill="#C8102E"/>
+            </g>
+          </svg>
+        </button>
+      </div>
+
       <img src="logo.png" alt="CycleGraph logo" class="logo" />
 
       <div style="text-align:center">
@@ -141,7 +181,7 @@
         <p class="kicker" data-i18n="kicker">MVP lanseres snart.</p>
 
         <!-- CTA: e-post (subject oppdateres av JS for valgt språk) -->
-        <a id="cta" class="cta" href="mailto:jstromo83@gmail.com?subject=CycleGraph%20–%20hold%20meg%20oppdatert" data-i18n="cta">
+        <a id="cta" class="cta" href="mailto:jstromo83@gmail.com?subject=CycleGraph%20%E2%80%93%20hold%20meg%20oppdatert" data-i18n="cta">
           Gi meg beskjed ved lansering
         </a>
 
@@ -163,7 +203,7 @@
         _ogDesc: "CycleGraph kombinerer watt, puls og værdata for mer realistiske treningsinnsikter.",
         badge: "CycleGraph (beta)",
         h1: "Presise treningsinnsikter fra watt, puls og vær",
-        lead: "Flaggskipet vårt, Precision Watt, kombinerer værdata og analyse for å gi en mer realistisk watt. Perfekt for mosjonister og seriøse amatører.",
+        lead: "Vårt flaggskip, Precision Watt, kombinerer værdata og analyse for å gi en mer realistisk watt. Perfekt for mosjonister og seriøse amatører.",
         kicker: "MVP lanseres snart.",
         cta: "Gi meg beskjed ved lansering",
         cta_subject: "CycleGraph%20%E2%80%93%20hold%20meg%20oppdatert",
@@ -218,15 +258,7 @@
       // Synlig tekst
       $$("[data-i18n]").forEach(node => {
         const key = node.getAttribute("data-i18n");
-        if (t[key]) {
-          // Behold <strong> i lead ved å sette textContent bare når noden ikke inneholder HTML
-          if (node === $(".lead")) {
-            // lead-tekst uten HTML, men vi kan sette ren tekst fordi <strong> i originalen er dekorativ
-            node.textContent = t[key];
-          } else {
-            node.textContent = t[key];
-          }
-        }
+        if (t[key]) node.textContent = t[key];
       });
 
       // CTA mailto med språkspesifikt subject
