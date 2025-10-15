@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema/daily_user_metrics.v1.json",
+  "title": "DailyUserMetrics",
+  "description": "Daglig summering per bruker. Input til trendberegning.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["user_id", "date", "total_watt", "sessions"],
+  "properties": {
+    "user_id": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "format": "date" },
+    "total_watt": { "type": "number", "minimum": 0 },
+    "sessions": { "type": "integer", "minimum": 0 },
+    "schema_version": {
+      "type": "string",
+      "description": "Må være kompatibel med v0.7.x.",
+      "pattern": "^0\\.7\\.[0-9]+$"
+    }
+  }
+}

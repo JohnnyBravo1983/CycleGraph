@@ -34,6 +34,12 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # --- INNSTIKK A: Node ---
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -50,7 +56,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3.12-dev
 
-    
       - name: Build Rust wheel
         working-directory: core
         run: maturin build --release -i python3.12 --features python
@@ -102,3 +107,33 @@ jobs:
               exit $code
             fi
           }
+
+      # --- INNSTIKK B: Frontend (guarded) ---
+      - name: Frontend – install deps
+        if: hashFiles('frontend/package.json') != ''
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend – type-check
+        if: hashFiles('frontend/package.json') != ''
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Frontend – build
+        if: hashFiles('frontend/package.json') != ''
+        working-directory: frontend
+        run: npm run build
+
+      - name: Frontend – tests (vitest)
+        if: hashFiles('frontend/package.json') != ''
+        working-directory: frontend
+        run: npm run test -- --run
+
+      # --- INNSTIKK C: JSON Schema validation (guarded) ---
+      - name: JSON Schemas – compile/validate (AJV)
+        if: hashFiles('schema/*.json') != ''
+        run: |
+          npx --yes ajv-cli@5 compile \
+            -s schema/session_metrics.v1.json \
+            -s schema/daily_user_metrics.v1.json \
+            -s schema/trends_response.v1.json

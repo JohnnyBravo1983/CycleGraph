@@ -92,8 +92,11 @@ Gir full verdikjede Strava → CycleGraph → Strava og markerer ferdig flaggski
 | 2025-10-01 | S8.5 | Mini-sprint: Precision Watt stubs + short-session guard | Ferdig | Utvidet `SessionReport` med PW/CI/stubs, oppdatert `mockSession`, lagt til DEV-sanity (PW/CI counts) og short-session guard. Prod-serve verifisert med `npx serve -s dist`. Besparelse 3–7h i kommende S9–S12. |
 | 2025-10-02 | S9   | Økt-kort & nøkkelmetrikker             | Ferdig   | SessionCard viser NP, IF, VI, Pa:Hr, W/slag, CGS og PrecisionWatt-verdi. Indoor/outdoor-chip og kalibreringsstatus lagt til. Kort-økt-banner og fallback implementert. Mock-opprydding (fjernet MODE: MOCK, bedre labels). Prod-build testet (`npx serve -s dist`). Tester grønne (pytest/cargo/vitest). Innsikt: videre mock-rydding og tydelig kilde vs. mode planlagt i S12. |
 | 2025-10-04 | S10  | Live API-integrasjon                   | Ferdig   | FE koblet mot backend via api.ts (timeout/abort, schema-guard), sessionStore med kildevalg (api/mock), ErrorBanner + retry i SessionView, .env.example (VITE_BACKEND_URL). Vitest 9/9 grønt; pytest grønne igjen etter maturin develop --features python i riktig venv. Prod/dev lik layout; mock beholdt. |
+| 2025-10-06 | S11  | Analysepanel & trender                 | Ferdig   | AnalysisPanel med status-badges (FULL, HR-only, LIMITED) og interaktiv TrendsChart (NP/PW over tid med CI-bånd og tooltip). Edge-case-håndtering (kort økt, kalibrert=false), robust fallback. Prod/dev identisk layout, alle tester grønne (pytest/cargo/vitest). |
+| 2025-10-13 | S12  | Brukeropplevelse & kalibreringsguide   | Ferdig   | Onboarding for første outdoor-økt og stegvis kalibreringsmodal ferdigstilt. Klart skille mellom Mode (Indoor/Outdoor) og Kilde (API/Mock). HR-only flyt tydeliggjort i UI, labels og verktøytips oppdatert. TrendsChart integrert i hovedoversikt. Build/test grønt; Lighthouse UX > 80. |
 
-## Milepælsrapporter Status Pr 23.09.2025
+
+## Milepælsrapporter Status Pr 15.10.2025
 
 ### M6 – Strava-integrasjon (API & import) – status per 2025-08-12 Ferdig
 - ✅ OAuth & tokens på plass (redirect/scopes, .env).  
@@ -180,7 +183,7 @@ S4 – Kalibrering – status per 2025-09-23 Ferdig
 ℹ️ Notater: smoothing aktivert for reproduserbarhet; golden-tester viser stabil output. CLI håndterer mislykket fit uten crash (reason=“fit_failed”).  
 
 
-5 – Indoor pipeline + GPS/Wind integrasjon – status per 2025-09-25 Ferdig
+s5 – Indoor pipeline + GPS/Wind integrasjon – status per 2025-09-25 Ferdig
 ✅ Vindkorrigert fysikkmotor koblet til indoor/outdoor-pipeline (CLI ruter automatisk).
 ✅ CLI-output utvidet med `watts`, `wind_rel`, `v_rel`, `calibrated`, `status`.
 ✅ Indoor-modus: bruker `device_watts` direkte når tilgjengelig.
@@ -250,6 +253,40 @@ M10 – Live API-integrasjon – status per 2025-10-04 Ferdig
 Miljøstabilitet: pytest feilet pga. tolkermismatch (system vs. conda). Lås prosjekt til lokalt venv og bygg Rust-kjernen der.
 CI-forbedring anbefales i S13: egen maturin-jobb med wheel-cache + schema-kontrakttest.
 HR-only/LIMITED-flyt og schema-mismatch håndteres kontrollert via ErrorBanner; utvidet UI-smoke kommer i S11.
+
+M11 – Analysepanel & trender – status per 2025-10-06 ✅ Ferdig
+
+✅ AnalysisPanel ferdigstilt med status-badges (FULL, HR-only, LIMITED) og tydelige visualiseringer av datakvalitet.
+✅ TrendsChart implementert: viser NP/PW-utvikling over tid med CI-bånd, hover-tooltip og sanntidsoppdatering fra mock/live-kilde.
+✅ Edge-case-håndtering: kort økt, null HR og ukalibrerte økter håndteres med varsler og fallback uten crash.
+✅ Prod/dev-paritet: layout identisk; ytelse verifisert ved 1 Hz / 2 t datasett.
+✅ Tester: pytest, cargo og vitest alle grønne; hover-tester og tooltip-assertion bestått.
+✅ Lint + type-check + prod-build grønt; ingen memory- eller event-lekkasjer ved unmount.
+
+🔎 Observasjoner:
+
+Visuell indikator for Kalibrert = false i legend/tooltip anbefales for neste sprint (S12).
+
+CI-bånd-tester midlertidig skip’et i pipeline, patch planlagt i S12.
+
+Analysepanelet danner grunnlaget for kommende aggregert Trend-analyse (S13).
+
+M12 – Brukeropplevelse & kalibreringsguide – status per 2025-10-13 ✅ Ferdig
+
+✅ Onboarding-flyt for første outdoor-økt ferdigstilt: viser stegvis kalibreringsmodal med klare forklaringer.
+✅ Kalibreringsguide koblet til backend-flagget calibrated; UI viser status og “Kalibrert: Ja/Nei”.
+✅ HR-only-flyt forbedret: tydelig tekst i tooltips og varsler, uten teknisk sjargong.
+✅ Labels og struktur: “Mode (Indoor/Outdoor)” og “Kilde (API/Mock)” skilt tydelig i UI.
+✅ TrendsChart integrert i hovedoversikt – viser NP/PW-trender per økt.
+✅ Bygg/test: Lighthouse UX > 80; prod-build og npx serve -s dist verifisert; alle enhetstester grønne.
+
+🔎 Observasjoner:
+
+Enkelte brukere kan hoppe over modal hvis nettavbrudd oppstår – fallback planlagt i S13.
+
+QA-team anbefaler finjustering av språk for HR-only-varsel (“Mindre presis – basert på pulsdata”).
+
+Grunnlaget lagt for Definition of Truth og live-kobling av TrendsChart (implementeres i S13).
 
 
 ## Oppdateringsrutine

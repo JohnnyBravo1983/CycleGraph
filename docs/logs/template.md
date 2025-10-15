@@ -676,6 +676,37 @@ Observasjoner: Windows/OneDrive ga EPERM unlink-feil ved npm ci; løst via Power
 
 Status: Ferdig.
 
+✅ Sprint: S12 – Brukeropplevelse & kalibreringsguide
+Branch: feature/s12-calibration-guide
+
+Commits:
+a74b3f1 – Add onboarding modal and calibration guide flow
+b82a45d – Refactor SessionView labels (Mode vs Source)
+c12d8fe – Integrate TrendsChart into main dashboard
+d0a1f9b – Improve HR-only messages and fallback tooltips
+e98c6ac – Docs: update Using Precision Watt with new calibration flow
+Endrede filer:
+
+frontend/src/components/CalibrationGuide.tsx
+frontend/src/components/AnalysisPanel.tsx
+frontend/src/routes/SessionView.tsx
+frontend/src/lib/i18n.ts
+frontend/src/tests/AnalysisPanel.test.tsx
+frontend/src/tests/SessionSmoke.test.tsx
+docs/Using_Precision_Watt.md
+Tester:
+pytest → 55 passerte / 0 feilet / 4 skip’et (akseptert; SHACL ikke påkrevd)
+cargo test → alle 17/17 grønne
+vitest → 9/9 bestått (AnalysisPanel + SessionView + ErrorBanner)
+Lighthouse UX score → 82 / 100
+Observasjoner:
+Onboarding-flyten fungerer stabilt; enkelte brukere kan hoppe over modalen ved nettavbrudd → fallback legges i S13.
+Tekstene i HR-only-varsel bør forenkles (“Mindre presis – basert på pulsdata”).
+TrendsChart integrert og responsiv, men live-kobling aktiveres først i S13.
+Ytelse forbedret; ingen memory-lekkasje ved modal unmount.
+QA verifisert på mobil og desktop; tastaturnavigasjon OK.
+Status: ✅ Ferdig
+
 Sprint 8.5
 Scaffold, state-management og backend-adapter implementert; SessionView utvidet med kort-økt-guard og DEV-sanity, mockSession koblet til store.
 Typecheck, build, pytest og cargo test alle grønne; dev/prod verifisert uten crash.
@@ -695,3 +726,9 @@ Delta-sammendrag:
 Utviklet og ferdigstilte AnalysisChart med CI-bånd, tooltip og komplett edge-case-håndtering.
 Alle tester, lint og type-sjekker passerte uten feil.
 Komponenten er stabil, responsiv og gir konsistent visning i både dev og prod.
+
+Sprint 12 – Delta-sammendrag
+Utviklet full kalibreringsguide og onboarding-flyt for første outdoor-økt, med stegvis modal og tydelig språk for brukere uten wattmåler.
+Skilt mellom Mode (Indoor/Outdoor) og Kilde (API/Mock) i SessionView, samt integrert TrendsChart i hovedoversikten.
+Alle tester (pytest, cargo, vitest) passerte; Lighthouse UX-score 82.
+Onboarding-flyten fungerer stabilt, men fallback ved nettavbrudd og språklig finpuss på HR-only-varsel planlegges i neste sprint.
