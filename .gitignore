@@ -54,7 +54,10 @@ Thumbs.db
 config.json
 secrets.json
 secrets/
-state/
+
+# ⬇️ Viktig endring: bare ignorer /state i roten, ikke alle "state/" hvor som helst
+/state/
+
 cli/tokens.py
 data/private_*.csv
 output/*.json
