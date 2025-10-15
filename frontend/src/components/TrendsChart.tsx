@@ -165,8 +165,9 @@ export default function TrendsChart(props: TrendsChartProps) {
         return;
       }
 
-      // Respekter mock både fra prop OG .env (VITE_USE_MOCK=true)
-      const mockActive = isMock || isMockEnv();
+      
+      // I test skal kun prop styre (ikke VITE_USE_MOCK)
+const mockActive = isMock || (!isTestEnv() && isMockEnv());
       if (mockActive) {
         const now = Date.now();
         const pts: TrendPoint[] = Array.from({ length: 30 }).map((_, i) => {
