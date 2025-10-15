@@ -114,10 +114,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Frontend – type-check
+      - name: Frontend – typecheck
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
-        run: npm run type-check
+        run: npm run typecheck
 
       - name: Frontend – build
         if: hashFiles('frontend/package.json') != ''
