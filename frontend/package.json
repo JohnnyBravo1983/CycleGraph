@@ -9,7 +9,6 @@
     "predev": "node scripts/make-2h-fixture.cjs",
     "prebuild": "node scripts/make-2h-fixture.cjs",
     "make:2h": "node scripts/make-2h-fixture.cjs",
-
     "dev": "vite",
     "dev:full": "npm run make:2h -- full && vite",
     "dev:uncal": "npm run make:2h -- uncal && vite",
@@ -17,15 +16,12 @@
     "dev:limited": "npm run make:2h -- limited && vite",
     "dev:ci-missing": "npm run make:2h -- ci-missing && vite",
     "dev:empty": "npm run make:2h -- empty && vite",
-
     "build": "tsc -b && vite build",
     "build:full": "npm run make:2h -- full && tsc -b && vite build",
     "preview": "vite preview",
-
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
-
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -38,6 +34,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "@tailwindcss/postcss": "^4.1.14",
     "@tailwindcss/vite": "^4.1.13",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
