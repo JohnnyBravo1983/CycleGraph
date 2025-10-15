@@ -90,30 +90,181 @@
       font-size: 13px;
       margin-top: 18px;
     }
+
+    /* Språk-knapper (øverst til høyre) */
+    .flagbar {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 20;
+    }
+    .flagbtn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid #2b3243;
+      background: #111522;
+      cursor: pointer;
+      font-size: 22px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+      color: #fff;
+    }
+    .flagbtn[aria-pressed="true"] {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
   </style>
 </head>
 <body>
+  <!-- 🇳🇴 / 🇬🇧 språkvalg -->
+  <div class="flagbar" role="group" aria-label="Language selection">
+    <button class="flagbtn" id="btn-no" aria-pressed="true" aria-label="Norsk">🇳🇴</button>
+    <button class="flagbtn" id="btn-en" aria-pressed="false" aria-label="English">🇬🇧</button>
+  </div>
+
   <main>
     <div class="card">
       <img src="logo.png" alt="CycleGraph logo" class="logo" />
 
       <div style="text-align:center">
-        <span class="badge">CycleGraph (beta)</span>
-        <h1>Presise treningsinnsikter fra watt, puls og vær</h1>
-        <p class="lead">
+        <span class="badge" data-i18n="badge">CycleGraph (beta)</span>
+        <h1 data-i18n="h1">Presise treningsinnsikter fra watt, puls og vær</h1>
+        <p class="lead" data-i18n="lead">
           Flaggskipet vårt, <strong>Precision Watt</strong>, kombinerer værdata og analyse for å gi en mer realistisk watt.
           Perfekt for mosjonister og seriøse amatører.
         </p>
-        <p class="kicker">MVP lanseres snart.</p>
+        <p class="kicker" data-i18n="kicker">MVP lanseres snart.</p>
 
-        <!-- CTA: nå korrekt e-post -->
-        <a class="cta" href="mailto:jstromo83@gmail.com?subject=CycleGraph%20–%20hold%20meg%20oppdatert">Gi meg beskjed ved lansering</a>
+        <!-- CTA: e-post (subject oppdateres av JS for valgt språk) -->
+        <a id="cta" class="cta" href="mailto:jstromo83@gmail.com?subject=CycleGraph%20–%20hold%20meg%20oppdatert" data-i18n="cta">
+          Gi meg beskjed ved lansering
+        </a>
 
-        <p class="contact">Kontakt: Johnny Strømø · 483 10 333 · jstromo83@gmail.com · Horten</p>
+        <p class="contact" data-i18n="contact">Kontakt: Johnny Strømø · 483 10 333 · jstromo83@gmail.com · Horten</p>
       </div>
     </div>
 
-    <footer>© CycleGraph</footer>
+    <footer data-i18n="footer">© CycleGraph</footer>
   </main>
+
+  <script>
+    // Oversettelser
+    const translations = {
+      no: {
+        _htmlLang: "no",
+        _title: "CycleGraph – Presise treningsinnsikter (beta)",
+        _desc: "CycleGraph kombinerer watt, puls og værdata for mer realistiske treningsinnsikter. Precision Watt lanseres snart. Bygget i Norge av Johnny Strømø.",
+        _ogTitle: "CycleGraph – Presise treningsinnsikter (beta)",
+        _ogDesc: "CycleGraph kombinerer watt, puls og værdata for mer realistiske treningsinnsikter.",
+        badge: "CycleGraph (beta)",
+        h1: "Presise treningsinnsikter fra watt, puls og vær",
+        lead: "Flaggskipet vårt, Precision Watt, kombinerer værdata og analyse for å gi en mer realistisk watt. Perfekt for mosjonister og seriøse amatører.",
+        kicker: "MVP lanseres snart.",
+        cta: "Gi meg beskjed ved lansering",
+        cta_subject: "CycleGraph%20%E2%80%93%20hold%20meg%20oppdatert",
+        contact: "Kontakt: Johnny Strømø · 483 10 333 · jstromo83@gmail.com · Horten",
+        footer: "© CycleGraph"
+      },
+      en: {
+        _htmlLang: "en",
+        _title: "CycleGraph – Precise training insights (beta)",
+        _desc: "CycleGraph blends power, heart rate, and weather data for more realistic insights. Precision Watt is coming soon. Built in Norway by Johnny Strømø.",
+        _ogTitle: "CycleGraph – Precise training insights (beta)",
+        _ogDesc: "CycleGraph blends power, heart rate, and weather data for more realistic training insights.",
+        badge: "CycleGraph (beta)",
+        h1: "Precise training insights from power, heart rate and weather",
+        lead: "Our flagship, Precision Watt, blends weather data and analysis to deliver more realistic power. Perfect for fitness riders and serious amateurs.",
+        kicker: "MVP launching soon.",
+        cta: "Notify me at launch",
+        cta_subject: "CycleGraph%20%E2%80%93%20notify%20me%20at%20launch",
+        contact: "Contact: Johnny Strømø · +47 483 10 333 · jstromo83@gmail.com · Horten, Norway",
+        footer: "© CycleGraph"
+      }
+    };
+
+    // Verktøy
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+    function setMeta(name, content) {
+      let el = document.querySelector(`meta[name="${name}"]`);
+      if (!el) {
+        el = document.createElement("meta");
+        el.setAttribute("name", name);
+        document.head.appendChild(el);
+      }
+      el.setAttribute("content", content);
+    }
+
+    function setOG(prop, content) {
+      let el = document.querySelector(`meta[property="${prop}"]`);
+      if (!el) {
+        el = document.createElement("meta");
+        el.setAttribute("property", prop);
+        document.head.appendChild(el);
+      }
+      el.setAttribute("content", content);
+    }
+
+    // Anvend språk
+    function applyLang(lang) {
+      const t = translations[lang] ?? translations.no;
+
+      // Synlig tekst
+      $$("[data-i18n]").forEach(node => {
+        const key = node.getAttribute("data-i18n");
+        if (t[key]) {
+          // Behold <strong> i lead ved å sette textContent bare når noden ikke inneholder HTML
+          if (node === $(".lead")) {
+            // lead-tekst uten HTML, men vi kan sette ren tekst fordi <strong> i originalen er dekorativ
+            node.textContent = t[key];
+          } else {
+            node.textContent = t[key];
+          }
+        }
+      });
+
+      // CTA mailto med språkspesifikt subject
+      const cta = $("#cta");
+      if (cta) {
+        const subject = t.cta_subject || translations.no.cta_subject;
+        cta.setAttribute("href", `mailto:jstromo83@gmail.com?subject=${subject}`);
+      }
+
+      // SEO / dokument
+      document.documentElement.lang = t._htmlLang || lang;
+      document.title = t._title;
+      setMeta("description", t._desc);
+      setOG("og:title", t._ogTitle);
+      setOG("og:description", t._ogDesc);
+
+      // Marker aktiv knapp
+      $("#btn-no")?.setAttribute("aria-pressed", String(lang === "no"));
+      $("#btn-en")?.setAttribute("aria-pressed", String(lang === "en"));
+
+      // Husk valget + oppdater URL (?lang=xx)
+      localStorage.setItem("lang", lang);
+      const url = new URL(window.location.href);
+      url.searchParams.set("lang", lang);
+      window.history.replaceState({}, "", url.toString());
+    }
+
+    // Init
+    (function initLang() {
+      const url = new URL(window.location.href);
+      const q = url.searchParams.get("lang");
+      const saved = localStorage.getItem("lang");
+      const lang = (q === "en" || q === "no") ? q : (saved || "no");
+      applyLang(lang);
+
+      $("#btn-no")?.addEventListener("click", () => applyLang("no"));
+      $("#btn-en")?.addEventListener("click", () => applyLang("en"));
+    })();
+  </script>
 </body>
 </html>
