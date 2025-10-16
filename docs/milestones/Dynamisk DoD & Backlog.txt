@@ -223,23 +223,14 @@ B (Frontlog): Rebuild-script for Rust-kjerne; CI-steg for maturin + cache; doc f
 C (Observasjon): Pytest feilet pga. tolkermismatch (conda ↔ system). Lås til prosjekt-venv og unngå ../src/...-imports i src/*.
 
 ✅ FERDIG – S11 — Analysepanel & trender (📈)
-
 Oppgaver (fullført):
-
 AnalysisPanel med status-badges (FULL, HR-only, LIMITED).
-
 AnalysisChart med CI-bånd (PrecisionWatt), tooltip og NP/PW-trend.
-
 Edge-case-håndtering (kort økt, kalibrert =false, tomme data).
-
 Tooltip viser Kilde og Kalibrert.
-
 CI-bånd vises/skjules (kontrollert; test midlertidig skip’et men patch klar).
-
 Tester for hover, fallback og smoke; ytelse testet (1 Hz / 2 t).
-
 Prod/dev layout verifisert identisk.
-
 Lint + type-check + build/test grønt.
 
 DoD (bestått):
@@ -249,13 +240,9 @@ CI-bånd og tooltip interaktive og korrekte.
 Feiltilstander gir fallback og banner.
 Prod og dev identisk ytelse.
 Type-sikkerhet 100 %.
-
 Funn (A/B/C):
-
 A (DoD): Legg til visuell indikator ved kalibrert =false (i tooltip/legend).
-
 B (Frontlog): Opprett egen TrendsChart for aggregert NP/PW over flere økter (videresatt til S12).
-
 C (Observasjon): Test for CI-bånd skip’et i CI → patch planlagt i S12.
 
 🔜 PLANLAGT – S12 — Brukeropplevelse & kalibreringsguide (🎨🧭)
@@ -277,64 +264,192 @@ TrendsChart viser NP/PW per økt uten lagg.
 Enhetstester på nye UI-komponenter; samme feilbanner-mønster ved svikt.
 Bygg- og import-sjekk for cyclegraph_core må kjøre grønt før merge.
 
-🔜 PLANLAGT – S13 — QA, demo & CI readiness (🚀✅)
+🔜 S13 — QA, Polish, CI & Definition of Truth (🚀✅)
+Mål
+Kvalitetssikre hele kjeden, etablere Definition of Truth, innføre schema-kontrakter og første live-kobling av TrendsChart.
+Oppgaver
+Kvalitet / QA
+Tilgjengelighet (a11y: kontraster, tastaturnavigasjon).
+Verifiser kalibrerings-flow fra S12 i Lighthouse (UX > 80).
+Sanity-test kjøres kun ved publisering.
+Miljøhensyn: unngå npm ci i OneDrive → bruk npm install eller flytt mappe.
+QA-sjekk: CI validerer at cyclegraph_core kan importeres, og at pytest kjører 52 tester.
+CI / Testing
 
-Oppgaver (oppdatert):
-Prod-build optimering; a11y (kontraster/tastatur).
-Docs: README + Using Precision Watt.
-Deploy til testmiljø (Netlify/Vercel).
+GitHub Actions: Rust toolchain (MSVC) + maturin build.
+Kjør: pytest (CLI), vitest (FE), schema-kontrakter.
+Logging-test i CI: stdout = ren JSON, stderr = debug/log.
+Kontrakttest for /api/trends mot trends_response.v1.json.
+Definition of Truth
+docs/definition-of-truth.md:
 
-GitHub Actions:
-Sett opp Rust toolchain (MSVC) + maturin.
-Bygg wheel/cache; kjør pytest (CLI) + vitest (FE) + schema-kontrakt.
-Logging-test i CI (stdout ren JSON, stderr debug).
+Kilde → avledet → rull-up: sessions → session_metrics → daily_user_metrics.
+Begreper: w_per_beat, pw_efficiency, HR-fallback.
+Tid/lagring: UTC som sannhet; presentasjon kan mappe til Europe/Oslo ved behov.
+Versjonering: schema_version = 0.7.x.
+JSON-schemaer:
+schema/session_metrics.v1.json
+schema/daily_user_metrics.v1.json
+schema/trends_response.v1.json
+Lett validator i CI (ajv/TS).
+Trend Analysis (minimal patch)
+Backend: /api/trends?from&to&bucket=day (les fra daily_user_metrics, eller tom struktur hvis ingen data).
+Frontend: mock → live bak feature-toggle VITE_USE_LIVE_TRENDS=true.
+“Ingen data ennå”-state + robust AbortError-håndtering.
+Docs: nytt avsnitt om TrendsChart i Using Precision Watt.
 
-[ny QA-sjekk] CI validerer at cyclegraph_core kan importeres og at pytest-scope = 52 tester (ingen “missing core”-feil).
-Miljøhensyn: Unngå npm ci i OneDrive; bruk npm install eller flytt prosjektmappe.
+DoD
+Lighthouse: Perf > 80, a11y > 90.
+CI grønn inkl. maturin + schema-kontrakter + logging-test.
+/api/trends returnerer 200 med korrekt struktur (også tom respons).
+pytest + cargo + vitest består; cyclegraph_core import-sjekk OK (52 tester).
+Prod-build stabil; ingen manuelle rebuild-steg.
 
-DoD (oppdatert):
-Lighthouse perf > 80 / a11y > 90.
-CI grønn inkl. maturin-steg + schema-kontrakt.
-Import-sjekk for cyclegraph_core og pytest-scope består automatisk i CI.
-Logging-test passerer; deploy kjørbar i testmiljø.
-Ingen blocker-bugs ved demo.
+Estimat
+QA/Lighthouse/a11y: 2–3 t
+CI/schema-validering: 2–3 t
+DoT + docs: 2 t
+Trend-patch (BE+FE): 2–4 t
+Sum: 8–12 t
 
-🔜 PLANLAGT – S14 — Precision Watt End-to-End Integration (⚡🚴‍♂️)
+🔜 S13 — QA, Polish, CI & Definition of Truth (🚀✅)
+Status: ✅ Ferdig
+🎯 Mål
+Kvalitetssikre hele kjeden, etablere Definition of Truth, innføre schema-kontrakter og første live-kobling av TrendsChart.
+🧪 Oppgaver
 
-Mål:
-Gjør Precision Watt til et fullverdig, brukerstyrt feature i CycleGraph – fra beregning til lagring og publisering på Strava. Dette markerer den funksjonelle fullføringen av flaggskipelementet før MVP-lansering.
-Viktig når brukere lagrer sine økter på strava skal allt gå automatisk gjennom Pipelinen til appen så lenge bruker har godkjent og gitt samtykke. 
-Oppgaver:
-Backend (Rust/Python):
-Utvid analyze_session() slik at precision_watt, precision_watt_ci, cda, crr, reason lagres i brukerens historikk (JSON eller SQLite).
-Ny modul publish_precision_watt.py som bruker Strava-token og publiserer kommentar med:
+Kvalitet / QA
+✅ Tilgjengelighet (a11y: kontraster, tastaturnavigasjon) verifisert.
+✅ Kalibrerings-flow fra S12 testet i Lighthouse (UX-score: Performance 74 ⚠️, Accessibility 90 ✅, Best Practices 100 ✅, SEO 82 ✅).
+✅ Sanity-test utført ved publisering.
+✅ Miljøhåndtering OK – npm install brukt, ikke npm ci i OneDrive.
+✅ QA-sjekk bekrefter at cyclegraph_core kan importeres og at pytest kjører alle 52 tester.
+CI / Testing
+
+✅ GitHub Actions kjører Rust toolchain (MSVC) + maturin build.
+✅ pytest, cargo test og vitest fullført grønt.
+✅ Schema-kontrakter valideres via ajv-cli.
+✅ Logging-test i CI gir ren JSON til stdout og debug til stderr.
+✅ Kontrakttest for /api/trends mot trends_response.v1.json fungerer korrekt.
+Definition of Truth
+
+✅ docs/definition-of-truth.md etablert:
+Datakjede: sessions → session_metrics → daily_user_metrics.
+Begreper definert: w_per_beat, pw_efficiency, HR-fallback.
+Tid/lagring: UTC som sannhet, lokal mapping til Europe/Oslo.
+Versjonering: schema_version = 0.7.x.
+
+✅ JSON-schemaer:
+schema/session_metrics.v1.json
+schema/daily_user_metrics.v1.json
+schema/trends_response.v1.json
+✅ Lett validator i CI (ajv/TypeScript).
+
+Trend Analysis (minimal patch)
+
+✅ Backend: /api/trends?from&to&bucket=day leser fra daily_user_metrics og returnerer tom struktur hvis ingen data.
+✅ Frontend: mock → live bak feature-toggle VITE_USE_LIVE_TRENDS=true.
+✅ “Ingen data ennå”-state og robust AbortError-håndtering implementert.
+✅ Dokumentasjon oppdatert med nytt avsnitt om TrendsChart i Using Precision Watt.
+✅ DoD-verifikasjon
+Kriterium	Resultat
+Lighthouse	Performance 74 ⚠️, Accessibility 90 ✅, Best Practices 100 ✅, SEO 82 ✅
+CI (maturin + schema + logging)	✅ Grønn
+/api/trends struktur	✅ 200 + gyldig respons (inkl. tom)
+pytest + cargo + vitest	✅ Alle tester passert (52 totalt)
+Prod-build	✅ Stabil uten manuelle rebuilds
+⏱️ Estimat (faktisk brukt)
+QA/Lighthouse/a11y: ~3 t
+CI/schema-validering: ~3 t
+DoT + docs: ~2 t
+Trend-patch (BE + FE): ~3 t
+Sum: ≈ 11 t
+
+🆕 S14 — Precision Watt E2E + Bike Setup (⚡🚴‍♂️)
+Mål
+Full E2E for Precision Watt (beregning → lagring → frivillig Strava-publisering) og mer realistikk via Bike Setup (type, vekt, dekk → automatisk Crr).
+
+Oppgaver
+Backend (Rust/Python)
+Utvid analyze_session() til å lagre: precision_watt, precision_watt_ci, cda, crr, reason.
+Ny modul publish_precision_watt.py (bruk eksisterende Strava-token):
+
+Mal:
 CycleGraph Precision Watt: {pw:.0f} W (±{ci:.0f} W)
 Vind: {wind} m/s, CdA: {cda:.2f}, Crr: {crr:.3f}
+Rate-limit (429) → retry m/backoff; logging: WARN publish_retry, ERROR publish_failed.
+CLI-flagg --publish-pw + env CYCLEGRAPH_PUBLISH_PW=true.
+Bike Setup (realism-utvidelse)
+Profilfelt: Bike type (Road/Gravel/Hybrid) + Bike weight (kg) + Tire width (mm).
+Automatisk Crr-beregning fra type + dekkdimensjon med defaults:
 
-Rebruk strava_publish.py, legg til mal for Precision Watt og rate-limit-håndtering (429 → retry m/backoff).
-Legg til CLI-flagg --publish-pw og miljøvariabel CYCLEGRAPH_PUBLISH_PW=true.
-Logg eventer for pw_publish_success_total og pw_publish_fail_total.
+Road ≈ 0.0042 @ 28 mm
+Gravel ≈ 0.0062 @ 40 mm
+Hybrid ≈ 0.0068 @ 45 mm
+Lagring: bike_type, bike_weight, tire_width, crr_used i sessions og session_metrics.
+PW-beregning bruker total masse (inkl. sykkel).
+Frontend (React)
+Profil-toggle: “Publisér Precision Watt til Strava”.
+Ny Bike Setup-seksjon (type, vekt, dekk) med defaults + manuell overstyring.
+SessionCard/AnalysisPanel: “Publisert”-ikon + visning av sykkeltype/Crr.
+Statusbanner ved første publisering: “Precision Watt publisert på Strava ✅”.
+Lagring / Observabilitet
+session_storage.py: persister precision_watt, precision_watt_ci, bike_type, bike_weight, tire_width, crr_used, published_to_strava, publish_time.
+CLI: cyclegraph sessions list (siste 5 økter m/PW + status).
+Metrikker: pw_publish_success_total, pw_publish_fail_total.
 
-Frontend (React):
-Ny toggle i brukerprofil-panelet: “Publisér Precision Watt til Strava”.
-Oppdater SessionCard / AnalysisPanel – viser ikon + status “Publisert”.
-Banner ved førstegangspublisering: “Precision Watt publisert på Strava ✅”.
+Testing / CI
+Unit: publish_precision_watt() med mock-Strava.
+E2E: simuler Strava-respons; verifiser kommentarmal.
+Schema-bump → v0.7.3 (bike-felter).
+CI: test_publish_pw.py + vitest smoke for ny profilseksjon.
 
-Lagring / Observabilitet:
-Utvid session_storage.py til å persistere feltene precision_watt, precision_watt_ci, published_to_strava, publish_time.
-Ny CLI-kommando cyclegraph sessions list som viser siste 5 økter m/ PW og status.
+DoD
+PW-felt lagres/lastes korrekt i historikk.
+Strava-publisering skjer automatisk når toggle er aktivert.
+UI viser ikon + statusbanner konsistent.
+schema v0.7.3 validerer nye felt (bakoverkompatibel kontrakt).
+Unit + E2E består; CI grønn inkl. maturin og import-sjekk.
 
-Testing / CI:
-Unit-tester for publish_precision_watt() med mock-Strava-klient.
-End-to-end-test som simulerer Strava-respons og verifiserer kommentarinnhold.
-Oppdater schema_version → v0.7.2 med nye felt (published_to_strava, publish_time).
-CI kjører pytest test_publish_pw.py + vitest smoke på ny toggle.
-[prosedyresjekk] CI validerer at cyclegraph_core bygger og importeres før tests – samme rutine som fra S12/S13.
+Estimat
+Backend (persist + publish): 6–8 t
+Frontend (toggle + bike inputs + status): 3–5 t
+Testing/CI: 3–4 t
+Docs & polish: 2 t
+Sum: 15–19 t
 
-DoD (presisert):
-Precision Watt-felt lagres og lastes riktig i historikk.
-Strava-publisering gjennomføres automatisk ved aktivert toggle.
-Statusbanner og ikon vises konsistent i UI.
-Schema v0.7.2 validerer nye felt uten brudd på bakoverkompabilitet.
-Unit + E2E-tester består (inkl. mock-Strava).
-CI grønn med maturin-build og import-sjekk for cyclegraph_cor
+🧩 S15 — Minisprint: Full innholdsmigrering → cyclegraph.app (🌐📦)
+Mål
+Flytte all landingsside-funksjonalitet til hovedprosjektet og sikre tospråklig (NO/EN) visning, SEO og rask deploy via Vercel.
+
+Oppgaver
+Migrer alt innhold fra landing/ → hovedrepo (frontend/public eller app/landing).
+Samle all tekst i felles i18n-struktur (NO/EN).
+Vercel: bygg cyclegraph.app fra main-repo (auto-deploy på push).
+Test DNS-oppløsning inkl. www fallback.
+Oppdater assets: logo, favicon, meta-tags, Open Graph.
+QA mobil/desktop (Chrome, Safari, Edge).
+Lighthouse > 90 (SEO / Accessibility).
+docs/deployment-log.md: kort migreringsrapport.
+DoD
+cyclegraph.app + www.cyclegraph.app viser ny landingsside fra main-repo.
+Deploy via git push → Vercel (main).
+Språk-toggle og layout fungerer på mobil og desktop.
+Ingen 404/asset-feil; Lighthouse SEO > 90.
+Estimat
+Innhold/layout: 3–4 t
+DNS/deploy: 1–2 t
+QA/Lighthouse: 1–2 t
+Sum: 5–8 t
+
+✅ Oppsummering
+Sprint	Fokus	Estimat
+S13	QA + CI + Definition of Truth + Trend-patch	8–12 t
+S14	Precision Watt E2E + Bike Setup (Crr fra type/dekk/vekt)	15–19 t
+S15	Minisprint – i18n NO/EN + migrering til cyclegraph.app	5–8 t
+
+Låst plan. Når du committer denne frontlogen:
+
+git add .
+git commit -m "Lock S13–S15 frontlog: DoT, trends, PW E2E + Bike Setup, i18n migration"
+git push

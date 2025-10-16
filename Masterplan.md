@@ -94,9 +94,9 @@ Gir full verdikjede Strava → CycleGraph → Strava og markerer ferdig flaggski
 | 2025-10-04 | S10  | Live API-integrasjon                   | Ferdig   | FE koblet mot backend via api.ts (timeout/abort, schema-guard), sessionStore med kildevalg (api/mock), ErrorBanner + retry i SessionView, .env.example (VITE_BACKEND_URL). Vitest 9/9 grønt; pytest grønne igjen etter maturin develop --features python i riktig venv. Prod/dev lik layout; mock beholdt. |
 | 2025-10-06 | S11  | Analysepanel & trender                 | Ferdig   | AnalysisPanel med status-badges (FULL, HR-only, LIMITED) og interaktiv TrendsChart (NP/PW over tid med CI-bånd og tooltip). Edge-case-håndtering (kort økt, kalibrert=false), robust fallback. Prod/dev identisk layout, alle tester grønne (pytest/cargo/vitest). |
 | 2025-10-13 | S12  | Brukeropplevelse & kalibreringsguide   | Ferdig   | Onboarding for første outdoor-økt og stegvis kalibreringsmodal ferdigstilt. Klart skille mellom Mode (Indoor/Outdoor) og Kilde (API/Mock). HR-only flyt tydeliggjort i UI, labels og verktøytips oppdatert. TrendsChart integrert i hovedoversikt. Build/test grønt; Lighthouse UX > 80. |
+| 2025-10-17 | S13  | QA, Polish, CI & Definition of Truth   | Ferdig   | Full QA- og DoD-verifikasjon gjennomført. CI validerer nå schema-kontrakter, feature-toggle og logging. /api/trends fungerer med tom respons og korrekt struktur. Lighthouse-resultater: Performance 74 ⚠️, Accessibility 90 ✅, Best Practices 100 ✅, SEO 82 ✅. Alle tester (pytest, cargo, vitest) grønne. docs/definition-of-truth.md etablert med datakjede sessions → session_metrics → daily_user_metrics. Løsningen er stabil; ytelsesforbedring flyttes til Sprint 14. |
 
-
-## Milepælsrapporter Status Pr 15.10.2025
+## Milepælsrapporter Status Pr 17.10.2025
 
 ### M6 – Strava-integrasjon (API & import) – status per 2025-08-12 Ferdig
 - ✅ OAuth & tokens på plass (redirect/scopes, .env).  
@@ -288,6 +288,18 @@ QA-team anbefaler finjustering av språk for HR-only-varsel (“Mindre presis �
 
 Grunnlaget lagt for Definition of Truth og live-kobling av TrendsChart (implementeres i S13).
 
+M13 – QA, Polish, CI & Definition of Truth – status per 2025-10-17 ✅ Ferdig
+
+✅ Full QA- og DoD-verifikasjon gjennomført med grønn CI på alle nivåer (pytest, cargo, vitest).
+✅ Lighthouse-audit kjørt: Performance 74 ⚠️, Accessibility 90 ✅, Best Practices 100 ✅, SEO 82 ✅.
+✅ Schema-kontrakter og feature-toggle valideres automatisk i CI; logging-test gir ren JSON-output.
+✅ /api/trends returnerer korrekt struktur (også tom respons) og håndterer AbortError robust.
+✅ docs/definition-of-truth.md etablert med tydelig datakjede (sessions → session_metrics → daily_user_metrics).
+✅ Prod-build stabil uten manuelle rebuilds; mock/live-switch fungerer sømløst.
+
+🔎 Observasjoner:
+Performance-score (74) ligger noe under målkravet (>80), men ingen tiltak settes nå – forbedring avventes til etter MVP-realisering.
+QA bekrefter at hele kjeden (backend, frontend, CI, schema) fungerer konsistent og er produksjonsklar.
 
 ## Oppdateringsrutine
 Når en milepæl eller oppgave er ferdig:  

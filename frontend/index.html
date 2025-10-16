@@ -2,11 +2,19 @@
 <html lang="no">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Viktig for riktig zoom og skalering på mobil -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <title>CycleGraph</title>
+
+    <!-- Forbedrer tekstgjengivelse og layout på iOS/Android -->
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
   </head>
-  <body>
+
+  <body class="bg-gray-50 text-gray-900 antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

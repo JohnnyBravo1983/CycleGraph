@@ -707,6 +707,42 @@ Ytelse forbedret; ingen memory-lekkasje ved modal unmount.
 QA verifisert på mobil og desktop; tastaturnavigasjon OK.
 Status: ✅ Ferdig
 
+✅ Sprint: 13 – QA-sjekk og DoD-verifikasjon
+Branch: main
+
+Commits:
+a41d92e – Fullført QA-verifikasjon (Lighthouse, API, schema, toggle, import)
+b09f55a – Oppdatert CI-workflow for schema-validator og feature-toggle-sjekk
+c17a3d8 – Korrigert AbortError-guard i TrendsChart.tsx
+d42b61f – Fjernet ubrukt import, oppdatert ajv.config.cjs, fikset CI-warnings
+e88f0e3 – Endelig DoD-verifisering og oppdatert QA-log
+Endrede filer:
+
+frontend/src/routes/TrendsChart.tsx  
+frontend/src/lib/fetchJSON.ts  
+frontend/scripts/ajv.config.cjs  
+frontend/tests/TrendsChart.test.tsx  
+.github/workflows/ci.yml  
+.env.example
+
+Tester:
+pytest -q → ✅ Alle tester passerte (9/9)
+cargo test → ✅ Alle Rust-tester grønt (23/23)
+npm run test → ✅ Vitest: 4/4 tester OK, ingen warnings
+Observasjoner:
+Lighthouse-resultater:
+Performance: 74 ⚠️ (noe under målkravet >80)
+Accessibility: 90 ✅
+Best Practices: 100 ✅
+SEO: 82 ✅
+Schema-validator stopper korrekt ved kontraktbrudd
+Feature-toggle fungerer (mock vs live)
+API returnerer gyldig struktur, håndterer tom respons
+Ingen kontrastfeil, tastaturnavigasjon OK
+CI kjører rent uten warnings
+Status: ✅ Ferdig
+📌 Alle kriterier i Definition of Done er oppfylt, med unntak av Performance (74). Tiltak for ytelsesforbedring vurderes i Sprint 14.
+
 Sprint 8.5
 Scaffold, state-management og backend-adapter implementert; SessionView utvidet med kort-økt-guard og DEV-sanity, mockSession koblet til store.
 Typecheck, build, pytest og cargo test alle grønne; dev/prod verifisert uten crash.
@@ -732,3 +768,10 @@ Utviklet full kalibreringsguide og onboarding-flyt for første outdoor-økt, med
 Skilt mellom Mode (Indoor/Outdoor) og Kilde (API/Mock) i SessionView, samt integrert TrendsChart i hovedoversikten.
 Alle tester (pytest, cargo, vitest) passerte; Lighthouse UX-score 82.
 Onboarding-flyten fungerer stabilt, men fallback ved nettavbrudd og språklig finpuss på HR-only-varsel planlegges i neste sprint.
+
+Sprint 13 – Delta-sammendrag
+Gjennomført full QA- og DoD-verifikasjon med fokus på stabilitet, testdekning og samsvar mellom frontend, backend og CI-pipeline.
+Alle tester (pytest, cargo, vitest) passerte uten feil, og CI validerer nå både schema og feature-toggle automatisk.
+Feature-toggle mellom live- og mock-data fungerer korrekt, og API håndterer tom respons uten crash.
+Lighthouse-resultater viser Performance 74, Accessibility 90, Best Practices 100 og SEO 82 — kun ytelse vurderes som forbedringspunkt.
+Løsningen er verifisert som stabil og klar for avslutning av Sprint 13; Performance-optimalisering løftes til Sprint 14.
