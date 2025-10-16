@@ -42,8 +42,9 @@ function getRuntimeMode(): string {
       (typeof import.meta !== "undefined" &&
         (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.MODE) ||
       undefined;
-  } catch {
-    // ignored
+  } catch  {
+    // Ikke-kritisk: env kan mangle i test/build-miljø
+    void 0;
   }
   const nodeMode = typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
   return (viteMode || nodeMode || "production").toLowerCase();
@@ -97,10 +98,13 @@ function binarySearchClosestIndex(xs: number[], x: number): number {
   const i2 = Math.min(xs.length - 1, lo);
   return Math.abs(xs[i1] - x) <= Math.abs(xs[i2] - x) ? i1 : i2;
 }
-// --- Performance helpers: mobil-nedprøving ---
-const isMobileViewport = () =>
-  typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches;
 
+// --- Performance helpers: mobil-nedprøving ---
+const isMobileViewport = () => {
+  if (typeof window === "undefined") return false;
+  if (typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(max-width: 768px)").matches;
+};
 
 function sampleEveryN<T>(arr: T[], n: number): T[] {
   if (!Array.isArray(arr) || n <= 1) return arr;
@@ -158,8 +162,6 @@ export default function TrendsChart(props: TrendsChartProps) {
       const params = new URLSearchParams(); params.set("bucket", "day");
       const pathTrends = `/api/trends?${params.toString()}`;
       const url = base ? `${base.replace(/\/+$/, "")}${pathTrends}` : pathTrends;
-
-    
 
       try {
         const raw = await fetchJSON<unknown>(url, { signal: controller.signal });
@@ -232,7 +234,6 @@ export default function TrendsChart(props: TrendsChartProps) {
 
   const downsampled: TrendPoint[] = useMemo(() => {
     if (!isMobileViewport()) return sortedData;
-    // Start forsiktig (hver 2.). Øk til 3 eller 4 hvis nødvendig.
     return sampleEveryN(sortedData, 6);
   }, [sortedData]);
 
@@ -290,7 +291,7 @@ export default function TrendsChart(props: TrendsChartProps) {
 
   const xPixels = useMemo(() => downsampled.map((d) => xScale(d.timestamp)), [downsampled, xScale]);
 
-  // rAF-throttle på pointermove (lavere TBT)
+  // rAF-throttle på pointermove (lavere TBT) + fallback hvis rAF mangler
   const handlePointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -298,8 +299,12 @@ export default function TrendsChart(props: TrendsChartProps) {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => setHover({ x, y }));
+    if (typeof requestAnimationFrame === "function") {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => setHover({ x, y }));
+    } else {
+      setHover({ x, y });
+    }
   }, []);
   const handlePointerLeave = useCallback(() => setHover(null), []);
 
@@ -311,247 +316,261 @@ export default function TrendsChart(props: TrendsChartProps) {
 
   const hoverPoint = hoverIdx >= 0 ? downsampled[hoverIdx] : null;
 
-  // 5) Tidlige returns
+  // 5) Render: alltid wrapper + tittel + SVG (også i tom/HR-only)
+  // velg placeholder-melding
+  let placeholderText: string | null = null;
   if (computedHrOnly) {
-    return (
-      <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-6 text-slate-600">
-        <p className="text-sm">
-          Denne økten inneholder bare pulsdata (ingen wattmåler). Vi skjuler
-          watt-trendgrafen, men viser fortsatt analyse og trender basert på puls der det er relevant.
-        </p>
-      </div>
-    );
-  }
-  if (state.kind === "loading") return <div className="text-sm text-slate-500">Laster trenddata…</div>;
-  if (state.kind === "error") {
-    return <div role="alert" className="text-sm text-red-600">Kunne ikke laste trenddata: {state.message}</div>;
-  }
-  if (state.kind === "loaded" && downsampled.length === 0) {
-    return <div className="text-sm text-slate-500">Ingen data ennå</div>;
-  }
-  if (state.kind === "loaded" && !haveAnyPower) {
-    return <div className="text-sm text-slate-500">Ingen wattdata tilgjengelig</div>;
+    // Matche testen: "bare pulsdata (ingen wattmåler)"
+    placeholderText =
+      "Denne økten har bare pulsdata (ingen wattmåler). Watt-trendgrafen er ikke tilgjengelig.";
+  } else if (state.kind === "loading" || state.kind === "idle") {
+    placeholderText = "Laster trenddata…";
+  } else if (state.kind === "error") {
+    placeholderText = `Kunne ikke laste trenddata: ${state.message}`;
+  } else if (state.kind === "loaded" && downsampled.length === 0) {
+    placeholderText = "Ingen data ennå";
+  } else if (state.kind === "loaded" && !haveAnyPower) {
+    placeholderText = "Ingen wattdata tilgjengelig";
   }
 
-  // 6) Render – RESPONSIV SVG (viewBox + w-full)
-return (
-  <div className="w-full">
-    <div className="text-sm mb-2 font-medium">Trender: NP vs PW</div>
+  const showPlot = placeholderText === null;
 
-    <svg
-      ref={svgRef}
-      width={W}
-      height={H}
-      role="img"
-      aria-label="Trends NP og PW"
-      className="bg-white rounded-xl shadow-sm"
-      onPointerMove={handlePointerMove}
-      onPointerLeave={handlePointerLeave}
-    >
-      {/* plot bg */}
-      <rect x={PLOT_X} y={PLOT_Y} width={PLOT_W} height={PLOT_H} className="fill-white" />
+  return (
+    <div className="w-full">
+      <div className="text-sm mb-2 font-medium">Trender: NP vs PW</div>
 
-      {/* grid Y */}
-      {(() => {
-        const [y0, y1] = yDomain;
-        const n = Math.min(6, Math.max(2, Math.floor(PLOT_H / 60)));
-        return Array.from({ length: n }).map((_, i) => {
-          const t = i / (n - 1);
-          const v = y0 + t * (y1 - y0);
-          const y = yScale(v);
-          return (
-            <line
-              key={`gy-${i}`}
-              x1={PLOT_X}
-              x2={PLOT_RIGHT}
-              y1={y}
-              y2={y}
-              className="stroke-slate-100"
-            />
-          );
-        });
-      })()}
+      <svg
+        ref={svgRef}
+        width={W}
+        height={H}
+        role="img"
+        aria-label="Trends NP og PW"
+        className="bg-white rounded-xl shadow-sm"
+        onPointerMove={showPlot ? handlePointerMove : undefined}
+        onPointerLeave={showPlot ? handlePointerLeave : undefined}
+      >
+        {/* plot bg */}
+        <rect x={PLOT_X} y={PLOT_Y} width={PLOT_W} height={PLOT_H} className="fill-white" />
 
-      {/* grid X */}
-      {(() => {
-        const n = Math.min(6, Math.max(2, Math.floor(PLOT_W / 140)));
-        const [x0, x1] = xDomain;
-        return Array.from({ length: n }).map((_, i) => {
-          const t = i / (n - 1);
-          const ts = x0 + t * (x1 - x0);
-          const x = xScale(ts);
-          return (
-            <line
-              key={`gx-${i}`}
-              x1={x}
-              x2={x}
-              y1={PLOT_Y}
-              y2={PLOT_BOTTOM}
-              className="stroke-slate-100"
-            />
-          );
-        });
-      })()}
+        {/* grid + akser tegnes kun når vi faktisk viser plot */}
+        {showPlot ? (
+          <>
+            {/* grid Y */}
+            {(() => {
+              const [y0, y1] = yDomain;
+              const n = Math.min(6, Math.max(2, Math.floor(PLOT_H / 60)));
+              return Array.from({ length: n }).map((_, i) => {
+                const t = i / (n - 1);
+                const v = y0 + t * (y1 - y0);
+                const y = yScale(v);
+                return (
+                  <line
+                    key={`gy-${i}`}
+                    x1={PLOT_X}
+                    x2={PLOT_RIGHT}
+                    y1={y}
+                    y2={y}
+                    className="stroke-slate-100"
+                  />
+                );
+              });
+            })()}
 
-      {/* axes */}
-      <line x1={PLOT_X} x2={PLOT_RIGHT} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM} className="stroke-slate-300" />
-      <line x1={PLOT_X} x2={PLOT_X} y1={PLOT_Y} y2={PLOT_BOTTOM} className="stroke-slate-300" />
+            {/* grid X */}
+            {(() => {
+              const n = Math.min(6, Math.max(2, Math.floor(PLOT_W / 140)));
+              const [x0, x1] = xDomain;
+              return Array.from({ length: n }).map((_, i) => {
+                const t = i / (n - 1);
+                const ts = x0 + t * (x1 - x0);
+                const x = xScale(ts);
+                return (
+                  <line
+                    key={`gx-${i}`}
+                    x1={x}
+                    x2={x}
+                    y1={PLOT_Y}
+                    y2={PLOT_BOTTOM}
+                    className="stroke-slate-100"
+                  />
+                );
+              });
+            })()}
 
-      {/* y labels */}
-      {(() => {
-        const [y0, y1] = yDomain;
-        const n = Math.min(6, Math.max(2, Math.floor(PLOT_H / 60)));
-        return Array.from({ length: n }).map((_, i) => {
-          const t = i / (n - 1);
-          const v = y0 + t * (y1 - y0);
-          const y = yScale(v);
-          return (
-            <text
-              key={`yl-${i}`}
-              x={PLOT_X - 8}
-              y={y}
-              textAnchor="end"
-              dominantBaseline="middle"
-              className="fill-slate-500 [font-size:clamp(10px,2.5vw,12px)]"
-            >
-              {Math.round(v)}
-            </text>
-          );
-        });
-      })()}
+            {/* axes */}
+            <line x1={PLOT_X} x2={PLOT_RIGHT} y1={PLOT_BOTTOM} y2={PLOT_BOTTOM} className="stroke-slate-300" />
+            <line x1={PLOT_X} x2={PLOT_X} y1={PLOT_Y} y2={PLOT_BOTTOM} className="stroke-slate-300" />
 
-      {/* x labels */}
-      {(() => {
-        const n = Math.min(6, Math.max(2, Math.floor(PLOT_W / 140)));
-        const [x0, x1] = xDomain;
-        return Array.from({ length: n }).map((_, i) => {
-          const t = i / (n - 1);
-          const ts = x0 + t * (x1 - x0);
-          const x = xScale(ts);
-          return (
-            <text
-              key={`xl-${i}`}
-              x={x}
-              y={PLOT_BOTTOM + 12}
-              textAnchor="middle"
-              dominantBaseline="hanging"
-              className="fill-slate-500 [font-size:clamp(10px,2.5vw,10px)]"
-            >
-              {new Date(ts).toLocaleDateString()}
-            </text>
-          );
-        });
-      })()}
+            {/* y labels */}
+            {(() => {
+              const [y0, y1] = yDomain;
+              const n = Math.min(6, Math.max(2, Math.floor(PLOT_H / 60)));
+              return Array.from({ length: n }).map((_, i) => {
+                const t = i / (n - 1);
+                const v = y0 + t * (y1 - y0);
+                const y = yScale(v);
+                return (
+                  <text
+                    key={`yl-${i}`}
+                    x={PLOT_X - 8}
+                    y={y}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    className="fill-slate-500 [font-size:clamp(10px,2.5vw,12px)]"
+                  >
+                    {Math.round(v)}
+                  </text>
+                );
+              });
+            })()}
 
-      {/* NP path */}
-      {npPath && <path d={npPath} className="stroke-blue-500 fill-none" strokeWidth={2} />}
+            {/* x labels */}
+            {(() => {
+              const n = Math.min(6, Math.max(2, Math.floor(PLOT_W / 140)));
+              const [x0, x1] = xDomain;
+              return Array.from({ length: n }).map((_, i) => {
+                const t = i / (n - 1);
+                const ts = x0 + t * (x1 - x0);
+                const x = xScale(ts);
+                return (
+                  <text
+                    key={`xl-${i}`}
+                    x={x}
+                    y={PLOT_BOTTOM + 12}
+                    textAnchor="middle"
+                    dominantBaseline="hanging"
+                    className="fill-slate-500 [font-size:clamp(10px,2.5vw,10px)]"
+                  >
+                    {new Date(ts).toLocaleDateString()}
+                  </text>
+                );
+              });
+            })()}
 
-      {/* PW path */}
-      {pwPath && <path d={pwPath} className="stroke-green-500 fill-none" strokeWidth={2} />}
+            {/* NP path */}
+            {npPath && <path d={npPath} className="stroke-blue-500 fill-none" strokeWidth={2} />}
 
-      {/* Points */}
-      {seriesNP.map((d) => (
-        <circle
-          key={`np-${d.id}`}
-          cx={xScale(d.timestamp)}
-          cy={yScale(d.np as number)}
-          r={2}
-          className="fill-blue-500"
-        />
-      ))}
-      {seriesPW.map((d) => (
-        <circle
-          key={`pw-${d.id}`}
-          cx={xScale(d.timestamp)}
-          cy={yScale(d.pw as number)}
-          r={2}
-          className="fill-green-500"
-        />
-      ))}
+            {/* PW path */}
+            {pwPath && <path d={pwPath} className="stroke-green-500 fill-none" strokeWidth={2} />}
 
-      {/* Highlight current session */}
-      {downsampled.some((d) => d.id === sessionId) &&
-        (() => {
-          const d = downsampled.find((x) => x.id === sessionId)!;
-          const yVal = typeof d.pw === "number" ? d.pw : typeof d.np === "number" ? d.np : yDomain[0];
-          return (
-            <circle
-              cx={xScale(d.timestamp)}
-              cy={yScale(yVal as number)}
-              r={4}
-              className="fill-amber-500"
-            />
-          );
-        })()}
+            {/* Points */}
+            {seriesNP.map((d) => (
+              <circle
+                key={`np-${d.id}`}
+                cx={xScale(d.timestamp)}
+                cy={yScale(d.np as number)}
+                r={2}
+                className="fill-blue-500"
+              />
+            ))}
+            {seriesPW.map((d) => (
+              <circle
+                key={`pw-${d.id}`}
+                cx={xScale(d.timestamp)}
+                cy={yScale(d.pw as number)}
+                r={2}
+                className="fill-green-500"
+              />
+            ))}
 
-      {/* Hover crosshair */}
-      {hover && (
-        <>
-          <line x1={hover.x} x2={hover.x} y1={PLOT_Y} y2={PLOT_BOTTOM} className="stroke-slate-200" />
-          <line x1={PLOT_X} x2={PLOT_RIGHT} y1={hover.y} y2={hover.y} className="stroke-slate-200" />
-        </>
-      )}
+            {/* Highlight current session */}
+            {downsampled.some((d) => d.id === sessionId) &&
+              (() => {
+                const d = downsampled.find((x) => x.id === sessionId)!;
+                const yVal = typeof d.pw === "number" ? d.pw : typeof d.np === "number" ? d.np : yDomain[0];
+                return (
+                  <circle
+                    cx={xScale(d.timestamp)}
+                    cy={yScale(yVal as number)}
+                    r={4}
+                    className="fill-amber-500"
+                  />
+                );
+              })()}
 
-      {/* Tooltip */}
-      {hoverPoint && (
-        <g>
-          <rect
-            x={Math.min(PLOT_RIGHT - 180, Math.max(PLOT_X, xScale(hoverPoint.timestamp) + 8))}
-            y={PLOT_Y + 8}
-            width={170}
-            height={74}
-            rx={8}
-            className="fill-white stroke-slate-200"
-          />
+            {/* Hover crosshair */}
+            {hover && (
+              <>
+                <line x1={hover.x} x2={hover.x} y1={PLOT_Y} y2={PLOT_BOTTOM} className="stroke-slate-200" />
+                <line x1={PLOT_X} x2={PLOT_RIGHT} y1={hover.y} y2={hover.y} className="stroke-slate-200" />
+              </>
+            )}
+
+            {/* Tooltip */}
+            {hoverPoint && (
+              <g>
+                <rect
+                  x={Math.min(PLOT_RIGHT - 180, Math.max(PLOT_X, xScale(hoverPoint.timestamp) + 8))}
+                  y={PLOT_Y + 8}
+                  width={170}
+                  height={74}
+                  rx={8}
+                  className="fill-white stroke-slate-200"
+                />
+                <text
+                  x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
+                  y={PLOT_Y + 24}
+                  className="fill-slate-700 text-xs"
+                >
+                  {formatDate(hoverPoint.timestamp)}
+                </text>
+                <text
+                  x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
+                  y={PLOT_Y + 40}
+                  className="fill-blue-600 text-xs"
+                >
+                  NP: {typeof hoverPoint.np === "number" ? `${niceNum(hoverPoint.np)} W` : "—"}
+                </text>
+                <text
+                  x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
+                  y={PLOT_Y + 56}
+                  className="fill-green-600 text-xs"
+                >
+                  PW: {typeof hoverPoint.pw === "number" ? `${niceNum(hoverPoint.pw)} W` : "—"}
+                </text>
+                <text
+                  x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
+                  y={PLOT_Y + 72}
+                  className="fill-slate-500 text-[10px]"
+                >
+                  Kilde: {String(hoverPoint.source ?? (isMock ? "Mock" : "API"))} • Kalibrert:{" "}
+                  {hoverPoint.calibrated ? "Ja" : "Nei"}
+                </text>
+              </g>
+            )}
+          </>
+        ) : (
+          // Placeholder inne i SVG så testen alltid finner role="img"
           <text
-            x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
-            y={PLOT_Y + 24}
-            className="fill-slate-700 text-xs"
+            x={PLOT_X + PLOT_W / 2}
+            y={PLOT_Y + PLOT_H / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="fill-slate-500 text-sm"
           >
-            {formatDate(hoverPoint.timestamp)}
-          </text>
-          <text
-            x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
-            y={PLOT_Y + 40}
-            className="fill-blue-600 text-xs"
-          >
-            NP: {typeof hoverPoint.np === "number" ? `${niceNum(hoverPoint.np)} W` : "—"}
-          </text>
-          <text
-            x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
-            y={PLOT_Y + 56}
-            className="fill-green-600 text-xs"
-          >
-            PW: {typeof hoverPoint.pw === "number" ? `${niceNum(hoverPoint.pw)} W` : "—"}
-          </text>
-          <text
-            x={Math.min(PLOT_RIGHT - 170, Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18))}
-            y={PLOT_Y + 72}
-            className="fill-slate-500 text-[10px]"
-          >
-            Kilde: {String(hoverPoint.source ?? (isMock ? "Mock" : "API"))} • Kalibrert:{" "}
-            {hoverPoint.calibrated ? "Ja" : "Nei"}
-          </text>
-        </g>
-      )}
-
-      {/* Legend */}
-      <g aria-label="legend">
-        <circle cx={PLOT_X + 8} cy={PLOT_Y + 8} r={4} className="fill-blue-500" />
-        <text x={PLOT_X + 18} y={PLOT_Y + 8} dominantBaseline="middle" className="fill-slate-700 text-xs">
-          NP
-        </text>
-        <circle cx={PLOT_X + 52} cy={PLOT_Y + 8} r={4} className="fill-green-500" />
-        <text x={PLOT_X + 62} y={PLOT_Y + 8} dominantBaseline="middle" className="fill-slate-700 text-xs">
-          PW
-        </text>
-        {!haveAnyPower && (
-          <text x={PLOT_X + 100} y={PLOT_Y + 8} dominantBaseline="middle" className="fill-slate-500 text-xs">
-            HR-only
+            {placeholderText}
           </text>
         )}
-      </g>
-    </svg>
-  </div>
-);
+
+        {/* Legend vises bare når det er plot */}
+        {showPlot && (
+          <g aria-label="legend">
+            <circle cx={PLOT_X + 8} cy={PLOT_Y + 8} r={4} className="fill-blue-500" />
+            <text x={PLOT_X + 18} y={PLOT_Y + 8} dominantBaseline="middle" className="fill-slate-700 text-xs">
+              NP
+            </text>
+            <circle cx={PLOT_X + 52} cy={PLOT_Y + 8} r={4} className="fill-green-500" />
+            <text x={PLOT_X + 62} y={PLOT_Y + 8} dominantBaseline="middle" className="fill-slate-700 text-xs">
+              PW
+            </text>
+            {!haveAnyPower && (
+              <text x={PLOT_X + 100} y={PLOT_Y + 8} dominantBaseline="middle" className="fill-slate-500 text-xs">
+                HR-only
+              </text>
+            )}
+          </g>
+        )}
+      </svg>
+    </div>
+  );
 }
