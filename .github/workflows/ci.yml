@@ -128,13 +128,14 @@ jobs:
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run test -- --run
-      # --- INNSTIKK C: JSON Schema validation (guarded) ---
+      
+        # --- INNSTIKK C: JSON Schema validation (guarded) ---
       - name: JSON Schemas – compile (AJV)
         if: hashFiles('schema/*.json') != ''
+        working-directory: frontend
         run: |
-          npx --yes ajv-cli@5 compile \
-          -c frontend/scripts/ajv.config.cjs \
-          -s schema/session_metrics.v1.json \
-          -s schema/daily_user_metrics.v1.json \
-          -s schema/trends_response.v1.json
- 
+         npx --yes ajv-cli@5 compile \
+          -c ./scripts/ajv.config.cjs \
+          -s ../schema/session_metrics.v1.json \
+          -s ../schema/daily_user_metrics.v1.json \
+          -s ../schema/trends_response.v1.json
