@@ -1,6 +1,6 @@
 // frontend/src/components/TrendsChart.tsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { getBackendBase } from "../lib/fetchJSON";
+import { getBackendBase, fetchJSON } from "../lib/fetchJSON";
 
 export interface TrendsChartProps {
   sessionId: string; // brukes til å ev. highlight'e aktuell økt
@@ -77,6 +77,16 @@ function isMockEnv(): boolean {
   }
 }
 
+/** Les VITE_USE_LIVE_TRENDS trygt (kan mangle i test) */
+function isLiveTrendsEnv(): boolean {
+  try {
+    const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+    return (env?.VITE_USE_LIVE_TRENDS ?? "").toLowerCase() === "true";
+  } catch {
+    return false;
+  }
+}
+
 function niceNum(n: number) {
   return Number.isFinite(n) ? Math.round(n) : n;
 }
@@ -144,7 +154,7 @@ export default function TrendsChart(props: TrendsChartProps) {
     const timer = setTimeout(() => {
       if (!controller.signal.aborted) controller.abort();
     }, TIMEOUT_MS);
-
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     function buildHrOnlyFallbackData(): TrendPoint[] {
       const now = Date.now();
       // 5 punkter med np/pw = null for å trigge "Ingen wattdata tilgjengelig"
@@ -165,10 +175,12 @@ export default function TrendsChart(props: TrendsChartProps) {
         return;
       }
 
-      
-      // I test skal kun prop styre (ikke VITE_USE_MOCK)
-const mockActive = isMock || (!isTestEnv() && isMockEnv());
-      if (mockActive) {
+      // Veksle mellom live og mock etter env/prop (i test skal prop styre)
+      const liveActive = isLiveTrendsEnv();
+      const mockActive = isMock || (!isTestEnv() && isMockEnv());
+
+      // MOCK: generer deterministiske punkter
+      if (!liveActive || mockActive) {
         const now = Date.now();
         const pts: TrendPoint[] = Array.from({ length: 30 }).map((_, i) => {
           const ts = now - (30 - i) * 2 * 24 * 3600 * 1000;
@@ -190,13 +202,13 @@ const mockActive = isMock || (!isTestEnv() && isMockEnv());
 
       setState({ kind: "loading" });
 
-      // Bygg kandidat-URLer: forsøk /api/trends først, så fallback /api/sessions/summary
-      const base = getBackendBase(); // '' i dev (da brukes Vite-proxy), ellers absolutt URL
-      const pathA = `/api/trends?sessionId=${encodeURIComponent(sessionId)}`;
-      const pathB = `/api/sessions/summary`;
-
-      const urlA = base ? `${base.replace(/\/+$/, "")}${pathA}` : pathA;
-      const urlB = base ? `${base.replace(/\/+$/, "")}${pathB}` : pathB;
+      // Live: hent fra /api/trends?from&to&bucket=day via fetchJSON()
+      const base = getBackendBase(); // '' i dev (Vite-proxy), ellers absolutt URL
+      const params = new URLSearchParams();
+      // Kravet sier from&to&bucket=day; vi setter bare bucket nå (from/to kan legges til senere)
+      params.set("bucket", "day");
+      const pathTrends = `/api/trends?${params.toString()}`;
+      const url = base ? `${base.replace(/\/+$/, "")}${pathTrends}` : pathTrends;
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       type TrendApiRow = {
@@ -210,52 +222,31 @@ const mockActive = isMock || (!isTestEnv() && isMockEnv());
         calibrated?: boolean;
       };
 
-      // NB: bruk ren fetch her for å unngå JSON-parse-feil når dev-server returnerer HTML
-      async function tryFetch(url: string): Promise<TrendPoint[] | null> {
-        try {
-          console.debug("[TrendsChart] fetching:", url);
-          const res = await fetch(url, {
-            signal: controller.signal,
-            headers: { Accept: "application/json" },
+      try {
+        const raw = await fetchJSON<unknown>(url, { signal: controller.signal });
+
+        let rows: TrendPoint[] | null = null;
+
+        if (Array.isArray(raw)) {
+          const arr = raw as Array<Record<string, unknown>>;
+          rows = arr.map((r) => {
+            const idVal = r.id ?? r.session_id ?? "";
+            const tsv = r.timestamp ?? r.ts ?? 0;
+            const ts = typeof tsv === "string" ? Number(tsv) : (tsv as number);
+            return {
+              id: String(idVal),
+              timestamp: Number(ts),
+              np: (r.np as number | null | undefined) ?? null,
+              pw: (r.pw as number | null | undefined) ?? null,
+              source: (r.source as string | undefined) ?? "API",
+              calibrated: Boolean(r.calibrated),
+            };
           });
-
-          // Avbrutt: ikke logg som feil
-          
-          if ((res as unknown as { name?: string }).name === "AbortError") return null;
-
-          if (!res.ok) return null;
-
-          const ct = res.headers.get("content-type") || "";
-          if (!ct.includes("application/json")) {
-            return null; // dev-server kan ha servert index.html → ignorer
-          }
-
-          const raw = (await res.json()) as unknown;
-
-          // CASE 1: Arrays av rader (forventet)
-          if (Array.isArray(raw)) {
-            const arr = raw as Array<Record<string, unknown>>;
-            const out: TrendPoint[] = arr.map((r) => {
-              const idVal = r.id ?? r.session_id ?? "";
-              const tsv = r.timestamp ?? r.ts ?? 0;
-              const ts = typeof tsv === "string" ? Number(tsv) : (tsv as number);
-              return {
-                id: String(idVal),
-                timestamp: Number(ts),
-                np: (r.np as number | null | undefined) ?? null,
-                pw: (r.pw as number | null | undefined) ?? null,
-                source: (r.source as string | undefined) ?? "API",
-                calibrated: Boolean(r.calibrated),
-              };
-            });
-            console.debug("[TrendsChart] parsed rows:", out.length);
-            return out;
-          }
-
-          // CASE 2: Eldre mock-objekt { t, watts, hr } -> konverter til rader
-          if (typeof raw === "object" && raw !== null && Array.isArray((raw as { t?: unknown }).t)) {
+        } else if (typeof raw === "object" && raw !== null) {
+          // Eldre mock-objekt { t, watts, hr }
+          if (Array.isArray((raw as { t?: unknown }).t)) {
             const r2 = raw as { t: number[]; watts?: number[]; hr?: number[] };
-            const out: TrendPoint[] = r2.t.map((tVal, i) => ({
+            rows = r2.t.map((tVal, i) => ({
               id: `legacy-${i}`,
               timestamp: Number(tVal),
               np: r2.watts?.[i] ?? null,
@@ -263,83 +254,41 @@ const mockActive = isMock || (!isTestEnv() && isMockEnv());
               source: "Mock",
               calibrated: false,
             }));
-            console.debug("[TrendsChart] parsed legacy rows:", out.length);
-            return out;
           }
-
-          // CASE 3: Objekt med { sessions: [...] } -> trekk ut som rader
-          if (
-            typeof raw === "object" &&
-            raw !== null &&
-            Array.isArray((raw as { sessions?: unknown[] }).sessions)
-          ) {
-            const rows = (raw as { sessions: Array<Record<string, unknown>> }).sessions;
-            const out: TrendPoint[] = rows.map((r, i) => ({
+          // Objekt med { sessions: [...] }
+          else if (Array.isArray((raw as { sessions?: unknown[] }).sessions)) {
+            const arr = (raw as { sessions: Array<Record<string, unknown>> }).sessions;
+            rows = arr.map((r, i) => ({
               id: String(r.id ?? `sum-${i}`),
-              timestamp: Number((r.timestamp as number | string | undefined) ?? Date.now() - (rows.length - i) * 86400000),
+              timestamp: Number(
+                (r.timestamp as number | string | undefined) ??
+                  Date.now() - (arr.length - i) * 86400000
+              ),
               np: (r.np as number | null | undefined) ?? null,
               pw: (r.pw as number | null | undefined) ?? null,
-              source: "Mock",
+              source: "API",
               calibrated: Boolean(r.calibrated),
             }));
-            console.debug("[TrendsChart] parsed sessions rows:", out.length);
-            return out;
           }
+        }
 
-          console.warn("[TrendsChart] unexpected response shape:", raw);
-          return null;
-        } catch (e) {
-          // Suppress AbortError i konsoll
-          if (e instanceof DOMException && e.name === "AbortError") {
-            return null;
-          }
-          console.warn("[TrendsChart] fetch failed:", url, e);
-          return null;
-        }
-      }
-
-      try {
-        const first = await tryFetch(urlA);
-        if (first && !cancelled) {
-          setState({ kind: "loaded", data: first });
-          return;
-        }
-        const second = await tryFetch(urlB);
-        if (second && !cancelled) {
-          setState({ kind: "loaded", data: second });
-          return;
-        }
         if (!cancelled) {
-          if (isTestEnv()) {
-            // I test: gi deterministisk fallback basert på sessionId
-            if (sessionId === "none") {
-              setState({ kind: "loaded", data: [] }); // “Ingen økter funnet”
-            } else {
-              setState({ kind: "loaded", data: buildHrOnlyFallbackData() }); // “Ingen wattdata tilgjengelig”
-            }
-          } else {
-            setState({
-              kind: "error",
-              message:
-                "Kunne ikke hente trenddata (timeout/sti). Sjekk /api/trends og /api/sessions/summary.",
-            });
-          }
+          setState({ kind: "loaded", data: rows ?? [] });
         }
       } catch (e) {
+        // Stille ignorering av AbortError (ingen logging)
+        if (e instanceof DOMException && e.name === "AbortError") {
+          // ikke oppdater state hvis vi allerede unmountet
+          if (!cancelled) setState((prev) => (prev.kind === "loaded" ? prev : { kind: "idle" }));
+          return;
+        }
+        // Andre feil: ikke spam konsoll; vis en kort feilmelding i UI (ikke crash)
         if (!cancelled) {
-          if (isTestEnv()) {
-            if (sessionId === "none") {
-              setState({ kind: "loaded", data: [] });
-            } else {
-              setState({ kind: "loaded", data: buildHrOnlyFallbackData() });
-            }
-          } else {
-            const msg = e instanceof Error ? e.message : String(e);
-            setState({
-              kind: "error",
-              message: /abort/i.test(msg) ? "Tidsavbrudd ved henting av trenddata." : msg,
-            });
-          }
+          const msg = e instanceof Error ? e.message : String(e);
+          setState({
+            kind: "error",
+            message: /abort/i.test(msg) ? "Tidsavbrudd ved henting av trenddata." : msg,
+          });
         }
       }
     }
@@ -505,7 +454,8 @@ const mockActive = isMock || (!isTestEnv() && isMockEnv());
     );
   }
   if (state.kind === "loaded" && sortedData.length === 0) {
-    return <div className="text-sm text-slate-500">Ingen økter funnet.</div>;
+    // Krav: "Hvis data.length === 0, vis en 'Ingen data ennå'-melding"
+    return <div className="text-sm text-slate-500">Ingen data ennå</div>;
   }
   if (state.kind === "loaded" && !haveAnyPower) {
     return <div className="text-sm text-slate-500">Ingen wattdata tilgjengelig</div>;
