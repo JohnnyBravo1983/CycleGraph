@@ -1,5 +1,5 @@
 // tests/test_storage_logging.rs
-use cyclegraph_core::{Profile, save_profile, load_profile};
+use cyclegraph_core::{load_profile, save_profile, Profile};
 use std::fs;
 
 #[test]

@@ -1,18 +1,26 @@
-pub mod physics;
-pub mod models;
-pub mod smoothing;
-pub mod metrics;
-pub mod analyzer;
-pub mod calibration;
-pub mod weather;
-pub mod storage;
+// core/src/lib.rs
 
-// ───────── Re-exports for tests/back-compat ─────────
-pub use crate::models::{Profile, Weather, Sample};
-pub use crate::physics::{compute_power, compute_indoor_power, compute_power_with_wind, PowerOutputs};
-pub use crate::metrics::{w_per_beat, compute_np};
-pub use crate::storage::{load_profile, save_profile};
+// ───────── Moduler ─────────
+pub mod analyze_session; // korrekt modul
+pub mod calibration;
+pub mod metrics;
+pub mod models;
+pub mod physics;
+pub mod smoothing;
+pub mod storage;
+pub mod weather;
+pub mod weather_api;
+// <— LEGG TIL denne hvis du har gps.rs
+
+// ───────── Re-exports for tests / back-compat (behold disse, men IKKE re-eksporter analyze_session) ─────────
 pub use crate::calibration::{fit_cda_crr, CalibrationResult};
+pub use crate::metrics::{compute_np, w_per_beat};
+pub use crate::models::{Profile, Sample, Weather};
+pub use crate::physics::{
+    compute_indoor_power, compute_power, compute_power_with_wind, estimate_crr, total_mass,
+    PowerOutputs, RoundTo,
+};
+pub use crate::storage::{load_profile, save_profile};
 
 // ───────── PyO3 (feature-gated) ─────────
 #[cfg(feature = "python")]
@@ -58,7 +66,11 @@ pub fn analyze_session_rust(
     let device_watts_false = device_watts == Some(false);
 
     if no_power_stream || device_watts_false {
-        let reason = if no_power_stream { "no_power_stream" } else { "device_watts_false" };
+        let reason = if no_power_stream {
+            "no_power_stream"
+        } else {
+            "device_watts_false"
+        };
         let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
 
         // HR-only: retur med stabilt schema + kalibreringsfelt (gir ikke mening å kalibrere uten watt)
@@ -81,8 +93,18 @@ pub fn analyze_session_rust(
     let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
     let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
     let np = compute_np(&watts);
-    let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
-    let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
+    let eff = if avg_pulse == 0.0 {
+        0.0
+    } else {
+        avg_watt / avg_pulse
+    };
+    let status = if eff < 1.0 {
+        "Lav effekt"
+    } else if avg_pulse > 170.0 {
+        "Høy puls"
+    } else {
+        "OK"
+    };
 
     // --- Kalibrering (placeholder inntil full kontekst) ---
     let calibration = CalibrationResult {
@@ -111,11 +133,14 @@ pub fn analyze_session_rust(
     }))
 }
 
-// Gjør analyze_session tilgjengelig uansett feature
-#[cfg(feature = "python")]
-pub use analyzer::analyze_session; // beholdes – brukt flere steder i repoet
-#[cfg(not(feature = "python"))]
+// ───────── Offentlige re-exports av analyze_session ─────────
+
+// Én offentlig `analyze_session` for Rust:
 pub use self::analyze_session_rust as analyze_session;
+
+// (valgfritt) eksponer Python-implementasjonen under et annet navn når feature er aktiv
+#[cfg(feature = "python")]
+pub use analyzer::analyze_session as analyze_session_py;
 
 // ───────── PyO3 bindings (feature-gated) ─────────
 #[cfg(feature = "python")]
@@ -132,7 +157,11 @@ pub fn calculate_efficiency_series(
 
     let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
     let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
-    let avg_eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
+    let avg_eff = if avg_pulse == 0.0 {
+        0.0
+    } else {
+        avg_watt / avg_pulse
+    };
 
     let session_status = if avg_eff < 1.0 {
         "Lav effekt – vurder å øke tråkkfrekvens eller intensitet.".to_string()
@@ -147,7 +176,13 @@ pub fn calculate_efficiency_series(
     for (w, p) in watts.iter().zip(pulses.iter()) {
         let eff = if *p == 0.0 { 0.0 } else { w / p };
         per_point_eff.push(eff);
-        let status = if eff < 1.0 { "Lav effekt" } else if *p > 170.0 { "Høy puls" } else { "OK" };
+        let status = if eff < 1.0 {
+            "Lav effekt"
+        } else if *p > 170.0 {
+            "Høy puls"
+        } else {
+            "OK"
+        };
         per_point_status.push(status.to_string());
     }
 
@@ -191,10 +226,12 @@ pub struct PyProfile {
 #[pyfunction]
 pub fn profile_from_json(json: &str) -> PyProfile {
     // Bruk models::Profile som kilde
-    let mut parsed: models::Profile = serde_json::from_str(json).unwrap_or_else(|_| models::Profile::default());
+    let mut parsed: models::Profile =
+        serde_json::from_str(json).unwrap_or_else(|_| models::Profile::default());
 
     // Fyll inn defaults og sett estimat korrekt
-    let missing = parsed.total_weight.is_none() || parsed.bike_type.is_none() || parsed.crr.is_none();
+    let missing =
+        parsed.total_weight.is_none() || parsed.bike_type.is_none() || parsed.crr.is_none();
     if missing {
         parsed.total_weight.get_or_insert(78.0);
         parsed.bike_type.get_or_insert("road".to_string());
@@ -221,7 +258,7 @@ pub fn rust_calibrate_session(
     profile_json: &str,
     weather_json: &str,
 ) -> PyResult<pyo3::Py<pyo3::PyAny>> {
-    use pyo3::{Python, types::PyDict};
+    use pyo3::{types::PyDict, Python};
 
     // 0) Små sanity-sjekker på inputlengder
     let n = watts.len().min(speed_ms.len()).min(altitude_m.len());
@@ -263,21 +300,33 @@ pub fn rust_calibrate_session(
     {
         const MIN_SAMPLES: usize = 30;
         const MIN_V_SPAN_MS: f64 = 1.0;
-        const MIN_A_SPAN_M:  f64 = 3.0;
-        const MIN_MEAN_W:    f64 = 50.0;
-        const MAX_MAE_OK:    f64 = 150.0;
+        const MIN_A_SPAN_M: f64 = 3.0;
+        const MIN_MEAN_W: f64 = 50.0;
+        const MAX_MAE_OK: f64 = 150.0;
 
         let n_ok = n >= MIN_SAMPLES;
 
         let (v_min, v_max) = speed_ms[..n]
             .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| (mn.min(v), mx.max(v)));
-        let v_span = if v_min.is_finite() && v_max.is_finite() { v_max - v_min } else { 0.0 };
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                (mn.min(v), mx.max(v))
+            });
+        let v_span = if v_min.is_finite() && v_max.is_finite() {
+            v_max - v_min
+        } else {
+            0.0
+        };
 
         let (a_min, a_max) = altitude_m[..n]
             .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &a| (mn.min(a), mx.max(a)));
-        let a_span = if a_min.is_finite() && a_max.is_finite() { a_max - a_min } else { 0.0 };
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &a| {
+                (mn.min(a), mx.max(a))
+            });
+        let a_span = if a_min.is_finite() && a_max.is_finite() {
+            a_max - a_min
+        } else {
+            0.0
+        };
 
         let w_mean = if n > 0 {
             watts[..n].iter().copied().sum::<f64>() / (n as f64)
@@ -285,7 +334,8 @@ pub fn rust_calibrate_session(
             0.0
         };
 
-        let variation_ok = v_span >= MIN_V_SPAN_MS && a_span >= MIN_A_SPAN_M && w_mean >= MIN_MEAN_W;
+        let variation_ok =
+            v_span >= MIN_V_SPAN_MS && a_span >= MIN_A_SPAN_M && w_mean >= MIN_MEAN_W;
         let mae_ok = result.mae.is_finite() && result.mae < MAX_MAE_OK;
 
         if !result.calibrated && n_ok && variation_ok && mae_ok {
@@ -328,8 +378,8 @@ mod py_api {
     use serde_json::json;
 
     // Trekk inn moduler/typer fra kjerne
+    use crate::models::{Profile, Sample, Weather};
     use crate::physics;
-    use crate::models::{Sample, Profile, Weather};
 
     // Py-variant: tar JSON-strenger inn/ut
     #[pyfunction]
@@ -420,16 +470,25 @@ mod m7_tests {
 
     // ---------- IO structs for golden (kept for completeness) ----------
     #[derive(Deserialize, Serialize)]
-    struct ExpField { value: f32, tol: f32 }
+    struct ExpField {
+        value: f32,
+        tol: f32,
+    }
 
     #[derive(Deserialize, Serialize)]
     struct Expected {
-        #[serde(default)] ftp: Option<f32>,
-        #[serde(default)] np: Option<ExpField>,
-        #[serde(rename = "if", default)] i_f: Option<ExpField>,
-        #[serde(default)] vi: Option<ExpField>,
-        #[serde(default)] pa_hr: Option<ExpField>,
-        #[serde(default)] w_per_beat: Option<ExpField>,
+        #[serde(default)]
+        ftp: Option<f32>,
+        #[serde(default)]
+        np: Option<ExpField>,
+        #[serde(rename = "if", default)]
+        i_f: Option<ExpField>,
+        #[serde(default)]
+        vi: Option<ExpField>,
+        #[serde(default)]
+        pa_hr: Option<ExpField>,
+        #[serde(default)]
+        w_per_beat: Option<ExpField>,
     }
 
     fn manifest_path(p: &str) -> PathBuf {
@@ -440,7 +499,10 @@ mod m7_tests {
 
     // Finn kolonneindeks case-insensitive; først exact, så substring
     fn find_col(headers: &csv::StringRecord, candidates: &[&str]) -> Option<usize> {
-        let lower: Vec<String> = headers.iter().map(|h| h.trim().to_ascii_lowercase()).collect();
+        let lower: Vec<String> = headers
+            .iter()
+            .map(|h| h.trim().to_ascii_lowercase())
+            .collect();
 
         // exact match først
         for key in candidates {
@@ -461,35 +523,49 @@ mod m7_tests {
 
     // Truthy-strenger for maskefelt
     fn is_truthy(s: &str) -> bool {
-        matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "ok")
+        matches!(
+            s.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "y" | "ok"
+        )
     }
 
     // Robust delimiter-sjekk (komma vs semikolon)
     fn sniff_delimiter(s: &str) -> u8 {
         let commas = s.matches(',').count();
-        let semis  = s.matches(';').count();
-        if semis > commas { b';' } else { b',' }
+        let semis = s.matches(';').count();
+        if semis > commas {
+            b';'
+        } else {
+            b','
+        }
     }
 
     // Robust tall-parser (1,23 / 1.23 / "200 W")
     fn parse_num(s: &str) -> Option<f32> {
         let mut t = s.trim();
-        if t.is_empty() { return None; }
+        if t.is_empty() {
+            return None;
+        }
         t = t.trim_matches(|c| c == '"' || c == '\'');
         let t = t.replace(',', ".");
         let mut buf = String::new();
         let mut seen_digit = false;
         for ch in t.chars() {
-            if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E' {
+            if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E'
+            {
                 buf.push(ch);
-                if ch.is_ascii_digit() { seen_digit = true; }
+                if ch.is_ascii_digit() {
+                    seen_digit = true;
+                }
             } else if seen_digit {
                 break;
             } else {
                 continue;
             }
         }
-        if buf.is_empty() { return None; }
+        if buf.is_empty() {
+            return None;
+        }
         buf.parse::<f32>().ok()
     }
 
@@ -511,14 +587,17 @@ mod m7_tests {
             .expect("no HR column in golden csv");
 
         // 2) Power-kolonne – **foretrekk device_watts først**
-        let i_pw = find_col(&headers, &["device_watts", "watts", "power", "power_w", "pwr"])
-            .expect("no power column in golden csv");
+        let i_pw = find_col(
+            &headers,
+            &["device_watts", "watts", "power", "power_w", "pwr"],
+        )
+        .expect("no power column in golden csv");
 
         // 3) Valgfri maskekolonne: behold kun truthy rader
         let i_mask = find_col(&headers, &["moving", "in_segment", "valid", "ok"]);
 
         let mut hr = Vec::<f32>::new();
-        let mut p  = Vec::<f32>::new();
+        let mut p = Vec::<f32>::new();
 
         let mut n_rows = 0usize;
         let mut n_mask_dropped = 0usize;
@@ -574,8 +653,15 @@ mod m7_tests {
             );
             if !p.is_empty() {
                 let avg = p.iter().copied().sum::<f32>() / p.len() as f32;
-                let (mn, mx) = p.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a,b), &x| (a.min(x), b.max(x)));
-                eprintln!("[GOLDEN DEBUG] {}: power_avg={:.2} min={:.2} max={:.2}", csv_path, avg, mn, mx);
+                let (mn, mx) = p
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &x| {
+                        (a.min(x), b.max(x))
+                    });
+                eprintln!(
+                    "[GOLDEN DEBUG] {}: power_avg={:.2} min={:.2} max={:.2}",
+                    csv_path, avg, mn, mx
+                );
             }
         }
 
@@ -588,14 +674,25 @@ mod m7_tests {
         serde_json::from_reader::<_, Expected>(std::io::BufReader::new(f)).expect("parse expected")
     }
 
-    fn approx(val: f32, exp: f32, tol: f32) -> bool { (val - exp).abs() <= tol }
+    fn approx(val: f32, exp: f32, tol: f32) -> bool {
+        (val - exp).abs() <= tol
+    }
 
     #[test]
     fn golden_sessions_match_with_tolerance() {
         let cases = [
-            ("tests/golden/data/sess01_streams.csv", "tests/golden/expected/sess01_expected.json"),
-            ("tests/golden/data/sess02_streams.csv", "tests/golden/expected/sess02_expected.json"),
-            ("tests/golden/data/sess03_streams.csv", "tests/golden/expected/sess03_expected.json"),
+            (
+                "tests/golden/data/sess01_streams.csv",
+                "tests/golden/expected/sess01_expected.json",
+            ),
+            (
+                "tests/golden/data/sess02_streams.csv",
+                "tests/golden/expected/sess02_expected.json",
+            ),
+            (
+                "tests/golden/data/sess03_streams.csv",
+                "tests/golden/expected/sess03_expected.json",
+            ),
         ];
 
         let update = std::env::var("CG_UPDATE_GOLDEN").ok().as_deref() == Some("1");
@@ -616,37 +713,95 @@ mod m7_tests {
             if update {
                 let new = Expected {
                     ftp: Some(ftp),
-                    np: Some(ExpField { value: np, tol: 0.5 }),
-                    i_f: Some(ExpField { value: iff, tol: 0.05 }),
-                    vi: Some(ExpField { value: vi, tol: 0.05 }),
-                    pa_hr: Some(ExpField { value: pa, tol: 0.05 }),
-                    w_per_beat: Some(ExpField { value: wpb, tol: 0.05 }),
+                    np: Some(ExpField {
+                        value: np,
+                        tol: 0.5,
+                    }),
+                    i_f: Some(ExpField {
+                        value: iff,
+                        tol: 0.05,
+                    }),
+                    vi: Some(ExpField {
+                        value: vi,
+                        tol: 0.05,
+                    }),
+                    pa_hr: Some(ExpField {
+                        value: pa,
+                        tol: 0.05,
+                    }),
+                    w_per_beat: Some(ExpField {
+                        value: wpb,
+                        tol: 0.05,
+                    }),
                 };
                 let pretty = serde_json::to_string_pretty(&new).unwrap();
                 std::fs::write(json_path, pretty).unwrap();
                 continue;
             }
 
-            let expected: Expected = serde_json::from_str(&std::fs::read_to_string(json_path).unwrap()).unwrap();
+            let expected: Expected =
+                serde_json::from_str(&std::fs::read_to_string(json_path).unwrap()).unwrap();
 
             if csv_path.ends_with("sess01_streams.csv") {
-                assert!(approx(wpb, 1.45, 0.05), "WpB {} vs {}±{} ({})", wpb, 1.45, 0.05, csv_path);
+                assert!(
+                    approx(wpb, 1.45, 0.05),
+                    "WpB {} vs {}±{} ({})",
+                    wpb,
+                    1.45,
+                    0.05,
+                    csv_path
+                );
             } else {
                 let f = expected.w_per_beat.as_ref().unwrap();
-                assert!(approx(wpb, f.value, f.tol), "WpB {} vs {}±{} ({})", wpb, f.value, f.tol, csv_path);
+                assert!(
+                    approx(wpb, f.value, f.tol),
+                    "WpB {} vs {}±{} ({})",
+                    wpb,
+                    f.value,
+                    f.tol,
+                    csv_path
+                );
             }
 
             let f = expected.np.as_ref().unwrap();
-            assert!(approx(np, f.value, f.tol), "NP {} vs {}±{} ({})", np, f.value, f.tol, csv_path);
+            assert!(
+                approx(np, f.value, f.tol),
+                "NP {} vs {}±{} ({})",
+                np,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.i_f.as_ref().unwrap();
-            assert!(approx(iff, f.value, f.tol), "IF {} vs {}±{} ({})", iff, f.value, f.tol, csv_path);
+            assert!(
+                approx(iff, f.value, f.tol),
+                "IF {} vs {}±{} ({})",
+                iff,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.vi.as_ref().unwrap();
-            assert!(approx(vi, f.value, f.tol), "VI {} vs {}±{} ({})", vi, f.value, f.tol, csv_path);
+            assert!(
+                approx(vi, f.value, f.tol),
+                "VI {} vs {}±{} ({})",
+                vi,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.pa_hr.as_ref().unwrap();
-            assert!(approx(pa, f.value, f.tol), "PaHR {} vs {}±{} ({})", pa, f.value, f.tol, csv_path);
+            assert!(
+                approx(pa, f.value, f.tol),
+                "PaHR {} vs {}±{} ({})",
+                pa,
+                f.value,
+                f.tol,
+                csv_path
+            );
         }
     }
 
@@ -670,7 +825,12 @@ mod m7_tests {
             .and_then(|s| s.parse::<u128>().ok())
             .unwrap_or(200);
 
-        assert!(dt.as_millis() <= limit_ms, "perf guard: {} ms > {} ms", dt.as_millis(), limit_ms);
+        assert!(
+            dt.as_millis() <= limit_ms,
+            "perf guard: {} ms > {} ms",
+            dt.as_millis(),
+            limit_ms
+        );
     }
 }
 
@@ -688,13 +848,15 @@ mod py_tests {
         let device_watts = Some(true);
 
         Python::with_gil(|py| -> pyo3::PyResult<()> {
-            let result = analyze_session_py(py, watts.clone(), pulses.clone(), device_watts).unwrap();
+            let result =
+                analyze_session_py(py, watts.clone(), pulses.clone(), device_watts).unwrap();
             let result_ref = result.as_ref(py);
             let mode: &str = result_ref.get_item("mode")?.extract()?;
             let reason: &str = result_ref.get_item("no_power_reason")?.extract()?;
             assert_eq!(mode, "hr_only");
             assert_eq!(reason, "no_power_stream");
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 }

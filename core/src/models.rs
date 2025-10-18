@@ -1,11 +1,11 @@
-﻿// core/src/models.rs
-use serde::{Serialize, Deserialize};
+// core/src/models.rs
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Sample {
-    pub t: f64,           // sek
-    pub v_ms: f64,        // m/s
-    pub altitude_m: f64,  // meter
+    pub t: f64,          // sek
+    pub v_ms: f64,       // m/s
+    pub altitude_m: f64, // meter
 
     /// Statisk heading (grader). Brukes som fallback hvis GPS mangler.
     pub heading_deg: f64, // grader
@@ -25,10 +25,10 @@ pub struct Sample {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Weather {
-    pub wind_ms: f64,         // m/s
-    pub wind_dir_deg: f64,    // grader (vinden KOMMER FRA)
-    pub air_temp_c: f64,      // °C
-    pub air_pressure_hpa: f64 // hPa
+    pub wind_ms: f64,          // m/s
+    pub wind_dir_deg: f64,     // grader (vinden KOMMER FRA)
+    pub air_temp_c: f64,       // °C
+    pub air_pressure_hpa: f64, // hPa
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,12 +61,11 @@ impl Sample {
     /// Beregn heading (0–360°, der 0 = nord) fra dette punktet til `next` basert på GPS.
     /// Returnerer None hvis noen av koordinatene mangler.
     pub fn heading_to(&self, next: &Sample) -> Option<f64> {
-        let (lat1, lon1, lat2, lon2) = match (
-            self.latitude, self.longitude, next.latitude, next.longitude
-        ) {
-            (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-            _ => return None,
-        };
+        let (lat1, lon1, lat2, lon2) =
+            match (self.latitude, self.longitude, next.latitude, next.longitude) {
+                (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+                _ => return None,
+            };
 
         // Konverter til radianer
         let phi1 = lat1.to_radians();
@@ -88,7 +87,9 @@ impl Weather {
     /// Komponent av vinden langs bevegelsesretningen (positiv = motvind).
     /// Bruker meteorologisk konvensjon: `wind_dir_deg` er retningen vinden KOMMER FRA.
     pub fn headwind_component(&self, heading_deg: f64) -> f64 {
-        let rel_angle = (heading_deg - self.wind_dir_deg).rem_euclid(360.0).to_radians();
+        let rel_angle = (heading_deg - self.wind_dir_deg)
+            .rem_euclid(360.0)
+            .to_radians();
         self.wind_ms * rel_angle.cos()
     }
 }

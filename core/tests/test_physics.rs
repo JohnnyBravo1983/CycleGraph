@@ -1,11 +1,25 @@
-use cyclegraph_core::{compute_power, compute_indoor_power, Profile, compute_power_with_wind};
 use cyclegraph_core::models::{Sample, Weather};
+use cyclegraph_core::{compute_indoor_power, compute_power, compute_power_with_wind, Profile};
 
 #[test]
 fn test_gravity_power() {
     let samples = vec![
-        Sample { t: 0.0, v_ms: 5.0,  altitude_m: 100.0, heading_deg: 0.0, moving: true, ..Default::default() },
-        Sample { t: 1.0, v_ms: 5.0,  altitude_m: 101.0, heading_deg: 0.0, moving: true, ..Default::default() },
+        Sample {
+            t: 0.0,
+            v_ms: 5.0,
+            altitude_m: 100.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
+        Sample {
+            t: 1.0,
+            v_ms: 5.0,
+            altitude_m: 101.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
     ];
 
     let profile = Profile {
@@ -30,8 +44,22 @@ fn test_gravity_power() {
 #[test]
 fn test_aero_power() {
     let samples = vec![
-        Sample { t: 0.0, v_ms: 10.0, altitude_m: 100.0, heading_deg: 0.0, moving: true, ..Default::default() },
-        Sample { t: 1.0, v_ms: 10.0, altitude_m: 100.0, heading_deg: 0.0, moving: true, ..Default::default() },
+        Sample {
+            t: 0.0,
+            v_ms: 10.0,
+            altitude_m: 100.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
+        Sample {
+            t: 1.0,
+            v_ms: 10.0,
+            altitude_m: 100.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
     ];
 
     let profile = Profile {
@@ -56,8 +84,22 @@ fn test_aero_power() {
 #[test]
 fn test_acceleration_power() {
     let samples = vec![
-        Sample { t: 0.0, v_ms: 5.0, altitude_m: 100.0, heading_deg: 0.0, moving: true, ..Default::default() },
-        Sample { t: 1.0, v_ms: 6.0, altitude_m: 100.0, heading_deg: 0.0, moving: true, ..Default::default() },
+        Sample {
+            t: 0.0,
+            v_ms: 5.0,
+            altitude_m: 100.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
+        Sample {
+            t: 1.0,
+            v_ms: 6.0,
+            altitude_m: 100.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
     ];
     let profile = Profile {
         total_weight: Some(75.0),
@@ -145,8 +187,22 @@ fn test_headwind_component() {
 fn test_v_rel_affects_aero_power() {
     // To samples @ 1 Hz, konstant fart og flat høyde
     let samples = vec![
-        Sample { t: 0.0, v_ms: 10.0, altitude_m: 0.0, heading_deg: 0.0, moving: true, ..Default::default() },
-        Sample { t: 1.0, v_ms: 10.0, altitude_m: 0.0, heading_deg: 0.0, moving: true, ..Default::default() },
+        Sample {
+            t: 0.0,
+            v_ms: 10.0,
+            altitude_m: 0.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
+        Sample {
+            t: 1.0,
+            v_ms: 10.0,
+            altitude_m: 0.0,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default()
+        },
     ];
 
     // Profil (default er ok; cda hentes fra sykkeltype fallback)
@@ -171,14 +227,20 @@ fn test_v_rel_affects_aero_power() {
     };
 
     let out_nowind = compute_power_with_wind(&samples, &profile, &weather_nowind);
-    let out_wind   = compute_power_with_wind(&samples, &profile, &weather_with_wind);
+    let out_wind = compute_power_with_wind(&samples, &profile, &weather_with_wind);
 
     // Sjekk at v_rel er positiv og at vind endrer v_rel
     assert!(out_nowind.v_rel[0] > 0.0);
-    assert!(out_wind.v_rel[0] > out_nowind.v_rel[0], "v_rel burde øke når wind_rel er negativ i denne modellen");
+    assert!(
+        out_wind.v_rel[0] > out_nowind.v_rel[0],
+        "v_rel burde øke når wind_rel er negativ i denne modellen"
+    );
 
     // Total effekt bør øke når v_rel øker (aero ∝ v_rel^3)
-    assert!(out_wind.power[0] > out_nowind.power[0], "Aero/total effekt burde være høyere med større v_rel");
+    assert!(
+        out_wind.power[0] > out_nowind.power[0],
+        "Aero/total effekt burde være høyere med større v_rel"
+    );
 
     // (valgfritt) enkel sanity for de neste punktene
     assert_eq!(out_nowind.power.len(), samples.len());

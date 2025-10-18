@@ -8,9 +8,9 @@ use std::error::Error;
 
 #[derive(Debug, Clone)]
 pub struct CalibrationResult {
-    pub cda: f64,        // CdA brukt i modellen under fit (fra profile eller default)
-    pub crr: f64,        // beste kandidat fra grid-search
-    pub mae: f64,        // mean absolute error mot målt effekt
+    pub cda: f64, // CdA brukt i modellen under fit (fra profile eller default)
+    pub crr: f64, // beste kandidat fra grid-search
+    pub mae: f64, // mean absolute error mot målt effekt
     pub calibrated: bool,
     pub reason: Option<String>,
 }
@@ -23,6 +23,34 @@ fn profile_crr(profile: &Profile) -> f64 {
 #[inline]
 fn profile_cda(profile: &Profile) -> f64 {
     profile.cda.unwrap_or(0.30) // konservativ default
+}
+
+/// Oppdag innendørsøkter:
+/// - Ingen GPS (latitude/longitude = None for alle samples) **og**
+/// - Praktisk talt flat høyde (total variasjon < 0.5 m)
+fn is_indoor_session(samples: &[Sample]) -> bool {
+    let no_gps = samples
+        .iter()
+        .all(|s| s.latitude.is_none() && s.longitude.is_none());
+
+    let flat_altitude = if samples.len() < 2 {
+        true
+    } else {
+        let mut min_a = f64::INFINITY;
+        let mut max_a = f64::NEG_INFINITY;
+        for s in samples {
+            let a = s.altitude_m;
+            if a < min_a {
+                min_a = a;
+            }
+            if a > max_a {
+                max_a = a;
+            }
+        }
+        (max_a - min_a).abs() < 0.5
+    };
+
+    no_gps && flat_altitude
 }
 
 /// Fit Crr (grid-search) gitt samples + målt effekt. CdA holdes konstant.
@@ -59,6 +87,18 @@ pub fn fit_cda_crr(
             mae: 0.0,
             calibrated: false,
             reason: Some("non_finite_measured_power".into()),
+        };
+    }
+
+    // 🏠 Indoor guard: hopp over kalibrering hvis økten er innendørs
+    if is_indoor_session(samples) {
+        // Vi gjør ingen tuning av CdA/Crr for indoor – device_watts skal brukes direkte.
+        return CalibrationResult {
+            cda: profile_cda(profile),
+            crr: profile_crr(profile),
+            mae: 0.0,
+            calibrated: false,
+            reason: Some("indoor_session".to_string()),
         };
     }
 
@@ -110,7 +150,8 @@ pub fn fit_cda_crr(
     }
 
     // 10% terskel relativt til snitteffekten i segmentet
-    let avg_measured = measured_power_w.iter().copied().sum::<f64>() / measured_power_w.len() as f64;
+    let avg_measured =
+        measured_power_w.iter().copied().sum::<f64>() / measured_power_w.len() as f64;
     let calibrated = avg_measured.is_finite() && best_mae < 0.10 * avg_measured;
 
     CalibrationResult {

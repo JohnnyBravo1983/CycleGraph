@@ -1,88 +1,100 @@
-use cyclegraph_core::{
-    models::{Profile, Sample, Weather},
-    calibration::fit_cda_crr,
-    storage::{load_profile, save_profile},
-};
+// core/tests/test_calibration.rs
+use cyclegraph_core::calibration::fit_cda_crr;
+use cyclegraph_core::compute_power; // re-eksportert i lib.rs via `pub use physics::compute_power;`
+use cyclegraph_core::models::{Profile, Sample, Weather};
 
-#[test]
-fn calib_updates_and_saves_profile_json() {
-    // 1) Syntetiske samples (≈5 min @1Hz, 4% stigning)
-    let samples: Vec<Sample> = (0..300)
-    .map(|i| Sample {
-        t: i as f64,
-        v_ms: 6.0 + (i as f64 * 0.01),
-        altitude_m: 100.0 + i as f64 * 0.2,
-        moving: true,
-        ..Default::default() // setter heading_deg=0.0, device_watts=None, osv.
-    })
-    .collect();
-
-    // 2) “Målt” effekt (dummy)
-    let measured_power_w: Vec<f64> = vec![250.0; samples.len()];
-
-    // 3) Weather og profile
-    let weather = Weather { wind_ms: 2.0, wind_dir_deg: 180.0, air_temp_c: 15.0, air_pressure_hpa: 1013.0 };
-    let mut profile = Profile::default();
-    profile.bike_type = Some("gravel".to_string());
-    profile.total_weight = Some(78.0);
-    profile.crr = Some(0.004);      // startantakelse
-    profile.cda = Some(0.30);       // startantakelse
-
-    // 4) Kjør kalibrering
-    let result = fit_cda_crr(&samples, &measured_power_w, &profile, &weather);
-
-    // 5) Oppdater profil
-    profile.cda = Some(result.cda);
-    profile.crr = Some(result.crr);
-    profile.calibrated = result.calibrated;
-    profile.calibration_mae = Some(result.mae);
-    profile.estimat = false;
-
-    // 6) Lagre og les tilbake
-    let path = "profile.json";
-    save_profile(&profile, path).expect("save_profile");
-    let loaded = load_profile(path).expect("load_profile");
-
-    // 7) Enkle asserts
-    assert_eq!(loaded.calibrated, result.calibrated);
-    assert!(loaded.crr.is_some());
-    assert!(loaded.cda.is_some());
-    assert!(loaded.calibration_mae.unwrap_or(1.0) >= 0.0);
+fn make_weather() -> Weather {
+    Weather {
+        wind_ms: 2.0,
+        wind_dir_deg: 180.0,
+        air_temp_c: 15.0,
+        air_pressure_hpa: 1013.0,
+    }
 }
 
-
-use std::fs;
+fn make_samples(n: usize) -> Vec<Sample> {
+    // 1 Hz, svak økning i fart, “bakke” via høydeøkning (0.5 m/s ~ ca 5 % hvis ~10 m/s horisontal)
+    (0..n)
+        .map(|i| Sample {
+            t: i as f64,
+            v_ms: 6.0 + (i as f64 * 0.01),
+            altitude_m: 100.0 + i as f64 * 0.5,
+            heading_deg: 0.0,
+            moving: true,
+            ..Default::default() // fyller device_watts=None, latitude=None, longitude=None
+        })
+        .collect()
+}
 
 #[test]
-fn test_roundtrip_profile_save_and_load() {
-    let tmpfile = "tests/tmp_profile.json";
+fn test_fit_cda_crr_recovers_known_crr_with_noise() {
+    let weather = make_weather();
 
-    // Lag et testprofil
-    let profile = Profile {
-        total_weight: Some(78.0),
-        bike_type: Some("gravel".to_string()),
-        crr: Some(0.004),
-        cda: Some(0.29),
-        calibrated: true,
-        calibration_mae: Some(0.015),
-        estimat: false,
+    // Ground-truth profil for å lage “målt” data
+    let gt_crr = 0.0055;
+    let gt_profile = Profile {
+        crr: Some(gt_crr),
+        ..Default::default()
     };
 
-    // Lagre
-    save_profile(&profile, tmpfile).expect("save_profile feilet");
+    // 300 samples ≈ 5 min @ 1 Hz
+    let samples = make_samples(300);
 
-    // Lese inn igjen
-    let loaded = load_profile(tmpfile).expect("load_profile feilet");
+    // Lag “målt” kraft fra modellen (ground truth) + liten deterministisk støy
+    let mut measured_power_w = compute_power(&samples, &gt_profile, &weather);
+    for (i, w) in measured_power_w.iter_mut().enumerate() {
+        // ±1.5 W deterministisk “sagtann”-støy
+        let noise = if i % 2 == 0 { 1.5 } else { -1.5 };
+        *w += noise;
+    }
 
-    // Sammenlign
-    assert_eq!(profile.total_weight, loaded.total_weight);
-    assert_eq!(profile.bike_type, loaded.bike_type);
-    assert_eq!(profile.crr, loaded.crr);
-    assert_eq!(profile.cda, loaded.cda);
-    assert_eq!(profile.calibrated, loaded.calibrated);
-    assert_eq!(profile.calibration_mae, loaded.calibration_mae);
-    assert_eq!(profile.estimat, loaded.estimat);
+    // Startprofil for fit (bevisst litt feil startverdi)
+    let start_profile = Profile {
+        crr: Some(0.005), // nær, men ikke lik
+        ..Default::default()
+    };
 
-    // Rydd opp
-    fs::remove_file(tmpfile).ok();
+    let result = fit_cda_crr(&samples, &measured_power_w, &start_profile, &weather);
+    eprintln!("FIT RESULT: {:?}", result);
+
+    assert!(result.mae.is_finite());
+    assert!(
+        result.calibrated,
+        "Forventet calibrated=true når MAE < 10% av snitteffekt"
+    );
+    // Crr må treffe innen rimelig margin (grid: 0.003–0.008 i steg 0.001)
+    assert!(
+        (result.crr - gt_crr).abs() <= 0.001,
+        "CRR mismatch: got {}, expected ~{}",
+        result.crr,
+        gt_crr
+    );
+
+    // Ekstra sanity: MAE < 10% av snitteffekt (samme terskel som i fit)
+    let avg_measured =
+        measured_power_w.iter().copied().sum::<f64>() / measured_power_w.len() as f64;
+    assert!(
+        result.mae < 0.10 * avg_measured,
+        "MAE too high: {} vs 10% of avg {}",
+        result.mae,
+        0.10 * avg_measured
+    );
+}
+
+#[test]
+fn test_fit_cda_crr_insufficient_segment() {
+    let weather = make_weather();
+    let samples = make_samples(120); // < 300 → skal gi insufficient_segment
+    let measured_power_w = vec![250.0; samples.len()];
+
+    let profile = Profile {
+        crr: Some(0.005),
+        ..Default::default()
+    };
+
+    let result = fit_cda_crr(&samples, &measured_power_w, &profile, &weather);
+    // forventet false og reason satt
+    assert!(!result.calibrated);
+    assert!(result.mae == 0.0);
+    assert_eq!(result.reason.as_deref(), Some("insufficient_segment"));
 }
