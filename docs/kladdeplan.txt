@@ -1,0 +1,362 @@
+Konge. Her er en komplett “Trinn 4 – Persistens & CLI”-pakke: diffs du kan lime rett inn, en liten CLI-kommando, og tester. Jeg har laget alt defensivt (trygge defaults/null) og med schema v0.7.3.
+
+1) core/src/analyze_session.rs — utvid output
+diff --git a/core/src/analyze_session.rs b/core/src/analyze_session.rs
+index 1111111..2222222 100644
+--- a/core/src/analyze_session.rs
++++ b/core/src/analyze_session.rs
+@@ -1,15 +1,46 @@
+ use serde::{Serialize, Deserialize};
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+-pub struct AnalyzeSessionOutput {
+-    // eksisterende felter ...
+-    pub np: f64,
+-    pub if_factor: f64,
+-    pub vi: f64,
+-    // osv
+-}
++pub struct AnalyzeSessionOutput {
++    // eksisterende felter ...
++    pub np: f64,
++    pub if_factor: f64,
++    pub vi: f64,
++
++    // ⬇️ Sprint 14 – nye felter (alt optional for bakoverkomp.)
++    pub precision_watt: Option<f64>,
++    pub precision_watt_ci: Option<(f64, f64)>,
++    pub crr_used: Option<f64>,
++    #[serde(rename = "CdA")]
++    pub cda: Option<f64>,
++    pub reason: Option<String>,
++
++    pub rider_weight: Option<f64>,
++    pub bike_weight: Option<f64>,
++    pub bike_type: Option<String>,
++    pub tire_width: Option<f64>,
++    pub tire_quality: Option<String>,
++
++    pub publish_state: Option<String>,
++    pub publish_hash: Option<String>,
++    pub published_to_strava: Option<bool>,
++    pub publish_time: Option<String>, // ISO 8601
++}
+ 
+ pub fn analyze_session(/* params */) -> AnalyzeSessionOutput {
+-    // eksisterende logikk...
+-    AnalyzeSessionOutput { np: 0.0, if_factor: 0.0, vi: 0.0 }
++    // eksisterende beregninger ...
++    let precision_watt = /* kalkuler el. None */ None;
++    let precision_watt_ci = /* kalkuler */ None;
++    let crr_used = /* hent fra profil / kalibrering */ None;
++    let cda = /* hent fra kalibrering */ None;
++    let reason = None;
++    let rider_weight = None;
++    let bike_weight = None;
++    let bike_type = None;
++    let tire_width = None;
++    let tire_quality = None;
++    let publish_state = Some("draft".to_string());
++    let publish_hash = None;
++    let published_to_strava = Some(false);
++    let publish_time = None;
++
++    AnalyzeSessionOutput {
++        np: 0.0, if_factor: 0.0, vi: 0.0,
++        precision_watt, precision_watt_ci, crr_used, cda, reason,
++        rider_weight, bike_weight, bike_type, tire_width, tire_quality,
++        publish_state, publish_hash, published_to_strava, publish_time,
++    }
+ }
+
+2) session_storage.py — persister alle nye felter (robust, med defaults)
+diff --git a/cli/session_storage.py b/cli/session_storage.py
+index 3333333..4444444 100644
+--- a/cli/session_storage.py
++++ b/cli/session_storage.py
+@@ -1,21 +1,121 @@
+-from typing import Dict, Any
++from typing import Dict, Any, Optional, Tuple
+ import json
+ from pathlib import Path
++from datetime import datetime
++
++SCHEMA_VERSION = "0.7.3"
+ 
+ DATA_DIR = Path("data")
+ DATA_DIR.mkdir(exist_ok=True, parents=True)
+ 
+-def persist_session_metrics(session_id: str, metrics: Dict[str, Any], profile: Dict[str, Any]) -> None:
+-    """Persisterer resultater fra analyze_session() til session_metrics.jsonl"""
++def _get(d: Dict[str, Any], key: str, default=None):
++    return d.get(key, default)
++
++def _iso(ts: Optional[str]) -> Optional[str]:
++    # aksepter allerede-ISO eller None
++    return ts
++
++def persist_session_metrics(session_id: str, metrics: Dict[str, Any], profile: Dict[str, Any]) -> None:
++    """
++    Persister resultater fra analyze_session() til session_metrics.jsonl (append-only).
++    Skriver alle Sprint 14-felter. Manglende => null/default.
++    """
+     out = {
+         "schema_version": "0.7.3",
+         "session_id": session_id,
+         "saved_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+-        "metrics": metrics,
+-        "profile": {
+-            "consent_accepted": profile.get("consent_accepted"),
+-            "consent_version": profile.get("consent_version"),
+-            "consent_time": profile.get("consent_time"),
+-            "bike_name": profile.get("bike_name"),
+-        },
++        "metrics": {
++            # eksisterende
++            "np": _get(metrics, "np"),
++            "if_factor": _get(metrics, "if_factor"),
++            "vi": _get(metrics, "vi"),
++
++            # Sprint 14 – nye
++            "precision_watt": _get(metrics, "precision_watt"),
++            "precision_watt_ci": _get(metrics, "precision_watt_ci"),
++            "crr_used": _get(metrics, "crr_used"),
++            "CdA": _get(metrics, "CdA") or _get(metrics, "cda"),
++            "reason": _get(metrics, "reason"),
++
++            "rider_weight": _get(metrics, "rider_weight"),
++            "bike_weight": _get(metrics, "bike_weight"),
++            "bike_type": _get(metrics, "bike_type"),
++            "tire_width": _get(metrics, "tire_width"),
++            "tire_quality": _get(metrics, "tire_quality"),
++
++            "publish_state": _get(metrics, "publish_state", "draft"),
++            "publish_hash": _get(metrics, "publish_hash"),
++            "published_to_strava": _get(metrics, "published_to_strava", False),
++            "publish_time": _iso(_get(metrics, "publish_time")),
++        },
++        "profile": {
++            "consent_accepted": _get(profile, "consent_accepted"),
++            "consent_version": _get(profile, "consent_version"),
++            "consent_time": _iso(_get(profile, "consent_time")),
++            "bike_name": _get(profile, "bike_name"),
++        }
+     }
+-    with (DATA_DIR / "session_metrics.jsonl").open("a", encoding="utf-8") as f:
++    with (DATA_DIR / "session_metrics.jsonl").open("a", encoding="utf-8") as f:
+         f.write(json.dumps(out, ensure_ascii=False) + "\n")
++
++def read_last_sessions(limit: int = 5):
++    path = DATA_DIR / "session_metrics.jsonl"
++    if not path.exists():
++        return []
++    rows = path.read_text(encoding="utf-8").splitlines()
++    out = []
++    for line in rows[-limit:]:
++        try:
++            out.append(json.loads(line))
++        except Exception:
++            continue
++    return out[::-1]  # nyeste først
+
+3) Ny CLI-kommando: cli/sessions.py + wire-up i CLI entry
+diff --git a/cli/sessions.py b/cli/sessions.py
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/cli/sessions.py
+@@ -0,0 +1,68 @@
++import click
++from .session_storage import read_last_sessions
++
++@click.group(help="Arbeid med økter")
++def sessions():
++    pass
++
++@sessions.command("list", help="Vis siste 5 økter med PW og publish-status")
++@click.option("--limit", default=5, show_default=True, help="Antall økter")
++def list_cmd(limit: int):
++    rows = read_last_sessions(limit=limit)
++    if not rows:
++        click.echo("Ingen økter funnet.")
++        return
++    # header
++    click.echo("session_id  precision_watt  CI(low,high)  publish_state  publish_time        crr_used  CdA  reason")
++    for row in rows:
++        m = row.get("metrics", {})
++        pw = m.get("precision_watt")
++        ci = m.get("precision_watt_ci")
++        ci_txt = f"{ci[0]:.1f},{ci[1]:.1f}" if isinstance(ci, (list, tuple)) and len(ci) == 2 else "-"
++        click.echo(
++            f"{row.get('session_id','-'):10}  "
++            f"{(f'{pw:.1f}' if isinstance(pw,(int,float)) else '-'):>13}  "
++            f"{ci_txt:>11}  "
++            f"{m.get('publish_state','-'):>12}  "
++            f"{(m.get('publish_time') or '-'):>19}  "
++            f"{(m.get('crr_used') if m.get('crr_used') is not None else '-'):>7}  "
++            f"{(m.get('CdA') if m.get('CdA') is not None else '-'):>4}  "
++            f"{(m.get('reason') or '-')}"
++        )
+diff --git a/cli/__init__.py b/cli/__init__.py
+index 6666666..7777777 100644
+--- a/cli/__init__.py
++++ b/cli/__init__.py
+@@ -1,6 +1,8 @@
+ import click
+-from .analyze import analyze
++from .analyze import analyze
++from .sessions import sessions
+ 
+ @click.group()
+ def cli():
+     pass
+ 
+ cli.add_command(analyze)
++cli.add_command(sessions)
+
+
+Bruk:
+
+cyclegraph sessions list
+
+4) Schema v0.7.3
+diff --git a/frontend/schemas/session_metrics.schema.json b/frontend/schemas/session_metrics.schema.json
+index 8888888..9999999 100644
+--- a/frontend/schemas/session_metrics.schema.json
++++ b/frontend/schemas/session_metrics.schema.json
+@@ -2,8 +2,9 @@
+   "$schema": "http://json-schema.org/draft-07/schema#",
+   "title": "session_metrics",
+-  "version": "0.7.2",
++  "version": "0.7.3",
+   "type": "object",
+   "required": ["schema_version", "session_id", "saved_at", "metrics", "profile"],
+   "properties": {
++    "schema_version": { "const": "0.7.3" },
+     "session_id": { "type": "string" },
+     "saved_at": { "type": "string", "format": "date-time" },
+     "metrics": {
+@@ -13,6 +14,23 @@
+         "np": { "type": ["number", "null"] },
+         "if_factor": { "type": ["number", "null"] },
+         "vi": { "type": ["number", "null"] },
++
++        "precision_watt": { "type": ["number", "null"] },
++        "precision_watt_ci": {
++          "type": ["array", "null"],
++          "items": { "type": "number" },
++          "minItems": 2,
++          "maxItems": 2
++        },
++        "crr_used": { "type": ["number", "null"] },
++        "CdA": { "type": ["number", "null"] },
++        "reason": { "type": ["string", "null"] },
++        "rider_weight": { "type": ["number", "null"] },
++        "bike_weight": { "type": ["number", "null"] },
++        "bike_type": { "type": ["string", "null"] },
++        "tire_width": { "type": ["number", "null"] },
++        "tire_quality": { "type": ["string", "null"] },
++        "publish_state": { "type": ["string", "null"] },
++        "publish_hash": { "type": ["string", "null"] },
++        "published_to_strava": { "type": ["boolean", "null"] },
++        "publish_time": { "type": ["string", "null"], "format": "date-time" }
+       }
+     },
+     "profile": {
+@@ -20,6 +38,9 @@
+       "properties": {
+         "consent_accepted": { "type": ["boolean", "null"] },
+         "consent_version": { "type": ["string", "null"] },
+-        "consent_time": { "type": ["string", "null"], "format": "date-time" }
++        "consent_time": { "type": ["string", "null"], "format": "date-time" },
++        "bike_name": { "type": ["string", "null"] }
+       }
+     }
+   }
+ }
+
+5) Tester
+5a) Rust: tests/test_storage.rs (sjekker analyze-felt)
+diff --git a/core/tests/test_storage.rs b/core/tests/test_storage.rs
+new file mode 100644
+index 0000000..aaaaaaa 100644
+--- /dev/null
++++ b/core/tests/test_storage.rs
+@@ -0,0 +1,34 @@
++use core::analyze_session::{analyze_session};
++use serde_json::json;
++
++#[test]
++fn analyze_outputs_persist_fields_present() {
++    let out = analyze_session(/* dummy params */);
++    // skal serialiseres uten panikk og ha optional felter
++    let v = serde_json::to_value(&out).expect("serialize");
++    let obj = v.as_object().unwrap();
++    // eksisterende
++    assert!(obj.contains_key("np"));
++    // nye felter finnes som keys (kan være null)
++    for k in [
++        "precision_watt","precision_watt_ci","crr_used","CdA","reason",
++        "rider_weight","bike_weight","bike_type","tire_width","tire_quality",
++        "publish_state","publish_hash","published_to_strava","publish_time"
++    ] {
++        assert!(obj.contains_key(k), "missing key {}", k);
++    }
++}
+
+5b) CLI-test (pytest): tests/test_cli_sessions.py
+diff --git a/tests/test_cli_sessions.py b/tests/test_cli_sessions.py
+new file mode 100644
+index 0000000..bbbbbbb 100644
+--- /dev/null
++++ b/tests/test_cli_sessions.py
+@@ -0,0 +1,55 @@
++import json, subprocess, sys, os
++from pathlib import Path
++
++def write_row(session_id: str, **metrics):
++    data_dir = Path("data"); data_dir.mkdir(parents=True, exist_ok=True)
++    row = {
++        "schema_version": "0.7.3",
++        "session_id": session_id,
++        "saved_at": "2025-10-18T10:00:00Z",
++        "metrics": {
++            "precision_watt": metrics.get("precision_watt"),
++            "precision_watt_ci": metrics.get("precision_watt_ci"),
++            "publish_state": metrics.get("publish_state","draft"),
++            "publish_time": metrics.get("publish_time"),
++            "crr_used": metrics.get("crr_used"),
++            "CdA": metrics.get("CdA"),
++            "reason": metrics.get("reason"),
++        },
++        "profile": {
++            "consent_accepted": True,
++            "consent_version": "1.0",
++            "consent_time": "2025-10-01T12:00:00Z",
++            "bike_name": "AeroX"
++        }
++    }
++    with open(data_dir / "session_metrics.jsonl", "a", encoding="utf-8") as f:
++        f.write(json.dumps(row)+"\n")
++
++def test_cli_sessions_list(tmp_path, monkeypatch):
++    monkeypatch.chdir(tmp_path)
++    (tmp_path/"data").mkdir()
++    write_row("S1", precision_watt=255.3, precision_watt_ci=[240.0,270.0], publish_state="draft", crr_used=0.004, CdA=0.28, reason="baseline")
++    write_row("S2", precision_watt=None, precision_watt_ci=None, publish_state="published", publish_time="2025-10-18T11:00:00Z")
++    # kall CLI
++    out = subprocess.check_output([sys.executable, "-m", "cyclegraph", "sessions", "list", "--limit", "2"], text=True)
++    assert "S2" in out and "published" in out
++    assert "S1" in out and "255.3" in out and "0.28" in out
+
+6) Ajv/CI-wire (valider schema v0.7.3)
+
+Hvis du allerede har frontend/scripts/ajv.config.cjs og en jobb som kjører ajv-cli compile på frontend/schemas/session_metrics.schema.json, så holder det å oppdatere versjon/felter som over. (Den forrige Actions-feilen om eksportfunksjon er allerede fikset i forrige trinn.)
+
+7) Quick-bash for commit & push
+
+Kjør fra repo-root (tar med nye filer):
+
+git add -A
+git commit -m "S14 Trinn 4: Persistens & CLI — session_metrics v0.7.3, analyze output utvidet, CLI sessions list, tester"
+git push origin main
