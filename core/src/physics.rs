@@ -19,30 +19,30 @@ impl RoundTo for f64 {
     }
 }
 
-/// Estimer Crr basert på dekkbredde og kvalitetsnivå.
-/// Merk: `bike_type` tas inn for ev. fremtidig justering (ikke brukt nå).
-/// - `tire_width` i millimeter (mm)
-/// - `tire_quality` i {"Trening", "Vanlig", "Ritt"} (ukjent -> 1.0)
-pub fn estimate_crr(bike_type: &str, tire_width: f64, tire_quality: &str) -> f64 {
-    let _ = bike_type; // reservert for fremtidig bruk
-
-    // Guard: sikre fornuftige grenser og finitte verdier
-    let width_mm = if tire_width.is_finite() && tire_width > 10.0 {
-        tire_width
-    } else {
+/// Crr-estimat fra dekkbredde/kvalitet.
+/// Merk: baseline ~0.005 for 28 mm “Vanlig”. Smalere dekk → litt høyere Crr.
+/// Kvalitet: Trening (1.2) > Vanlig (1.0) > Ritt (0.85).
+/// - `tire_quality` i {"Trening", "Vanlig", "Ritt"} (ukjent → 1.0)
+pub fn estimate_crr(_bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> f64 {
+    // Guard: veldig smal bredde gir urealistisk høy Crr – fall tilbake til 25 mm.
+    let w = if tire_width_mm < 20.0 {
         25.0
+    } else {
+        tire_width_mm
     };
 
     let quality_factor = match tire_quality {
         "Trening" => 1.2,
         "Vanlig" => 1.0,
         "Ritt" => 0.85,
-        _ => 1.0, // fallback
+        _ => 1.0, // ukjent → fallback
     };
 
-    // Spesifisert baseformel + 5 desimalers avrunding
-    let base = (28.0 / width_mm).powf(0.3);
-    (base * quality_factor).round_to(5)
+    // Skaler relativt til 28 mm: (28 / w)^0.3 og gang med fysisk baseline (~0.005).
+    let relative = (28.0 / w).powf(0.3);
+    let crr = 0.005 * relative * quality_factor;
+
+    crr.round_to(5)
 }
 
 /// Total masse (kg) = rytter + sykkel, rundet til 5 desimaler.
