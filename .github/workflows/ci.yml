@@ -69,24 +69,22 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          # Hard reset i runtime-miljøet
-          unset LD_LIBRARY_PATH || true
+          # Fjern arv fra eventuelle Windows-lokale envs
           unset CARGO_TARGET_DIR || true
-          # Og i Github-miljøet for neste steps
+          unset LD_LIBRARY_PATH || true
+          # LD_LIBRARY_PATH kan være tom (OK). Ikke sett CARGO_TARGET_DIR i det hele tatt.
           echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=" >> "$GITHUB_ENV"
           echo "After sanitize:"
-          echo "  LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
-          echo "  CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
+          env | sort | grep -E 'CARGO_TARGET_DIR|LD_LIBRARY_PATH' || true
 
       - name: Build Rust wheel
         working-directory: core
         env:
-          LD_LIBRARY_PATH: ""     # belt & braces
-          CARGO_TARGET_DIR: ""    # belt & braces
+          # Hold LD_LIBRARY_PATH tomt for å unngå blanding av paths
+          LD_LIBRARY_PATH: ""
         run: |
           echo "Effective LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
-          echo "Effective CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
+          echo "CARGO_TARGET_DIR should be unset → '${CARGO_TARGET_DIR-<unset>}'"
           maturin build --release -i python3.12 --features python
 
       - name: Install latest-built wheel
@@ -176,22 +174,19 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          unset LD_LIBRARY_PATH || true
           unset CARGO_TARGET_DIR || true
+          unset LD_LIBRARY_PATH || true
           echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=" >> "$GITHUB_ENV"
           echo "After sanitize:"
-          echo "  LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
-          echo "  CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
+          env | sort | grep -E 'CARGO_TARGET_DIR|LD_LIBRARY_PATH' || true
 
       - name: Build Rust wheel
         working-directory: core
         env:
           LD_LIBRARY_PATH: ""
-          CARGO_TARGET_DIR: ""
         run: |
           echo "Effective LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
-          echo "Effective CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
+          echo "CARGO_TARGET_DIR should be unset → '${CARGO_TARGET_DIR-<unset>}'"
           maturin build --release -i python3.12 --features python
 
       - name: Install latest-built wheel
