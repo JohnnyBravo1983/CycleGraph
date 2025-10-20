@@ -31,9 +31,11 @@ fn test_fit_cda_crr_recovers_known_crr_with_noise() {
     let weather = make_weather();
 
     // Ground-truth profil for å lage “målt” data
-    let mut gt_profile = Profile::default();
     let gt_crr = 0.0055;
-    gt_profile.crr = Some(gt_crr);
+    let gt_profile = Profile {
+        crr: Some(gt_crr),
+        ..Default::default()
+    };
 
     // 300 samples ≈ 5 min @ 1 Hz
     let samples = make_samples(300);
@@ -47,14 +49,19 @@ fn test_fit_cda_crr_recovers_known_crr_with_noise() {
     }
 
     // Startprofil for fit (bevisst litt feil startverdi)
-    let mut start_profile = Profile::default();
-    start_profile.crr = Some(0.005); // nær, men ikke lik
+    let start_profile = Profile {
+        crr: Some(0.005), // nær, men ikke lik
+        ..Default::default()
+    };
 
     let result = fit_cda_crr(&samples, &measured_power_w, &start_profile, &weather);
     eprintln!("FIT RESULT: {:?}", result);
 
     assert!(result.mae.is_finite());
-    assert!(result.calibrated, "Forventet calibrated=true når MAE < 10% av snitteffekt");
+    assert!(
+        result.calibrated,
+        "Forventet calibrated=true når MAE < 10% av snitteffekt"
+    );
     // Crr må treffe innen rimelig margin (grid: 0.003–0.008 i steg 0.001)
     assert!(
         (result.crr - gt_crr).abs() <= 0.001,
@@ -64,7 +71,8 @@ fn test_fit_cda_crr_recovers_known_crr_with_noise() {
     );
 
     // Ekstra sanity: MAE < 10% av snitteffekt (samme terskel som i fit)
-    let avg_measured = measured_power_w.iter().copied().sum::<f64>() / measured_power_w.len() as f64;
+    let avg_measured =
+        measured_power_w.iter().copied().sum::<f64>() / measured_power_w.len() as f64;
     assert!(
         result.mae < 0.10 * avg_measured,
         "MAE too high: {} vs 10% of avg {}",
@@ -79,8 +87,10 @@ fn test_fit_cda_crr_insufficient_segment() {
     let samples = make_samples(120); // < 300 → skal gi insufficient_segment
     let measured_power_w = vec![250.0; samples.len()];
 
-    let mut profile = Profile::default();
-    profile.crr = Some(0.005);
+    let profile = Profile {
+        crr: Some(0.005),
+        ..Default::default()
+    };
 
     let result = fit_cda_crr(&samples, &measured_power_w, &profile, &weather);
     // forventet false og reason satt

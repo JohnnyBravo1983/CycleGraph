@@ -11,6 +11,27 @@
     "date": { "type": "string", "format": "date" },
     "avg_watt": { "type": "number", "minimum": 0 },
     "duration_min": { "type": "number", "minimum": 0 },
+
+    "bike_type": { "type": "string" },
+    "bike_weight": { "type": "number", "minimum": 0 },
+    "tire_width": { "type": "number", "minimum": 10 },
+    "tire_quality": { "type": "string" },
+    "crr_used": { "type": "number", "minimum": 0 },
+    "rider_weight": { "type": "number", "minimum": 0 },
+    "bike_name": { "type": "string" },
+
+    "precision_watt": { "type": "number" },
+    "precision_watt_ci": { "type": "number", "minimum": 0 },
+
+    "publish_state": {
+      "type": "string",
+      "enum": ["none", "pending", "published", "failed"],
+      "default": "none"
+    },
+    "publish_hash": { "type": "string" },
+    "published_to_strava": { "type": "boolean", "default": false },
+    "publish_time": { "type": "string", "format": "date-time" },
+
     "schema_version": {
       "type": "string",
       "description": "Må være kompatibel med v0.7.x.",
@@ -18,3 +39,4 @@
     }
   }
 }
+

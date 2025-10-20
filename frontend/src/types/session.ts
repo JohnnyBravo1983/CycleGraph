@@ -96,3 +96,41 @@ export type KeyMetrics = Pick<
   | 'cgs'
   | 'precision_watt_value'
 >;
+
+/* ────────────────────────────────────────────────────────────────────────────
+   S14: SessionMetrics (lagring/persistens) i tråd med schema/session_metrics.v1.json
+   Dette er aggregerte felter per økt (ikke samme som SessionReport-streams).
+   Alle nye felt er valgfrie for bakoverkompatibilitet.
+──────────────────────────────────────────────────────────────────────────── */
+
+export type PublishState = 'none' | 'pending' | 'published' | 'failed';
+
+/** Match mot schema/session_metrics.v1.json */
+export interface SessionMetrics {
+  user_id: string;
+  date: string;           // ISO-date (YYYY-MM-DD)
+  avg_watt: number;
+  duration_min: number;
+
+  // S14 – Bike Setup / fysikk
+  bike_type?: string;
+  bike_weight?: number;   // kg
+  tire_width?: number;    // mm
+  tire_quality?: string;  // "Trening" | "Vanlig" | "Ritt" | fri tekst
+  crr_used?: number;
+  rider_weight?: number;  // kg
+  bike_name?: string;
+
+  // S14 – Precision Watt (aggregert/lagret per økt)
+  precision_watt?: number;
+  precision_watt_ci?: number;
+
+  // S14 – Publisering til Strava
+  publish_state?: PublishState;
+  publish_hash?: string;
+  published_to_strava?: boolean;
+  publish_time?: string;  // ISO date-time
+
+  // Schema-versjon (v0.7.x)
+  schema_version: string;
+}

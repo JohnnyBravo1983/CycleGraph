@@ -11,7 +11,10 @@ fn analyzer_no_watt_hr_only() {
     let result: Value = analyze_session(watts, pulses, device_watts).unwrap();
 
     assert_eq!(result.get("mode").and_then(|v| v.as_str()), Some("hr_only"));
-    assert_eq!(result.get("no_power_reason").and_then(|v| v.as_str()), Some("no_power_stream"));
+    assert_eq!(
+        result.get("no_power_reason").and_then(|v| v.as_str()),
+        Some("no_power_stream")
+    );
 }
 #[test]
 fn test_analyze_session_basic() {
@@ -24,5 +27,8 @@ fn test_analyze_session_basic() {
 
     let parsed: Value = result.unwrap(); // ferdig, allerede en Value
 
-    assert!(parsed.get("NP").is_some() || parsed.get("avg").is_some(), "Expected key 'NP' or 'avg' in output");
+    assert!(
+        parsed.get("NP").is_some() || parsed.get("avg").is_some(),
+        "Expected key 'NP' or 'avg' in output"
+    );
 }
