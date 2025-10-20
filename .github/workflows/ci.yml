@@ -65,18 +65,29 @@ jobs:
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
-      - name: Sanitize Linux env (unset LD_LIBRARY_PATH)
+      - name: Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          # Hard reset i runtime-miljøet
           unset LD_LIBRARY_PATH || true
-          echo "LD_LIBRARY_PATH cleared -> ${LD_LIBRARY_PATH:-<empty>}"
+          unset CARGO_TARGET_DIR || true
+          # Og i Github-miljøet for neste steps
+          echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=" >> "$GITHUB_ENV"
+          echo "After sanitize:"
+          echo "  LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
+          echo "  CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
 
       - name: Build Rust wheel
         working-directory: core
         env:
-          LD_LIBRARY_PATH: ""   # ← hard reset for dette steget
-        run: maturin build --release -i python3.12 --features python
+          LD_LIBRARY_PATH: ""     # belt & braces
+          CARGO_TARGET_DIR: ""    # belt & braces
+        run: |
+          echo "Effective LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
+          echo "Effective CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
+          maturin build --release -i python3.12 --features python
 
       - name: Install latest-built wheel
         run: |
@@ -161,18 +172,27 @@ jobs:
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
-      - name: Sanitize Linux env (unset LD_LIBRARY_PATH)
+      - name: Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           unset LD_LIBRARY_PATH || true
-          echo "LD_LIBRARY_PATH cleared -> ${LD_LIBRARY_PATH:-<empty>}"
+          unset CARGO_TARGET_DIR || true
+          echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=" >> "$GITHUB_ENV"
+          echo "After sanitize:"
+          echo "  LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
+          echo "  CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
 
       - name: Build Rust wheel
         working-directory: core
         env:
-          LD_LIBRARY_PATH: ""   # ← hard reset også her
-        run: maturin build --release -i python3.12 --features python
+          LD_LIBRARY_PATH: ""
+          CARGO_TARGET_DIR: ""
+        run: |
+          echo "Effective LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
+          echo "Effective CARGO_TARGET_DIR='${CARGO_TARGET_DIR:-<empty>}'"
+          maturin build --release -i python3.12 --features python
 
       - name: Install latest-built wheel
         run: |
@@ -213,7 +233,7 @@ jobs:
           npm config set fetch-retry-maxtimeout 120000
           for i in 1 2 3; do
             echo "npm ci attempt $i/3"
-            npm ci && break || (echo "npm ci failed (attempt $i), sleeping…" && sleep 10)
+            npm ci && break || (echo "npm ci failed (attempt $i), sleeping…"; sleep 10)
           done
 
       - name: Frontend – typecheck
