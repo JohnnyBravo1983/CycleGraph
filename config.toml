@@ -1,0 +1,3 @@
+[build]
+# Bygg ALT utenfor OneDrive for å unngå låsing
+target-dir = "C:/cg-build"
