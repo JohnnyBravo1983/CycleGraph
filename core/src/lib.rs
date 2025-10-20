@@ -373,15 +373,20 @@ mod m7_tests {
     }
 
     // ---------- IO structs for golden (Uten serde_derive) ----------
-    struct ExpField { value: f32, tol: f32 }
-    struct Expected {
-        ftp: Option<f32>,
-        np: Option<ExpField>,
-        i_f: Option<ExpField>,
-        vi: Option<ExpField>,
-        pa_hr: Option<ExpField>,
-        w_per_beat: Option<ExpField>,
-    }
+    #[derive(Debug, Clone, Copy)]
+struct ExpField { value: f32, tol: f32 }
+
+#[derive(Debug, Clone)]
+struct Expected {
+    #[allow(dead_code)] // eller #[allow(unused)]
+    ftp: Option<f32>,
+    np: Option<ExpField>,
+    i_f: Option<ExpField>,
+    vi: Option<ExpField>,
+    pa_hr: Option<ExpField>,
+    w_per_beat: Option<ExpField>,
+}
+
 
     fn manifest_path(p: &str) -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p) }
 
