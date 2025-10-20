@@ -30,9 +30,11 @@ pub struct OpenMeteoClient {
 
 impl OpenMeteoClient {
     pub fn new() -> Self {
-        Self {
-            agent: Agent::new(),
-        }
+        // En enkel agent; ureq bruker rustls når "tls" er aktivert
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(10))
+            .build();
+        Self { agent }
     }
 }
 
@@ -57,7 +59,7 @@ impl WeatherProvider for OpenMeteoClient {
         let resp = self.agent.get(&url).call().ok()?;
         let body: OpenMeteoResp = resp.into_json().ok()?;
 
-        // Enkel logging for debugging
+        // Enkel logging (valgfri)
         println!(
             "[OpenMeteo] lat={:.3}, lon={:.3} => {:.1}°C, {:.1} m/s @ {:.0}°, {:.0} hPa",
             lat,
