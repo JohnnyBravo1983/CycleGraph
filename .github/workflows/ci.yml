@@ -18,6 +18,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect changed paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            schemas:
+              - 'schema/**'
+
       - name: Show commit
         run: git rev-parse HEAD
 
@@ -49,9 +59,9 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      # Frontend cache (kun hvis frontend finnes)
-      - name: Set up Node
-        if: hashFiles('frontend/package.json') != ''
+      # Node settes bare opp hvis vi faktisk trenger frontend
+      - name: Set up Node (only if frontend/schema changed)
+        if: steps.changes.outputs.frontend == 'true' || steps.changes.outputs.schemas == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -121,47 +131,37 @@ jobs:
             fi
           }
 
-      # --- Frontend (guarded + tolerant) ---
-      - name: Frontend – install deps (retry; tolerant)
-        if: hashFiles('frontend/package.json') != ''
+      # ---------- Frontend (kjør KUN ved endringer) ----------
+      - name: Frontend – install deps
+        if: steps.changes.outputs.frontend == 'true' || steps.changes.outputs.schemas == 'true'
         working-directory: frontend
-        continue-on-error: true
         shell: bash
         run: |
-          set -e
           npm config set fetch-retries 5
           npm config set fetch-retry-maxtimeout 120000
-          for i in 1 2 3; do
-            echo "npm ci attempt $i/3"
-            npm ci && break || (echo "npm ci failed (attempt $i), sleeping…" && sleep 10)
-          done
+          npm ci
 
-      - name: Frontend – typecheck (tolerant)
-        if: hashFiles('frontend/package.json') != ''
+      - name: Frontend – typecheck
+        if: steps.changes.outputs.frontend == 'true'
         working-directory: frontend
-        continue-on-error: true
-        run: npm run typecheck || true
+        run: npm run typecheck
 
-      - name: Frontend – build (tolerant)
-        if: hashFiles('frontend/package.json') != ''
+      - name: Frontend – build
+        if: steps.changes.outputs.frontend == 'true'
         working-directory: frontend
-        continue-on-error: true
-        run: npm run build || true
+        run: npm run build
 
-      - name: Frontend – tests (vitest, tolerant)
-        if: hashFiles('frontend/package.json') != ''
+      - name: Frontend – tests (vitest)
+        if: steps.changes.outputs.frontend == 'true'
         working-directory: frontend
-        continue-on-error: true
-        run: npm run test -- --run || true
+        run: npm run test -- --run
 
-      # --- JSON Schemas (guarded + tolerant) ---
-      - name: JSON Schemas – compile (AJV, tolerant)
-        if: hashFiles('schema/*.json') != ''
+      - name: JSON Schemas – compile (AJV)
+        if: steps.changes.outputs.schemas == 'true'
         working-directory: frontend
-        continue-on-error: true
         run: |
           npx --yes ajv-cli@5 compile \
             -c ./scripts/ajv.config.cjs \
             -s ../schema/session_metrics.v1.json \
             -s ../schema/daily_user_metrics.v1.json \
-            -s ../schema/trends_response.v1.json || true
+            -s ../schema/trends_response.v1.json
