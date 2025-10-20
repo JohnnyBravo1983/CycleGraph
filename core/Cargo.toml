@@ -31,8 +31,8 @@ log = "0.4"
 once_cell = "1.18"
 prometheus = "0.13"
 ordered-float = "2.1"
-chrono = { version = "0.4", features = ["serde", "clock"] }
-ureq = { version = "2", features = ["json"] }
+
+
 
 chrono = { version = "0.4", features = ["serde", "clock"] }
 
