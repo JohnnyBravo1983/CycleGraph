@@ -74,6 +74,8 @@ jobs:
 
       - name: Build Rust wheel
         working-directory: core
+        env:
+          LD_LIBRARY_PATH: ""   # ← hard reset for dette steget
         run: maturin build --release -i python3.12 --features python
 
       - name: Install latest-built wheel
@@ -168,6 +170,8 @@ jobs:
 
       - name: Build Rust wheel
         working-directory: core
+        env:
+          LD_LIBRARY_PATH: ""   # ← hard reset også her
         run: maturin build --release -i python3.12 --features python
 
       - name: Install latest-built wheel
