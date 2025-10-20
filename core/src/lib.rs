@@ -5,7 +5,9 @@ pub mod metrics;
 pub mod analyzer;
 pub mod calibration;
 pub mod weather;
+pub mod weather_api;
 pub mod storage;
+pub mod analyze_session;
 
 // ───────── Re-exports for tests/back-compat ─────────
 pub use crate::models::{Profile, Weather, Sample};
