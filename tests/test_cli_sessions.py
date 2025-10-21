@@ -12,7 +12,7 @@ def write_row(session_id: str, **metrics):
     row = {
         "schema_version": "0.7.3",
         "session_id": session_id,
-        "saved_at": "2025-10-18T10:00:00Z",
+        "saved_at": "2025-10-18T10:00:00Z" if session_id == "S1" else "2025-10-18T11:00:00Z",
         "metrics": {
             "precision_watt": metrics.get("precision_watt"),
             "precision_watt_ci": metrics.get("precision_watt_ci"),
@@ -35,7 +35,6 @@ def write_row(session_id: str, **metrics):
 def test_cli_sessions_list():
     runner = CliRunner()
     with runner.isolated_filesystem():
-        # Sørg for at repo-roten er på sys.path (for import cli)
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
 
@@ -43,10 +42,11 @@ def test_cli_sessions_list():
         for mod in ("cli.session_storage", "cli.session", "cli"):
             sys.modules.pop(mod, None)
 
-        # Importer cli først NÅ (etter vi er inne i isolert FS)
         from cli import cli as app
+        import cli.session_storage as ss
+        ss.DATA_DIR = Path("data")  # tving bruk av lokal data/
 
-        # Skriv testdata i denne (isolerte) cwd
+        # Skriv to rader (S1 eldre, S2 nyere)
         Path("data").mkdir(parents=True, exist_ok=True)
         write_row(
             "S1",
@@ -65,13 +65,20 @@ def test_cli_sessions_list():
             publish_time="2025-10-18T11:00:00Z",
         )
 
-        # Kjør CLI direkte i-prosess
-        result = runner.invoke(app, ["sessions", "list", "--limit", "2"])
-        # Debug ved behov:
-        # print("EXIT:", result.exit_code)
-        # print("OUTPUT:\n", result.output)
+        # Kjør CLI
+        result = runner.invoke(app, ["sessions", "list", "--limit", "2"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
 
-        assert result.exit_code == 0
         out = result.output
+        # Basissjekker
+        assert "session_id" in out  # header
         assert "S2" in out and "published" in out
         assert "S1" in out and "255.3" in out and "0.28" in out
+
+        # Sortering: nyeste først → forvent S2 før S1 i tekstutskriften
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        # Finn datalinjer (enkelt grep: linjer som starter med S)
+        data_lines = [ln for ln in lines if ln.startswith("S")]
+        assert len(data_lines) >= 2, out
+        assert data_lines[0].startswith("S2"), f"Første rad skal være S2 (nyest). Output:\n{out}"
+        assert data_lines[1].startswith("S1"), f"Andre rad skal være S1 (eldst). Output:\n{out}"

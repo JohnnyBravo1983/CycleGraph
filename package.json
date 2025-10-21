@@ -4,7 +4,7 @@
   "version": "0.7.3",
   "description": "Root-level tooling for schema validation and CI checks",
   "scripts": {
- "test:schema:compile": "ajv compile -c ajv-formats --spec=draft7 -s schema/session_metrics.v1.json && ajv compile -c ajv-formats --spec=draft7 -s schema/profile.v1.json",
+    "test:schema:compile": "ajv compile -c ajv-formats --spec=draft7 -s schema/session_metrics.v1.json && ajv compile -c ajv-formats --spec=draft7 -s schema/profile.v1.json",
     "test:schema": "npm run test:schema:compile"
   },
   "devDependencies": {

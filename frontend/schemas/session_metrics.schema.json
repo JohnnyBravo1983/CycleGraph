@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "session_metrics",
+  "type": "object",
+  "required": ["schema_version", "session_id", "saved_at", "metrics", "profile"],
+  "properties": {
+    "schema_version": { "const": "0.7.3" },
+    "session_id": { "type": "string" },
+    "saved_at": { "type": "string", "format": "date-time" },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "np": { "type": ["number", "null"] },
+        "if_factor": { "type": ["number", "null"] },
+        "vi": { "type": ["number", "null"] },
+
+        "precision_watt": { "type": ["number", "null"] },
+        "precision_watt_ci": {
+          "type": ["array", "null"],
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "crr_used": { "type": ["number", "null"] },
+        "CdA": { "type": ["number", "null"] },
+        "reason": { "type": ["string", "null"] },
+        "rider_weight": { "type": ["number", "null"] },
+        "bike_weight": { "type": ["number", "null"] },
+        "bike_type": { "type": ["string", "null"] },
+        "tire_width": { "type": ["number", "null"] },
+        "tire_quality": { "type": ["string", "null"] },
+
+        "publish_state": { "type": ["string", "null"] },
+        "publish_hash": { "type": ["string", "null"] },
+        "published_to_strava": { "type": ["boolean", "null"] },
+        "publish_time": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "consent_accepted": { "type": ["boolean", "null"] },
+        "consent_version": { "type": ["string", "null"] },
+        "consent_time": { "type": ["string", "null"], "format": "date-time" },
+        "bike_name": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
