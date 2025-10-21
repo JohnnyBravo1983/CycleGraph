@@ -8,6 +8,15 @@ version = "0.1.0"
 description = "CycleGraph CLI + Rust core bindings"
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+  "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+]
 
 [tool.setuptools]
 packages = ["cli"]  # finner pakken 'cli' (og underpakker)
