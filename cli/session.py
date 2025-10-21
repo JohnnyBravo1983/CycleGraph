@@ -1,17 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-CycleGraph CLI
-- Subcommand 'efficiency': dispatch via parser -> efficiency.py
-- Subcommand 'session'   : NP/IF/VI/Pa:Hr/W/beat/CGS + batch/trend + baseline
-- --calibrate: valgfri kalibrering mot powermeter
-- --weather: path til værfil (JSON) som brukes i kalibrering
-- --indoor : kjør indoor pipeline uten GPS (device_watts-policy)
-
-TRINN 3 (Sprint 6): Strukturerte JSON-logger
-- Logger som JSON på stderr med felter: level, step, duration_ms (+ev. extras)
-- Nivåstyring via --log-level (debug/info/warning) eller miljøvariabel LOG_LEVEL
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -27,6 +13,73 @@ import logging
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
+
+from pathlib import Path
+import click
+
+
+# Importer session_storage modulært slik at vi kan tvinge DATA_DIR ved behov
+try:
+    from . import session_storage as ss
+except Exception:  # fallback hvis relative imports ikke fungerer i miljøet
+    import cli.session_storage as ss  # type: ignore
+
+
+@click.group(name="sessions", help="Arbeid med økter")
+def sessions():
+    """Gruppe for økt-relaterte kommandoer."""
+    pass
+
+
+@sessions.command("list", help="Vis siste 5 økter med PW og publish-status")
+@click.option("--limit", default=5, show_default=True, type=int, help="Antall økter")
+def sessions_list_cmd(limit: int):
+    """
+    Minimal og robust implementasjon:
+    - Sikrer at DATA_DIR peker til ./data hvis ikke eksisterer
+    - Leser siste rader via ss.read_last_sessions
+    - Skriver tabell til stdout
+    """
+    # Sørg for at ss.DATA_DIR peker til en faktisk mappe (fall back til ./data)
+    try:
+        data_dir = ss.DATA_DIR
+    except Exception:
+        data_dir = Path("data")
+
+    if not data_dir.exists():
+        data_dir = Path("data")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        ss.DATA_DIR = data_dir  # bind tilbake til modulen
+
+    rows = ss.read_last_sessions(limit=limit)
+    if not rows:
+        click.echo("Ingen økter funnet.")
+        return
+
+    # header
+    click.echo(
+        "session_id  precision_watt  CI(low,high)  publish_state  publish_time        crr_used  CdA  reason"
+    )
+
+    for row in rows:
+        m = (row.get("metrics") or {})
+        pw = m.get("precision_watt")
+        ci = m.get("precision_watt_ci")
+        ci_txt = (
+            f"{ci[0]:.1f},{ci[1]:.1f}"
+            if isinstance(ci, (list, tuple)) and len(ci) == 2
+            else "-"
+        )
+        click.echo(
+            f"{row.get('session_id','-'):10}  "
+            f"{(f'{pw:.1f}' if isinstance(pw,(int,float)) else '-'):>13}  "
+            f"{ci_txt:>11}  "
+            f"{(m.get('publish_state') or '-'):>12}  "
+            f"{(m.get('publish_time') or '-'):>19}  "
+            f"{(m.get('crr_used') if m.get('crr_used') is not None else '-'):>7}  "
+            f"{(m.get('CdA') if m.get('CdA') is not None else '-'):>4}  "
+            f"{(m.get('reason') or '-')}"
+        )
 
 # ─────────────────────────────────────────────────────────────
 # Global logger + wrappers (alltid tom msg, data i extra)
