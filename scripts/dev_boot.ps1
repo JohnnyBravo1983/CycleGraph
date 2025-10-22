@@ -1,5 +1,4 @@
-﻿# 0) Sørg for at du står i riktig repo
-pwd  # skal ende på ...\CycleGraph
+﻿# 0) Sørg for at du står i riktig repo # skal ende på ...\CycleGraph
 
 # 1) Venv
 if (-not (Test-Path .\.venv\Scripts\Activate.ps1)) { py -3.12 -m venv .venv }

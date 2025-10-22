@@ -114,8 +114,7 @@ from cli.weather_client_mock import WeatherClient  # noqa: F401
 from cli.formatters.strava_publish import PublishPieces, build_publish_texts  # noqa: F401
 from cli.strava_client import StravaClient  # noqa: F401
 
-# STDOUT-emitter fra analyze (én linje JSON). Ikke importer _init_logger her.
-from cli.analyze import emit_cli_json  # type: ignore
+
 
 # Rust-funksjon for kalibrering (valgfri, fail-safe import)
 try:

@@ -14,6 +14,9 @@ TRINN 3 (Sprint 6): Strukturerte JSON-logger
 
 from __future__ import annotations
 
+from cyclegraph.pipeline import persist_and_maybe_publish
+
+
 import argparse
 import csv
 import glob
@@ -333,8 +336,25 @@ def write_report(outdir: str, sid: str, report: Dict[str, Any], fmt: str):
             w.writerow(enriched)
 
 def write_history_copy(history_dir: str, report: Dict[str, Any]):
+    """
+    Skriver en historikkfil for rapporten (for revisjon/sporbarhet) og
+    kaller backend-hooken som persisterer session + (valgfri) publisering til Strava.
+    Hooken er no-op safe dersom aktivitet/PW mangler eller toggle/token er av.
+    """
     os.makedirs(history_dir, exist_ok=True)
+
+    # --- identitet + payload for backend ---------------------------------------
     sid = report.get("session_id") or "session"
+    session_payload = {
+        "session_id": sid,
+        # begge varianter støttes; hvis ingen finnes → no-op i hooken
+        "strava_activity_id": report.get("strava_activity_id") or report.get("activity_id"),
+        "precision_watt": report.get("precision_watt"),
+        "precision_watt_ci": report.get("precision_watt_ci"),
+    }
+    # ---------------------------------------------------------------------------
+
+    # Skriv historikk (best effort, uavhengig av backend-persist/publish)
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
     path = os.path.join(history_dir, f"{sid}_{date_str}.json")
     try:
@@ -342,6 +362,10 @@ def write_history_copy(history_dir: str, report: Dict[str, Any]):
             json.dump(report, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"ADVARSEL: Klarte ikke å skrive history-fil: {path} ({e})", file=sys.stderr)
+
+    # --- CycleGraph backend: persist + (valgfri) auto-publish til Strava --------
+    persist_and_maybe_publish(sid, session_payload)
+    # --------------------------------------------------------------------------- #
 
 
 def publish_to_strava_stub(report: Dict[str, Any], dry_run: bool):

@@ -1,0 +1,4 @@
+1.powershell $env:STRAVA_CLIENT_SECRET = "90845b55b04d073a1568465ac1e0ca55da269c82"
+2.powershell"SEC LEN=" + ($env:STRAVA_CLIENT_SECRET | ForEach-Object { $_.Length })
+3. Log inn på strava settings my aplication og I feltet Authorization Callback Domain, skriv localhost (kun domenet, ikke http:// og ikke port).
+

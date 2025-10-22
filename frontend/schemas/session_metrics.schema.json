@@ -21,6 +21,7 @@
           "minItems": 2,
           "maxItems": 2
         },
+
         "crr_used": { "type": ["number", "null"] },
         "CdA": { "type": ["number", "null"] },
         "reason": { "type": ["string", "null"] },
@@ -30,11 +31,17 @@
         "tire_width": { "type": ["number", "null"] },
         "tire_quality": { "type": ["string", "null"] },
 
-        "publish_state": { "type": ["string", "null"] },
+        "publish_state": {
+          "type": ["string", "null"],
+          "enum": ["pending", "done", "failed", null]
+        },
         "publish_hash": { "type": ["string", "null"] },
-        "published_to_strava": { "type": ["boolean", "null"] },
-        "publish_time": { "type": ["string", "null"], "format": "date-time" }
-      }
+        "publish_time": { "type": ["string", "null"], "format": "date-time" },
+        "publish_error": { "type": ["string", "null"] },
+
+        "published_to_strava": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": true
     },
     "profile": {
       "type": "object",
@@ -43,7 +50,9 @@
         "consent_version": { "type": ["string", "null"] },
         "consent_time": { "type": ["string", "null"], "format": "date-time" },
         "bike_name": { "type": ["string", "null"] }
-      }
+      },
+      "additionalProperties": true
     }
-  }
+  },
+  "additionalProperties": true
 }
