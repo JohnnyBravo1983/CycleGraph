@@ -9,6 +9,12 @@ import ErrorBanner from "../components/ErrorBanner";
 import AnalysisPanel from "../components/AnalysisPanel";
 
 import CalibrationGuide from "../components/CalibrationGuide";
+// ── Trinn 6 additions (lim inn under eksisterende imports) ───────────────────
+// ── Trinn 6 additions (lim inn under eksisterende imports) ───────────────────
+// Imports under skal taees i bruk i trinn 7 
+//import type { SessionMetricsDoc, SessionMetricsView } from "../types/SessionMetrics";
+//import { isSessionMetricsDoc, toSessionMetricsView } from "../types/SessionMetrics";
+//import { getSessionMetricsById } from "../mocks/sessionApi";
 // Lazy-load grafen (Performance boost)
 const TrendsChart = React.lazy(() => import("../components/TrendsChart"));
 
@@ -42,7 +48,7 @@ function useDevFetchApiRewrite() {
           u = asUrl.pathname + asUrl.search;
         }
       } catch {
-       // ignored 
+        // ignored
       }
 
       if (u.startsWith("/trends")) u = "/api" + u;
@@ -312,7 +318,13 @@ export default function SessionView() {
   );
 
   const nForT = useMemo(
-    () => Math.max(wattsArr?.length ?? 0, hrArr?.length ?? 0, ciLower?.length ?? 0, ciUpper?.length ?? 0),
+    () =>
+      Math.max(
+        wattsArr?.length ?? 0,
+        hrArr?.length ?? 0,
+        ciLower?.length ?? 0,
+        ciUpper?.length ?? 0
+      ),
     [wattsArr, hrArr, ciLower, ciUpper]
   );
 
@@ -367,7 +379,9 @@ export default function SessionView() {
   );
 
   const sessionId = useMemo(
-    () => (getStrKey(effectiveSession, "id") ?? getNestedStr(effectiveSession, "session", "id")) || id,
+    () =>
+      (getStrKey(effectiveSession, "id") ??
+        getNestedStr(effectiveSession, "session", "id")) || id,
     [effectiveSession, id]
   );
 
@@ -447,6 +461,34 @@ export default function SessionView() {
     setShowCalibration(false);
   }
 
+ /** Props-normalisering til SessionCard (unngå typekollisjon) */
+type SessionCardProps = React.ComponentProps<typeof SessionCard>;
+const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
+  if (!effectiveSession) return null;
+
+  // Lag en kopi og fjern precision_watt_ci uten å binde en ubrukt variabel
+  const base = { ...(effectiveSession as SessionReport) };
+  delete (base as unknown as { precision_watt_ci?: unknown }).precision_watt_ci;
+
+  const watts =
+    Array.isArray(effectiveSession.watts)
+      ? effectiveSession.watts
+      : typeof effectiveSession.watts === "number"
+      ? [effectiveSession.watts]
+      : null;
+
+  const sources = Array.isArray(effectiveSession.sources)
+    ? effectiveSession.sources
+    : undefined;
+
+  return {
+    ...base,
+    watts,
+    sources,
+  } as SessionCardProps["session"];
+}, [effectiveSession]);
+
+
   return (
     <div className="page">
       {/* Header */}
@@ -502,9 +544,9 @@ export default function SessionView() {
         </div>
       )}
 
-      {effectiveSession && (
+      {effectiveSession && sessionForCard && (
         <div className="grid gap-4">
-          <SessionCard session={effectiveSession} />
+          <SessionCard session={sessionForCard} />
 
           {showAnalysisPanel && <AnalysisPanel series={panelSeries} />}
 
@@ -568,7 +610,9 @@ export default function SessionView() {
         </div>
       )}
 
-      {!effectiveSession && !loadingNow && !hasError && <div className="card">Ingen data å vise.</div>}
+      {!effectiveSession && !loadingNow && !hasError && (
+        <div className="card">Ingen data å vise.</div>
+      )}
 
       <div className="mt-6 text-xs text-slate-400">
         Kilde:{" "}
