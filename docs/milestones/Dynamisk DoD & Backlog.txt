@@ -365,141 +365,178 @@ DoT + docs: ~2 t
 Trend-patch (BE + FE): ~3 t
 Sum: ≈ 11 t
 
-🆕 Dynamisk DoD – Sprint 14: Precision Watt E2E + Bike Setup
-Mål
-
-Fullføre Precision Watt som brukerstyrt feature fra beregning → lagring → (valgfri) Strava-publisering, med Bike Setup (type, vekt, dekk, kvalitet) og brukerprofil/kalibrering.
-PW skal beregnes automatisk etter hver importert/lagret økt og lagres i historikk.
-Bruker kan rekalibrere når som helst.
-Live API støtter økter opptil 4 timer.
-
-Omfang (leveranser)
+🆕 Dynamisk DoD — Sprint 14.5: Precision Watt E2E (Backend fullføring + verifikasjon)
+🎯 Mål
+Ferdigstille backend E2E for Precision Watt slik at alle fem øktene (ride1–5) kan analyseres med vær + profil, persisteres, og (valgfritt) publiseres til Strava – idempotent, robust og uten mock. Samtidig: profil/kalibrering i backend, auto-refresh av Strava-token, og støtte for økter opptil 5 timer.
+✅ Gjort i S14 (flyttet status)
+API oppe (127.0.0.1:5179), app.py laster .env (dotenv), debug-endepunkter finnes.
+Token-flyt reetablert (authorize → code → token).
+ride3 publisert med Precision Watt ≈ 225 W (Strava viste 198 W).
+Publish-pipeline kjører; toggles leses; ride1/2/4/5 publiserte kun Strava’s tall (manglende analyze).
+Hjelpeskript for start/publish/auth etablert.
+📦 Omfang (leveranser)
 Backend (Rust/Python)
-analyze_session() utvides: persisterer precision_watt, precision_watt_ci, cda, crr, reason + Bike-felter + profilfelter brukt i beregning.
-Værimport: ved analyse av økt hentes sanntids værdata (vindstyrke, vindretning, temperatur, trykk, lufttetthet) via vær-API.
-GPS-kobling: hvert sekund i økten kobles GPS-heading mot vindretning for å beregne relativ vindvinkel og faktisk motvind/medvind som inngår i Precision Watt-formelen.
-Crr-estimering fra sykkeltype, dekkbredde og dekk-kategori (Trening / Vanlig / Ritt) med vektet formel og avrunding.
-Total masse = ryttervekt + sykkelvekt i PW-beregning.
-Automatisk trigger etter import/lagring: Import → Analyze → Persist PW → (toggle aktiv) sett publish_state="pending".
-Publiserings-orchestrering (idempotent) med retry/backoff (429) og statusflagg.
-Live API: analyse og UI håndterer økter ≤ 4 timer.
-Frontend (React)
-Bike Setup i kalibreringsmodal (dropdowns + auto-defaults pr sykkeltype).
-Kalibrerings/onboarding: nye brukere promptes til kalibrering som standard; rekalibrering tilgjengelig i profil når som helst.
-Profil: rytter-egenvekt, Bike-navn (valgfritt), samtykke til databruk (påkrevd) m/tidsstempel og versjon.
-Toggle: “Publisér Precision Watt til Strava”.
-Visning: “PW beregnet ✓”, “Publisert på Strava ✓” / feilbanner; vis Crr brukt.
-Lagring / Observabilitet
-session_storage.py / persist: alle PW- og Bike-felter + publiseringsstatus + publish_time / publish_hash.
-CLI: cyclegraph sessions list (siste 5 økter med PW/publish-status).
+Værdata i analysen: analyze_session() henter vindstyrke/retning, temp, trykk → lufttetthet (ρ); kobler GPS-heading ↔ vindvinkel; brukes i PW-formelen.
+Profil + defaults: hvis profil mangler → bruk dokumenterte safe defaults (rider_weight, bike_type, bike_weight, tire_width, tire_quality). Når profil finnes → overstyr defaults.
+Profil/kalibrering i backend: lagre/laste profil (JSON/fil-DB), bruke verdiene i analyse (total masse + Crr avledet fra dekk-kvalitet/bredde).
+Sessions 1–5: kjør analyze for alle fem; persister:
+precision_watt, precision_watt_ci, cda, crr_used, reason, publish_state, publish_hash.
+Idempotent publish: publish_hash = sha256(activity_id | pw | ci) → hopp over duplikat.
+Auto-refresh Strava token: ved 401/utløp → bruk refresh_token, oppdater .env (access/refresh/expires_at), retry.
+Øktlengde: støtte ≤ 5 timer @ 1 Hz med timeout/chunk-guards.
+Publish-tekst: inkluder nøyaktig:
+Check out my full ride analysis at CycleGraph.app
+Lagring/Observabilitet
+Schema v0.7.3 (additivt): bike_type, bike_weight, tire_width, tire_quality, rider_weight, crr_used, precision_watt, precision_watt_ci, publish_state, publish_hash, published_to_strava, publish_time, consent_*.
 Metrikker: pw_publish_success_total, pw_publish_fail_total.
-UX / Produktkrav (Bike Setup & Kalibrering)
-Sykkeltype (dropdown): Road (default) / Gravel / Hybrid.
-Sykkelvekt (kg) (dropdown, heltall):
-Road 7–11 (default 9) | Gravel 9–13 (default 11) | Hybrid 11–16 (default 13)
-Dekkbredde (mm) (dropdown):
-Road 25–32 (default 28) | Gravel 35–45 (default 40) | Hybrid 40–50 (default 45)
+Logger: strukturert Import → Analyze → Persist → Publish (med tidsbruk/resultat).
+API (MÅ være i drift i S14.5)
+POST /api/sessions/:id/analyze
+POST /api/sessions/:id/publish
+GET /api/profile/get
+POST /api/profile/set ← brukes i S14.5 for å verifisere at profil påvirker beregning
+GET /api/health, GET /api/debug/token_present
+CLI/Script
+scripts/tools/start_api.ps1
+scripts/tools/publish_ride.ps1
+scripts/tools/strava_reauth.ps1
+🧪 DoD (sjekkliste)
+Funksjonelt
+ analyze_session() bruker vær (inkl. vindvinkel og ρ) i PW (ikke mock).
+ Profil påvirker beregningen: defaults ved fravær; profilverdier overstyrer defaults.
+ ride1–5: etter analyze har data/sessions/*.json PW + CI + CdA + Crr_used + reason (ikke bare Strava’s tall).
+ Publish idempotent (hash), 401→auto-refresh + retry, 429→backoff.
+ Støtter ≤ 5 timer datasett uten jank/feil.
+ Publish-kommentar inkluderer “Check out my full ride analysis at CycleGraph.app”.
+Observabilitet & persist
+ Schema v0.7.3 validerer (additivt, bakoverkompatibelt).
+ Logger viser hver fase + varighet; metrikker økes korrekt.
+Token & robusthet
+ refresh_token-flyt oppdaterer .env (access/refresh/expires_at).
+ /api/debug/token_present → ok:true under drift; publish tåler access-utløp.
+Profil-verifikasjon (S14.5-krav)
+ POST /api/profile/set med realistiske verdier før analyze.
+ Re-analyze ride1–5 → PW/Crr_used/CdA endrer seg konsistent ift. defaults.
+🧪 Akseptansekjøring (kommandoer)
+Start API (vindu A)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tools\start_api.ps1 -Port 5179
+Helse/token (vindu B)
+Invoke-RestMethod http://127.0.0.1:5179/api/health
+Invoke-RestMethod http://127.0.0.1:5179/api/debug/token_present
+Sett profil (påvirker masse/Crr)
 
-Dekk-kategori (enkelt forklart dropdown):
-🟢 Trening – slitesterke, litt tregere (+10 % Crr)
-⚪ Vanlig / Performance – balanse mellom fart og komfort (default)
-🏁 Ritt / Race – glatte konkurransedekk, lav rullemotstand (–7 %)
-Crr brukt: beregnes automatisk (vises read-only i UI) med tekst “Lav / Middels / Høy rullemotstand”.
-Profil / kalibrering
-Nye brukere: obligatorisk prompt for kalibrering/profil ved første innlogging/import.
-Rekalibrering når som helst via profilpanelet.
-Felter: rider_weight_kg (påkrevd), bike_type, bike_weight_kg, tire_width_mm, tire_quality, bike_name (valgfritt), consent_accepted, consent_version, consent_time.
-Default-logikk
-Bytte sykkeltype oppdaterer default-områder for vekt/dekk.
-Endringer forhåndsvises med live oppdatert “Crr brukt”.
-Strava-publisering
-Toggle i profil: “Publisér Precision Watt til Strava”.
-Første vellykkede publisering: grønt statusbanner.
-Tekniske regler
-Crr-baseline pr type: Road ≈ 0.0042, Gravel ≈ 0.0062, Hybrid ≈ 0.0068.
-Bredde-faktor: (28 / tire_width)^0.3
-Kvalitet-faktor: Trening 1.10, Performance 1.00, Race 0.93.
-Avrunding: 5 desimaler ved lagring i metrics.
-Idempotens-publisering: publish_hash = sha256(activity_id + pw + ci) → hopp over hvis identisk hash finnes.
-Publiseringsstatus: publish_state ∈ {none, pending, done, failed}.
-Feiltoleranse: 429 → eksponentiell backoff + WARN publish_retry; 401/403 (token) → failed + UI-banner “Koble Strava på nytt”.
-Live API varighet: UI/BE håndterer sesjoner opptil 4 timer @ 1 Hz uten jank; abort/timeout-guards på plass.
-Schema-bump (v0.7.3)
-Nye/utvidede felter i session_metrics og/eller profil: bike_type, bike_weight, tire_width, tire_quality, crr_used, rider_weight, bike_name, precision_watt, precision_watt_ci, publish_state, publish_hash, published_to_strava, publish_time, consent_accepted, consent_version, consent_time.
-Bakoverkompatibilitet: nye felter er additive; schema-validator aksepterer eldre data.
-Definition of Done (sjekkliste)
-Backend
+$body = @{
+  rider_weight_kg = 103
+  bike_weight_kg  = 9.5
+  bike_type       = "road"
+  tire_width_mm   = 28
+  tire_quality    = "gp5000"
+  bike_name       = "Canyon Endurace"
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -ContentType "application/json" `
+  -Uri http://127.0.0.1:5179/api/profile/set -Body $body
 
-✅ analyze_session() persisterer PW + CI + CdA/Crr/Reason og Bike/Profil-felter som brukt i beregning.
-✅ Henter sanntids værdata (vind, retning, temperatur, trykk) for hver økt.
-✅ Kobler GPS-heading mot vindretning for relativ vindvinkel og faktisk motvind/medvind i PW-formelen.
-✅ Automatisk trigger etter import/lagring beregner PW og lagrer uten manuell inngripen.
-✅ Publiserings-orchestrering → pending → done/failed (idempotent via hash).
-✅ Retry/backoff for 429; 401/403 setter failed og gir feilkode.
-✅ Live API støtter økter ≤ 4 timer.
-✅ CLI viser siste 5 økter med precision_watt, publish_state, publish_time.
 
-Frontend / UX
+Analyze alle 5
+1..5 | % { Invoke-RestMethod -Method Post "http://127.0.0.1:5179/api/sessions/ride$_/analyze" }
+Verifiser persist (eksempel ride3)
+Get-Content .\data\sessions\ride3.json -Raw | ConvertFrom-Json |
+  Select session_id, precision_watt, precision_watt_ci, crr_used, cda, reason, publish_state | Format-List
+Publish alle 5 (idempotent + riktig kommentar)
+1..5 | % { Invoke-RestMethod -Method Post "http://127.0.0.1:5179/api/sessions/ride$_/publish" }
+Forventning (profil-effekt):
+precision_watt skal endre seg vs. før profil; crr_used reflekterer dekk-kvalitet/bredde; vær (ρ/vindvinkel) påvirker PW.
+🔦 (Valgfritt) Tynn FE-smoke i S14.5 – for trygg overgang til S15
+ Frontend henter live /api/sessions/:id og viser PW/CI i SessionCards (VITE_USE_MOCK=false).
+ TrendsChart kaller /api/trends og håndterer tom respons uten crash.
+ Responsiv layout – enkel manuell sjekk (mobilbredde).
+(Full profil-UI, toggles og komplett FE-synlighet ligger i S15.)
+🧯 Troubleshooting (kort)
+has_token=False / mangler STRAVA_ACCESS_TOKEN → start server fra repo-rot, ha load_dotenv(override=True) øverst i app.py.
+404 etter authorize → ok ved manuell code (evt. legg /api/debug/oauth_capture).
+Port i bruk → netstat -ano | findstr :5179 → taskkill /PID <PID> /F.
+Tom publish-respons i PS5.1 → endpoint kan returnere 204; bruk publish_ride.ps1.
+from __future__ syntax error → må stå helt øverst i fila.
+📌 Commit/tag-forslag
+git add .
+git commit -m "S14.5: Backend PW E2E: weather+profile in analyze, schema v0.7.3 persist, idempotent publish w/ token auto-refresh, 5h guard, logs/metrics."
+git tag -a v0.14.5 -m "Sprint 14.5 E2E PW backend complete"git push --follow-tags
 
-✅ Onboarding prompt for kalibrering (kan utsettes, men krever samtykke).
-✅ Profil & rekalibrering når som helst.
-✅ Bike Setup dropdowns + live forhåndsvisning av Crr brukt.
-✅ Dekk-kategori forklart (Trening / Vanlig / Ritt) med ikon og tooltip.
-✅ PW-status etter import + Strava-publisering.
-✅ Strava-toggle lagres persist.
-✅ Tilgjengelighet (a11y): labels, fokus, tastatur.
+🧩 Sprint 15 — Frontend integrasjon + innholdsmigrering til cyclegraph.app
+🎯 Mål
+Koble frontend ←→ backend slik at bruker ser korrekte analyserte data (ikke mock) i Session Cards/Trend, og samtidig migrere landingssiden til cyclegraph.app (Vercel) – tospråklig, SEO/OG riktig, >90 Lighthouse.
+📦 Omfang (leveranser)
+Frontend (React/TS/Vite)
+Session Cards viser: PW, PW CI, CdA, crr_used, publish-status (done/failed/pending/none), publish_time, og Strava activity-link.
+Trend-visning (enkel): PW over tid for de siste N øktene (real data).
+Profil/kalibrering UI: dropdowns for bike_type, bike_weight_kg, tire_width_mm, tire_quality, felt for rider_weight_kg, bike_name; samtykke med versjon + tidsstempel.
+Toggle: “Publisér Precision Watt til Strava”.
+Lagring: POST/PUT til backend for profil; backend bruker dette ved neste analyze.
+Ingen mock: all visning leser ekte data fra API (/api/sessions/:id, /api/sessions/list, /api/profile/get).
+A11y: labels, fokus, tastatur.
+Migrering — cyclegraph.app (Vercel)
+Flytt alt fra landing/ inn i hovedrepo (f.eks. frontend/public eller frontend/app/landing).
+Konsolider i18n (NO/EN).
+Deploy med Vercel (main), DNS verifisert (root + www), favicon/OG/meta oppdatert, responsivt.
+Kjør Lighthouse og fiks >90 (SEO/Accessibility/Best Practices/Performance så langt det lar seg gjøre).
+Observabilitet
+Frontend feilhåndtering (UI-banner) for 401/403 (foreslå “Koble Strava på nytt”).
+Enkel “Activity log” i UI: siste analyze/publish med timestamp.
+🧪 DoD (sjekkliste)
+Funksjonelt
+ Session Cards viser verdier fra ekte analyse (PW, CI, CdA, Crr brukt, publish-status/tid).
+ Trend-graf henter ekte data (minst 5 økter).
+ Profil/kalibrering kan lagres, og ny analyze bruker verdiene (verifiser med re-analyze ride1–5 og se endring).
+ Publiseringstoggle kan settes i UI og respekteres i backend.
+Migrering
+ cyclegraph.app og www.cyclegraph.app viser ny landingsside fra main-repo.
+ NO/EN toggle fungerer; meta/OG/favicons riktig.
+ Lighthouse SEO/Acc > 90 (logg resultat i docs/deployment-log.md).
+Ingen mock
+ Alle API-kall går mot live endpoints. “Dummy”/mock slått av/ryddet.
+Akseptansekjøring
+ Åpne frontend (npm run dev) → Session Cards viser data for ride1–5.
+ Endre profil (f.eks. dekk-kategori) → re-analyze ride3 → PW endres konsistent.
+ Slå på publish-toggle i UI → publisering skjer ved neste analyze/publish, kommentar inkluderer “Check out my full ride analysis at CycleGraph.app”.
+ Lighthouse-rapport >90 (lagres i docs/deployment-log.md).
+🧽 (Frivillig) Sprint 16 — “Polish & Launch” (liten buffer)
+🎯 Mål
+Polish + release hygiene etter S15, kun for å beskytte kognitiv kapasitet.
+Omfang (light)
+Release notes + README oppdatert (Quick Start + Troubleshooting + Scripts).
+E2E-script: én kommando som kjører import→analyze→publish for et sett økter.
+Telemetry finpuss (labels, timing).
+Feiltekster i UI (oversatt + konsistente).
+Siste SEO (sitemap/robots, canonical).
+DoD
+ “Launch Playbook” ferdig i /docs/launch-playbook.md.
+ README Quick Start (dev) + brukerhjelp (kalibrering, publish).
+ Demo-brukerflyt testet (kalibrer → last opp → analyze → publish → se på web).
+ Alt grønt i CI.
+📌 Notater/Presiseringer fra innsikten din (og hvordan vi sjekker dem)
+Ride3 ble publisert med PW ≈ 225W (≠ Strava 198W).
+→ Vi kjører ride3/analyze på nytt med vær aktivert, og logger ut brukt crr_used, CdA, reason, precision_watt_ci.
+Værberegning var trolig ikke aktiv i den runden.
+→ Inngår i S14.5 DoD. Test: slå av/på vær via env-toggle (om du har), se effekt på PW.
+Defaults: må dokumenteres og matche UI-defaults senere (S15).
+→ S14.5: definér og bruk i backend. S15: bind til UI.
+Ride1/2/4/5 publiserte Strava-tall (ikke PW).
+→ S14.5: kjør analyze → PW for alle fem.
+Frontend skal lese alt fra API, ikke mock.
+→ Lagt i S15 + eksplisitt DoD “Ingen mock”.
+Profil/dropdowns + lagring + samtykke + kalibrering.
+→ Backend i S14.5 (verdier brukt i analyse). UI i S15.
+Øktlengde 5t → S14.5 (backend + test).
 
-Lagring / Observabilitet
-
-✅ Persist av alle nye felter.
-✅ Metrikker økes korrekt.
-✅ Strukturerte logger for import → analyze → persist → publish med varighet og resultat.
-
-Testing / CI
-
-✅ Unit: estimate_crr(), vær-håndtering, publiseringsmodul (mock-Strava), idempotens.
-✅ E2E: importert Strava-økt → PW lagres automatisk og publiseres ved toggle.
-✅ Schema v0.7.3 validerer.
-✅ Ytelse: 4-timers datasett @ 1 Hz består.
-✅ CI grønn (maturin + pytest + cargo + vitest).
-
-Dokumentasjon
-
-✅ Brukerdoc: Kalibrering & Bike Setup, Rekalibrering, Strava-publisering, værdata og vindmodell.
-✅ Dev-doc: Crr-formel, weather/GPS-integrasjon, schemafelt, publish-flow, ytelsesnotater.
-✅ Samtykke-tekst og lagring beskrevet.
-
-Ikke med (kan vurderes senere)
-
-Strava webhooks (for automatisk event-trigger).
-
-Merke-spesifikke dekkdatabaser (for omfattende til MVP).
-
-Estimat (uendret)
-
-Backend (persist + publish + værdata): 6–8 t
-Frontend (toggle + Bike Setup + status): 3–5 t
-Testing/CI: 3–4 t
-Docs & polish: 2 t
-Sum: 15–19 t
-
-Resultat ved “grønn DoD”
-
-Nye brukere kalibreres (prompt) og avgir samtykke.
-
-Økter opptil 4 timer importeres → PW beregnes og lagres automatisk med vær- og vinddata per sekund.
-
-(Valgfritt) publisering til Strava skjer automatisk når togglen er aktivert, idempotent og robust.
-
-Bike Setup-feltene er enkle, forståelige og realistiske (Trening / Vanlig / Ritt).
-
-✅ Oppsummering
-Sprint	Fokus	Estimat
-S13	QA + CI + Definition of Truth + Trend-patch	8–12 t
-S14	Precision Watt E2E + Bike Setup (Crr fra type/dekk/vekt)	15–19 t
-S15	Minisprint – i18n NO/EN + migrering til cyclegraph.app	5–8 t
-
-Låst plan. Når du committer denne frontlogen:
+Kommentar-tekst i Strava: “Check out my full ride analysis at CycleGraph.app”.
+→ S14.5 publish-format + S15 UI-toggle.
+🧯 Troubleshooting (kortversjon – ligger også i skriptene)
+has_token=False / Missing STRAVA_ACCESS_TOKEN → Server startet uten ny .env. Stopp, start fra repo-rot, load_dotenv(override=True) øverst i app.py.
+404 etter authorize → ok når du bruker manuell code. (Evt. legg /api/debug/oauth_capture i API.)
+Port i bruk → netstat -ano | findstr :5179 → taskkill /PID <PID> /F.
+Tom publish-respons i PS5.1 → endpoint kan returnere 204; bruk publish_ride.ps1 for tydelig output.
+from __future__ syntax error → må stå øverst i fila.
+Hvis du vil, kan jeg nå oppdatere publish-kommentaren (nøyaktig tekst), legge inn auto-refresh-snutten i publish.py/strava_auth.py, og gi deg en 1-kommando E2E som kjører alt for ride1–5 som siste steg i S14.5.
 
 git add .
 git commit -m "Lock S13–S15 frontlog: DoT, trends, PW E2E + Bike Setup, i18n migration"

@@ -1,0 +1,63 @@
+🧪 QUICK START (to vinduer)
+
+Vindu A (server):
+
+# Fra repo-roten
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tools\start_api.ps1 -Port 5179
+
+
+Vindu B (klient):
+
+# Publiser ride3 rett ut (viser respons)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tools\publish_ride.ps1 -SessionId ride3 -AnalyzeFirst
+
+
+Hvis token er utløpt/førstegang:
+
+# Åpner authorize-URL → lim inn code → oppdaterer .env automatisk
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tools\strava_reauth.ps1
+
+📄 HJELPEDOK: Start, analyse, publish + feilsøk
+1) Start API
+
+Anbefalt: scripts\tools\start_api.ps1 (nytt, bedre logging), eller din start-api-no-reload.ps1.
+
+Starter Uvicorn på ønsket port og viser full traceback hvis noe feiler.
+
+Test at det kjører:
+
+Invoke-RestMethod http://127.0.0.1:5179/api/health
+Invoke-RestMethod http://127.0.0.1:5179/api/debug/token_present
+
+
+Forvent ok:true på begge.
+
+2) Analyze (valgfritt) og Publish
+
+publish_ride.ps1 kan kjøre analyze først (flagget -AnalyzeFirst) og deretter publish.
+
+Viser HTTP-koder og JSON-body (PS 5.1-kompatibelt).
+
+Dumper også nøkkelfelt fra data/sessions/<id>.json.
+
+3) Token-håndtering (engang/utløp)
+
+strava_reauth.ps1 åpner Strava-authorize, du limer inn code fra URL, scriptet:
+
+bytter code → tokens
+
+oppdaterer .env (STRAVA_ACCESS_TOKEN, STRAVA_REFRESH_TOKEN, STRAVA_TOKEN_EXPIRES_AT)
+
+viser lokal utløpstid
+
+Hvor ofte? Access-token ≈ 6 timer. Refresh-token varer lenge. Kjør strava_reauth.ps1 når du får 401 eller du vil rotere tokens.
+
+🧯 VANLIGE FEIL → LØSNING
+Symptom	Årsak	Fiks
+{"detail":"Missing STRAVA_ACCESS_TOKEN"} / has_token=False	Server startet uten å lese ny .env	Stopp server (Ctrl+C), start fra repo-roten, sørg for load_dotenv(override=True) helt øverst i app.py.
+401 Unauthorized ved token-exchange	Bruker gammel/allerede brukt code eller feil client-verdier	Kjør strava_reauth.ps1 på nytt, lim inn fersk code, sjekk at STRAVA_CLIENT_ID/SECRET er riktige.
+404 etter “Authorize”	Mangler callback-rute, eller feil path	Det er OK når du bruker manuell code. (Evt. legg til /api/debug/oauth_capture i app.py om du vil unngå 404.)
+Port hopper til 5180 / “in use”	Noe lytter på 5179	`netstat -ano
+Tom respons i PowerShell	Endpoint returnerer 204 / body ikke skrevet	Bruk publish_ride.ps1 (viser alt) eller endre endpoint til å returnere JSON.
+PS7-parametre funker ikke	Du kjører Windows PowerShell 5.1	Scriptene under er PS 5.1-kompatible (ingen -StatusCodeVariable).
+SyntaxError: from __future__	Future-import ikke øverst	Flytt from __future__ import annotations helt øverst i app.py.
