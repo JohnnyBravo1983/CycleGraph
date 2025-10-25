@@ -25,11 +25,7 @@ impl RoundTo for f64 {
 /// - `tire_quality` i {"Trening", "Vanlig", "Ritt"} (ukjent → 1.0)
 pub fn estimate_crr(_bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> f64 {
     // Guard: veldig smal bredde gir urealistisk høy Crr – fall tilbake til 25 mm.
-    let w = if tire_width_mm < 20.0 {
-        25.0
-    } else {
-        tire_width_mm
-    };
+    let w = if tire_width_mm < 20.0 { 25.0 } else { tire_width_mm };
 
     let quality_factor = match tire_quality {
         "Trening" => 1.2,
@@ -194,4 +190,75 @@ pub fn compute_indoor_power(sample: &Sample, profile: &Profile) -> f64 {
     let p_roll = mass * G * crr * v;
 
     (p_aero + p_roll).max(0.0)
+}
+
+/* -------------------------------------------------------------------------
+   Nye komponent-beregninger (drag/rolling/climb) for tidsserier.
+   Dette er uavhengig av Sample/Weather og kan brukes i analyser/plots.
+   ------------------------------------------------------------------------- */
+
+/// Komponent-utskrift (W per sample).
+#[derive(Debug, Clone)]
+pub struct Components {
+    pub total: Vec<f64>,
+    pub drag: Vec<f64>,
+    pub rolling: Vec<f64>,
+    // optional: legg til climb, accel, drivetrain ved behov
+}
+
+/// Enkel gradientberegning fra høyde-serie.
+/// Antar 1s oppløsning og bruker lokal fart til å anslå ds = v*dt.
+/// Clamp for å unngå ekstreme verdier ved støy/stopp.
+fn gradient_from_alt(alt: &Vec<f64>, vel_len: usize, vel: &Vec<f64>) -> Vec<f64> {
+    let n = vel_len.min(alt.len());
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut grad = vec![0.0; n];
+    for i in 1..n {
+        let v_mid = 0.5 * (vel[i].max(0.0) + vel[i - 1].max(0.0));
+        let ds = (v_mid * 1.0).max(1e-3); // dt ≈ 1s
+        grad[i] = ((alt[i] - alt[i - 1]) / ds).clamp(-0.3, 0.3);
+    }
+    grad
+}
+
+/// Beregn komponentene gitt serier av fart (m/s) og høyde (m) + parametre.
+/// - `cda`, `crr`, `weight` (kg), `rho` (kg/m^3)
+pub fn compute_components(
+    vel: &Vec<f64>,
+    alt: &Vec<f64>,
+    cda: f64,
+    crr: f64,
+    weight: f64,
+    rho: f64,
+) -> Components {
+    let mass = weight; // kg
+    let n = vel.len();
+    let mut total = Vec::with_capacity(n);
+    let mut drag = Vec::with_capacity(n);
+    let mut rolling = Vec::with_capacity(n);
+
+    // gradient fra høyde + fart (for ds)
+    let grad = gradient_from_alt(alt, n, vel);
+
+    for i in 0..n {
+        let v = vel[i].max(0.0);
+        // Aero ~ v^3 med relativ lufthastighet ~ v (uten vind i denne rutinen)
+        let p_drag = 0.5 * rho * cda * v.powi(3);
+
+        // Rullemotstand ~ crr * m * g * v * cos(theta) ≈ v * (1 - θ²/2)
+        let p_roll = crr * mass * G * v * (1.0 - 0.5 * grad[i] * grad[i]);
+
+        // Gravitajon oppover (negativ settes til 0 for enkelhets skyld)
+        let p_climb = (mass * G * v * grad[i]).max(0.0);
+
+        let p = p_drag + p_roll + p_climb;
+
+        drag.push(if p_drag.is_finite() { p_drag.max(0.0) } else { 0.0 });
+        rolling.push(if p_roll.is_finite() { p_roll.max(0.0) } else { 0.0 });
+        total.push(if p.is_finite() { p.max(0.0) } else { 0.0 });
+    }
+
+    Components { total, drag, rolling }
 }

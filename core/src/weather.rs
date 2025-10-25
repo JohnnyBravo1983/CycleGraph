@@ -165,17 +165,21 @@ pub fn normalize_wind_angle_deg(angle: f64) -> f64 {
 /// `wind_dir_deg` er *hvor vinden kommer fra* (meteorologisk, 0..360).
 /// Relativ vinkel = vinkel mellom heading og vindens *retning mot* (wind_dir+180).
 pub fn wind_rel_angle_deg(wind_dir_deg: f64, heading_deg: f64) -> f64 {
-    let mut wd = wind_dir_deg.rem_euclid(360.0);
-    let mut hd = heading_deg.rem_euclid(360.0);
+    // Normaliser begge vinkler til [0, 360)
+    let hd = heading_deg.rem_euclid(360.0);
+    let wd = wind_dir_deg.rem_euclid(360.0);
 
-    // Vind blåser TIL (wd+180)
+    // Vind blåser FRA wd, altså TIL (wd + 180)
     let wind_towards = (wd + 180.0).rem_euclid(360.0);
 
+    // Absolutt vinkelavvik mellom retning du sykler og retning vinden blåser TIL
     let mut diff = (wind_towards - hd).abs();
     if diff > 180.0 {
         diff = 360.0 - diff;
     }
-    normalize_wind_angle_deg(diff) // 0..180
+
+    // Sikrer 0..180 i henhold til din helper
+    normalize_wind_angle_deg(diff)
 }
 
 /// Standard lufttetthet fra T (°C) og p (hPa): ρ = p / (R*T), R=287.05

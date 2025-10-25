@@ -18,11 +18,7 @@ pub struct WeatherContext {
 #[inline]
 pub fn weather_adjustment_factor(weather: &WeatherContext) -> f32 {
     let humidity_factor = if weather.humidity > 80.0 { 0.95 } else { 1.0 };
-    let temp_factor = if weather.temperature > 25.0 {
-        0.97
-    } else {
-        1.0
-    };
+    let temp_factor = if weather.temperature > 25.0 { 0.97 } else { 1.0 };
     let pressure_factor = if weather.pressure < 1000.0 { 0.98 } else { 1.0 };
     humidity_factor * temp_factor * pressure_factor
 }
@@ -90,6 +86,16 @@ fn mean(xs: &[f32]) -> f32 {
     }
 }
 
+/// 🧮 f64-varianter (for robust statistikk, NP i f64, m.m.)
+#[inline]
+pub fn mean_f64(xs: &[f64]) -> f64 {
+    if xs.is_empty() {
+        0.0
+    } else {
+        xs.iter().copied().sum::<f64>() / xs.len() as f64
+    }
+}
+
 fn median_f32(xs: &mut [f32]) -> f32 {
     if xs.is_empty() {
         return 0.0;
@@ -101,6 +107,66 @@ fn median_f32(xs: &mut [f32]) -> f32 {
     } else {
         0.5 * (xs[n / 2 - 1] + xs[n / 2])
     }
+}
+
+/// Median for f64 (parallell til f32-varianten)
+fn median_f64(xs: &mut [f64]) -> f64 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = xs.len();
+    if n % 2 == 1 {
+        xs[n / 2]
+    } else {
+        0.5 * (xs[n / 2 - 1] + xs[n / 2])
+    }
+}
+
+/// Robust skala basert på MAD (median absolute deviation).
+/// Skaleres med 1.4826 (~konvertering til σ for normalfordeling).
+/// Merk: dette er robust "std-dev"; hvis du trenger "CI of mean", del på sqrt(N) der du bruker den.
+pub fn robust_ci(xs: &[f64]) -> f64 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+    let mut tmp = xs.to_vec();
+    let med = median_f64(&mut tmp);
+    let mut dev: Vec<f64> = xs.iter().map(|x| (x - med).abs()).collect();
+    let mad = median_f64(&mut dev);
+    1.4826 * mad
+}
+
+// ───────── Robust CI for f64 (alternativ implementasjon) ─────────
+pub fn robust_ci_f64(xs: &[f64]) -> f64 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+
+    // Beregn median
+    let mut sorted = xs.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = sorted.len() / 2;
+    let median = if sorted.len() % 2 == 0 {
+        (sorted[mid - 1] + sorted[mid]) / 2.0
+    } else {
+        sorted[mid]
+    };
+
+    // Beregn avvik fra median
+    let mut diffs: Vec<f64> = xs.iter().map(|&x| (x - median).abs()).collect();
+    diffs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Median Absolute Deviation (MAD)
+    let mid = diffs.len() / 2;
+    let mad = if diffs.len() % 2 == 0 {
+        (diffs[mid - 1] + diffs[mid]) / 2.0
+    } else {
+        diffs[mid]
+    };
+
+    // Robust CI ≈ 1.4826 × MAD
+    mad * 1.4826
 }
 
 #[inline]
@@ -223,7 +289,7 @@ pub fn pa_hr(hr: &[f32], power: &[f32], _hz: f32) -> f32 {
 
 pub fn w_per_beat(power: &[f32], hr: &[f32]) -> f32 {
     if power.is_empty() || hr.is_empty() {
-        return 0.0;
+        return 0.0; // ← Fix: tidlig retur
     }
 
     let avg_p = avg_power(power);
@@ -249,7 +315,7 @@ pub fn precision_watt(power: &[f32], hz: f32) -> f32 {
     for i in 0..power.len() {
         sum += power[i] as f64;
         if i >= window {
-            sum -= power[i - window] as f64;
+            sum -= power[i - window] as f64; // Fix: endret 'p' til 'power'
         }
         let avg = if i + 1 >= window {
             sum / window as f64
@@ -421,5 +487,32 @@ mod tests {
         let pw = precision_watt(&p, 1.0);
         assert!(pw.is_finite() && pw > 0.0);
         assert!(pw < 5.0);
+    }
+
+    #[test]
+    fn test_mean_f64_and_robust_ci() {
+        let xs: Vec<f64> = vec![1.0, 2.0, 2.0, 100.0]; // outlier
+        let m = mean_f64(&xs);
+        assert!(m.is_finite() && m > 0.0);
+
+        let ci = robust_ci(&xs);
+        // Robust skala skal ikke eksplodere pga outlier
+        assert!(ci.is_finite() && ci > 0.0);
+        // En enkel sanity: robust_ci bør være mye mindre enn avviket til outlieren
+        assert!(ci < 50.0);
+    }
+
+    #[test]
+    fn test_robust_ci_empty() {
+        let xs: [f64; 0] = [];
+        assert_eq!(robust_ci(&xs), 0.0);
+    }
+
+    #[test]
+    fn test_robust_ci_f64_matches() {
+        let xs = [1.0_f64, 2.0, 2.0, 100.0];
+        let a = robust_ci(&xs);
+        let b = robust_ci_f64(&xs);
+        assert!((a - b).abs() < 1e-12);
     }
 }

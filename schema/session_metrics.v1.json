@@ -16,14 +16,21 @@
     "bike_weight": { "type": "number", "minimum": 0 },
     "tire_width": { "type": "number", "minimum": 10 },
     "tire_quality": { "type": "string" },
-    "crr_used": { "type": "number", "minimum": 0 },
+    "crr_used": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Effektivt Crr brukt i beregningen for denne økten (kan avvike fra profile.Crr dersom system justerer)."
+    },
     "rider_weight": { "type": "number", "minimum": 0 },
     "bike_name": { "type": "string" },
 
     "precision_watt": { "type": "number" },
     "precision_watt_ci": { "type": "number", "minimum": 0 },
 
-    "weather_applied": { "type": "boolean" },
+    "weather_applied": {
+      "type": "boolean",
+      "description": "Om værdata er brukt i beregningen (true når Trinn 4 er aktivt); skal vises i output."
+    },
     "wind_angle_deg": { "type": "number", "minimum": 0, "maximum": 180 },
     "air_density_kg_per_m3": { "type": "number", "minimum": 0.9, "maximum": 1.5 },
 
@@ -35,6 +42,42 @@
     "publish_hash": { "type": "string" },
     "published_to_strava": { "type": "boolean", "default": false },
     "publish_time": { "type": "string", "format": "date-time" },
+
+    "profile": {
+      "type": "object",
+      "description": "Bruker-/øktspesifikk profil (inngangsverdier) for fysikkparametre. Systemet kan bruke defaults dersom felt mangler. Skal persisteres i output.",
+      "additionalProperties": false,
+      "properties": {
+        "CdA": {
+          "type": "number",
+          "minimum": 0.15,
+          "maximum": 0.6,
+          "default": 0.28,
+          "description": "Frontalt areal * drag-koeffisient (m^2). Brukes i aero-leddet: 0.5 * rho * v_rel^2 * CdA."
+        },
+        "Crr": {
+          "type": "number",
+          "minimum": 0.002,
+          "maximum": 0.02,
+          "default": 0.004,
+          "description": "Rullemotstandskoeffisient (typisk 0.003–0.006 landevei)."
+        },
+        "weight_kg": {
+          "type": "number",
+          "minimum": 35,
+          "maximum": 150,
+          "default": 78.0,
+          "description": "Systemvekt i kg (rytter + sykkel)."
+        },
+        "device": {
+          "type": "string",
+          "enum": ["strava", "garmin", "zwift", "unknown"],
+          "default": "strava",
+          "description": "Kilde for øktdata/metrikker."
+        }
+      },
+      "required": []
+    },
 
     "schema_version": {
       "type": "string",

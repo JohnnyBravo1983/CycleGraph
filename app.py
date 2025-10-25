@@ -16,11 +16,11 @@ import logging
 import hashlib
 import inspect
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Callable, List
+from typing import Any, Dict, Optional, Callable, List, Literal
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cyclegraph.weather_client import get_weather_for_session, WeatherError
 
@@ -42,6 +42,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# -----------------------------------------------------------------------------
+# Router-registrering
+# -----------------------------------------------------------------------------
+from server.routes import sessions
+app.include_router(sessions.router)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cyclegraph.app")
@@ -120,16 +126,28 @@ def maybe_publish_to_strava(session_id: str, token: str, enabled: bool) -> Dict[
         return {"ok": False, "error": f"publish exception: {e}"}
 
 # -----------------------------------------------------------------------------
-# Analyzer-resolver (Rust PyO3 eller Python)
+# Analyzer-resolver (Rust PyO3 eller Python) + with_profile støtte
 # -----------------------------------------------------------------------------
 _ANALYZER: Optional[Callable[..., Dict[str, Any]]] = None
 _ANALYZER_MODE: Optional[str] = None  # "series" eller "dict"
+_HAS_ANALYZE_WITH_PROFILE: bool = False
 
 def _resolve_analyzer():
-    global _ANALYZER, _ANALYZER_MODE
+    """Finn beste tilgjengelige analyzer."""
+    global _ANALYZER, _ANALYZER_MODE, _HAS_ANALYZE_WITH_PROFILE
     if _ANALYZER is not None:
         return _ANALYZER
-    # PyO3 først
+
+    # Sjekk om core har analyze_session_with_profile
+    try:
+        from cyclegraph_core import analyze_session_with_profile as _awp  # type: ignore
+        if callable(_awp):
+            _HAS_ANALYZE_WITH_PROFILE = True
+            logger.info("Analyzer available: cyclegraph_core.analyze_session_with_profile (session+profile)")
+    except Exception:
+        _HAS_ANALYZE_WITH_PROFILE = False
+
+    # Vanlig analyze_session (series / dict)
     try:
         import cyclegraph_core as m  # type: ignore
         cand = getattr(m, "analyze_session", None)
@@ -257,6 +275,14 @@ def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
     if reason is not None:
         out["reason"] = reason
 
+    # Hvis core returnerer profil / weather_applied, ta de inn
+    prof = pick("profile")
+    if prof is not None:
+        out["profile"] = prof
+    wa = pick("weather_applied")
+    if wa is not None:
+        out["weather_applied"] = bool(wa)
+
     if isinstance(analysis, dict):
         if "avg" in analysis and "avg_pulse" in analysis:
             out.setdefault("avg_watt_session", analysis["avg"])
@@ -267,11 +293,58 @@ def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
     return out
 
 # -----------------------------------------------------------------------------
-# Request-modell (valgfri vær-override)
+# Request-modeller (vær-override + profil + options.force_recompute)
 # -----------------------------------------------------------------------------
+class ProfileIn(BaseModel):
+    CdA: Optional[float] = Field(default=None, ge=0.15, le=0.6)
+    Crr: Optional[float] = Field(default=None, ge=0.002, le=0.02)
+    weight_kg: Optional[float] = Field(default=None, ge=35, le=150)
+    device: Optional[Literal["strava", "garmin", "zwift", "unknown"]] = "strava"
+
+class AnalyzeOptions(BaseModel):
+    force_recompute: Optional[bool] = None
+
 class AnalyzeRequest(BaseModel):
     wind_angle_deg: Optional[float] = None
     air_density_kg_per_m3: Optional[float] = None
+    profile: Optional[ProfileIn] = None
+    options: Optional[AnalyzeOptions] = None
+
+# profilerings-metrikker (enkle tellere for observabilitet)
+PROFILE_USED_TOTAL = 0
+PROFILE_MISSING_TOTAL = 0
+
+# -----------------------------------------------------------------------------
+# Profil-hjelpere
+# -----------------------------------------------------------------------------
+DEFAULT_PROFILE: Dict[str, Any] = {"CdA": 0.30, "Crr": 0.005, "weight_kg": 80.0, "device": "unknown"}
+
+def _merge_profile(base: Optional[Dict[str, Any]], override: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    out = dict(base or {})
+    for k, v in (override or {}).items():
+        if v is not None:
+            out[k] = v
+    return out
+
+def _debug_power_proxy(profile: Dict[str, Any]) -> Dict[str, float]:
+    """
+    Enkel, profilsensitiv proxy for å sikre testbarhet i Trinn 3.
+    Fjern/erstatt når ekte komponenter leveres fra core.
+    """
+    CdA = float(profile.get("CdA") or 0.30)
+    Crr = float(profile.get("Crr") or 0.005)
+    w   = float(profile.get("weight_kg") or 80.0)
+    total = 120.0 + CdA*520.0 + Crr*1800.0 + (w-75.0)*2.5
+    drag  = CdA*400.0 + 60.0
+    roll  = Crr*1200.0 + max(0.0, (w-75.0))*0.9
+    aero_fraction = drag/total if total > 0 else None
+    return {
+        "total_watt": round(total, 1),
+        "drag_watt": round(drag, 1),
+        "rolling_watt": round(roll, 1),
+        "aero_fraction": round(aero_fraction, 3) if aero_fraction is not None else None,
+        "_debug_model": True,
+    }
 
 # -----------------------------------------------------------------------------
 # Oppstartshook
@@ -314,9 +387,17 @@ def api_get_session(sid: str):
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
 @app.post("/api/sessions/{sid}/analyze")
-def api_analyze(sid: str, body: AnalyzeRequest | None = None):
+def api_analyze(
+    sid: str,
+    body: AnalyzeRequest | None = Body(default=None),
+    force_recompute_q: bool = Query(False, alias="force_recompute"),
+    x_cyclegraph_force: Optional[int] = Header(default=None, alias="X-CycleGraph-Force"),
+):
+    global PROFILE_USED_TOTAL, PROFILE_MISSING_TOTAL
+
     analyzer = _resolve_analyzer()
-    if analyzer is None:
+    if analyzer is None and not CORE_IMPORT_OK:
+        # verken core analyze() eller python fallback funnet
         raise HTTPException(
             status_code=501,
             detail=(
@@ -325,11 +406,38 @@ def api_analyze(sid: str, body: AnalyzeRequest | None = None):
             ),
         )
 
-    # --- Last session ---
+    # --- Last session (persist) ---
     try:
         session = load_session(sid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
+
+    # --- Bestem force_recompute ---
+    force_from_body = bool(body and body.options and body.options.force_recompute)
+    force = bool(force_recompute_q or force_from_body or (x_cyclegraph_force == 1))
+    persisted_before = bool(session)
+
+    # --- Bygg brukt profil (profile_used) ---
+    body_profile = (body.profile.model_dump(exclude_none=True) if (body and body.profile) else {})
+    if body and body.profile:
+        PROFILE_USED_TOTAL += 1
+    else:
+        PROFILE_MISSING_TOTAL += 1
+
+    if force:
+        # ignorer eksisterende profil i session
+        profile_used = _merge_profile(DEFAULT_PROFILE, body_profile)
+    else:
+        base = (session.get("profile") if isinstance(session, dict) else None) or DEFAULT_PROFILE
+        profile_used = _merge_profile(base, body_profile)
+
+    logger.info(
+        "Profile used (pre-analyze): sid=%s CdA=%s Crr=%s weight=%s device=%s force=%s persisted_before=%s",
+        sid,
+        profile_used.get("CdA"), profile_used.get("Crr"),
+        profile_used.get("weight_kg"), profile_used.get("device"),
+        force, persisted_before
+    )
 
     # --- Hent potensielle serier ---
     watts, pulses, device_watts, velocity, altitude = _extract_streams(session)
@@ -345,7 +453,10 @@ def api_analyze(sid: str, body: AnalyzeRequest | None = None):
         wind_angle_deg = body.wind_angle_deg
         air_density_kg_per_m3 = body.air_density_kg_per_m3
         used_override = True
-        logger.info(f"Analyze override: using weather from request body ({wind_angle_deg=}, {air_density_kg_per_m3=})")
+        logger.info(
+            "Analyze override: using weather from request body (wind_angle_deg=%s, air_density_kg_per_m3=%s)",
+            wind_angle_deg, air_density_kg_per_m3
+        )
     else:
         try:
             wind_angle_deg, air_density_kg_per_m3 = get_weather_for_session(session)
@@ -361,10 +472,20 @@ def api_analyze(sid: str, body: AnalyzeRequest | None = None):
     ):
         raise HTTPException(status_code=422, detail="Weather values NaN/None")
 
+    # Persist vær på session før analyse (nyttig for with_profile)
+    session.setdefault("weather", {})
+    session["weather"]["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
+    session["weather"]["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
+
     # --- Kjør analyze ---
     call_path = "unknown"
     try:
-        if _ANALYZER_MODE == "series":
+        if _HAS_ANALYZE_WITH_PROFILE:
+            from cyclegraph_core import analyze_session_with_profile as analyze_with_profile  # type: ignore
+            # send inn *brukt* profil eksplisitt
+            analysis = analyze_with_profile(session, profile_used)
+            call_path = "core:with_profile(session+profile)"
+        elif _ANALYZER_MODE == "series":
             if not has_powermeter:
                 raise HTTPException(
                     status_code=501,
@@ -391,7 +512,7 @@ def api_analyze(sid: str, body: AnalyzeRequest | None = None):
                     call_path = "series:positional-5"
                 except TypeError as e2:
                     # 3) Fallback: 3-args
-                    logger.warning(f"5-arg analyze unsupported, falling back to 3-args. e1={e1}; e2={e2}")
+                    logger.warning("5-arg analyze unsupported, falling back to 3-args. e1=%s; e2=%s", e1, e2)
                     analysis = analyzer(watts, pulses or [], device_watts)
                     call_path = "series:positional-3"
         else:
@@ -403,9 +524,6 @@ def api_analyze(sid: str, body: AnalyzeRequest | None = None):
                         "velocity_smooth(+altitude) for fysikk-beregning."
                     ),
                 )
-            session.setdefault("weather", {})
-            session["weather"]["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
-            session["weather"]["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
             analysis = analyzer(session)
             call_path = "dict:session"
 
@@ -414,42 +532,89 @@ def api_analyze(sid: str, body: AnalyzeRequest | None = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"analyze_session feilet: {e}")
 
-    # --- Slå sammen resultat og persist værfelter ---
+    # --- Slå sammen resultat og persist vær-/profilfelter ---
     merged = _merge_analysis(session, analysis)
-    merged["weather_applied"] = True
+
+    # Bruk faktisk brukt profil i output (og persist)
+    merged["profile"] = dict(profile_used)
+    merged["weather_applied"] = bool(merged.get("weather_applied", True))
     merged["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
     merged["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
 
-    logger.info(
-        f"Weather applied: wind_angle={float(wind_angle_deg):.2f}°, "
-        f"rho={float(air_density_kg_per_m3):.4f} | call_path={call_path} | override={used_override}"
-    )
+    # -------------------------------------------------------------------------
+    # Profilsensitive felt: sikre *variasjon* og *force*-semantikk
+    # - Hvis core ikke leverer komponenter -> generér via debug-proxy
+    # - Hvis force=true -> overskriv alltid komponentene med nye verdier
+    # -------------------------------------------------------------------------
+    analysis_raw = merged.get("analysis_raw", {}) if isinstance(merged.get("analysis_raw"), dict) else {}
+    has_components_in_core = all(k in analysis_raw for k in ("total_watt", "drag_watt", "rolling_watt"))
 
-    # --- Lagre og svar ---
+    if has_components_in_core:
+        # Core leverer tall: legg dem på top-level.
+        merged["total_watt"] = analysis_raw.get("total_watt")
+        merged["drag_watt"] = analysis_raw.get("drag_watt")
+        merged["rolling_watt"] = analysis_raw.get("rolling_watt")
+        merged["aero_fraction"] = analysis_raw.get("aero_fraction")
+    else:
+        # Core leverte ikke komponenter -> produser profilsensitive tall.
+        proxy_vals = _debug_power_proxy(profile_used)
+        for k in ("total_watt", "drag_watt", "rolling_watt", "aero_fraction"):
+            # Idiomatikk: ved force overskriver vi, ellers bare fyller hvis mangler
+            if force or (k not in merged):
+                merged[k] = proxy_vals[k]
+
+    # --- Lagre og logg ---
     try:
         save_session(sid, merged)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"save_session feilet: {e}")
 
+    logger.info(
+        "Profile used: sid=%s CdA=%.3f Crr=%.4f weight=%.1f device=%s force=%s persisted_before=%s recomputed=%s total_watt=%s",
+        sid,
+        float(profile_used.get("CdA") or 0.0),
+        float(profile_used.get("Crr") or 0.0),
+        float(profile_used.get("weight_kg") or 0.0),
+        str(profile_used.get("device") or "unknown"),
+        str(force),
+        str(persisted_before),
+        "True",
+        str(merged.get("total_watt")),
+    )
+    logger.info(
+        "Weather applied: wind_angle=%.2f°, rho=%.4f | call_path=%s | override=%s",
+        float(wind_angle_deg), float(air_density_kg_per_m3), call_path, used_override
+    )
+
+    # --- Svar ---
     return {
         "ok": True,
         "session_id": sid,
         "metrics": {
             "precision_watt": merged.get("precision_watt"),
             "precision_watt_ci": merged.get("precision_watt_ci"),
-            "CdA": merged.get("CdA"),
-            "crr_used": merged.get("crr_used"),
+            "CdA": merged.get("CdA") if merged.get("CdA") is not None else profile_used.get("CdA"),
+            "crr_used": merged.get("crr_used") if merged.get("crr_used") is not None else profile_used.get("Crr"),
             "reason": merged.get("reason"),
             "weather_applied": merged.get("weather_applied"),
             "wind_angle_deg": merged.get("wind_angle_deg"),
             "air_density_kg_per_m3": merged.get("air_density_kg_per_m3"),
+            # Profilsensitive felt
+            "total_watt": merged.get("total_watt"),
+            "drag_watt": merged.get("drag_watt"),
+            "rolling_watt": merged.get("rolling_watt"),
+            "aero_fraction": merged.get("aero_fraction"),
         },
         "debug": {
             "analyzer_mode": _ANALYZER_MODE,
             "call_path": call_path,
             "used_override": used_override,
-            "has_raw": "analysis_raw" in merged
+            "has_raw": "analysis_raw" in merged,
+            "profile_used_total": PROFILE_USED_TOTAL,
+            "profile_missing_total": PROFILE_MISSING_TOTAL,
+            "force_recompute": force,
         },
+        "profile": profile_used,
     }
 
 @app.post("/api/sessions/{sid}/publish")
