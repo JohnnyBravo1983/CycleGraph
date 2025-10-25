@@ -12,6 +12,7 @@ pub mod weather;
 pub mod weather_api;
 
 // ───────── Re-exports (beholdt) ─────────
+use crate::weather::{normalize_rho, normalize_wind_angle_deg};
 pub use crate::calibration::{fit_cda_crr, CalibrationResult};
 pub use crate::metrics::{compute_np, w_per_beat};
 pub use crate::models::{Profile, Sample, Weather};
@@ -40,14 +41,24 @@ pub fn compute_power_with_wind_json(
 }
 
 // ───────── Rust-only analyze ─────────
-pub fn analyze_session_rust(
+//
+// Intern kjerne som *faktisk* bruker værverdier (rho/angle) i en enkel aero-heuristikk.
+// Brukes både av wrapperen `analyze_session_rust` (bakoverkomp) og av PyO3-funksjonen.
+fn analyze_session_core(
     watts: Vec<f64>,
     pulses: Vec<f64>,
     device_watts: Option<bool>,
+    wind_angle_deg: Option<f64>,
+    air_density_kg_per_m3: Option<f64>,
 ) -> Result<serde_json::Value, String> {
     if pulses.is_empty() || (!watts.is_empty() && pulses.len() != watts.len()) {
         return Err("Watt og puls må ha samme lengde (dersom watt er tilstede) og puls-listen kan ikke være tom.".to_string());
     }
+
+    // Normaliser værverdier med trygge defaults (MVP)
+    let angle_deg = normalize_wind_angle_deg(wind_angle_deg.unwrap_or(30.0)); // 0..180
+    let rho = normalize_rho(air_density_kg_per_m3.unwrap_or(1.225));          // ~[0.9..1.5]
+    let weather_applied = true;
 
     let no_power_stream = watts.is_empty();
     let device_watts_false = device_watts == Some(false);
@@ -55,6 +66,8 @@ pub fn analyze_session_rust(
     if no_power_stream || device_watts_false {
         let reason = if no_power_stream { "no_power_stream" } else { "device_watts_false" };
         let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+
+        // HR-only: Behold kontrakt, men inkluder værfelt for observabilitet
         return Ok(json!({
             "mode": "hr_only",
             "no_power_reason": reason,
@@ -65,20 +78,38 @@ pub fn analyze_session_rust(
             "cda": 0.30,
             "crr": 0.005,
             "mae": 0.0,
-            "reason": "hr_only_mode"
+            "reason": "hr_only_mode",
+            "weather_applied": weather_applied,
+            "wind_angle_deg": angle_deg,
+            "air_density_kg_per_m3": rho,
+            "precision_watt": 0.0,
+            "precision_watt_ci": 0.0
         }));
     }
 
-    let avg_watt = watts.iter().sum::<f64>() / watts.len() as f64;
-    let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+    // Baseline (robust gjennomsnitt)
+    let avg_watt = watts.iter().copied().sum::<f64>() / watts.len() as f64;
+    let avg_pulse = pulses.iter().copied().sum::<f64>() / pulses.len() as f64;
     let np = compute_np(&watts);
     let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
     let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
 
+    // (Placeholder til kalibrering kobles inn)
     let calibration = CalibrationResult {
         cda: 0.30, crr: 0.005, mae: 0.0, calibrated: false,
         reason: Some("calibration_context_missing".to_string()),
     };
+
+    // ── Weather-influenced PW (MVP-heuristikk) ───────────────────────────────
+    // Aero-andel skaleres med rho/1.225 og vinkel (0.5→1.0 fra medvind→motvind).
+    let aero_frac = 0.60_f64;                          // konservativ aero-andel
+    let angle_factor = 1.0 + 0.5 * (angle_deg / 180.0); // 0°=1.0, 90°=1.25, 180°=1.5
+    let non_aero = (1.0 - aero_frac) * avg_watt;       // rulling/gravitasjon/drivverk
+    let aero_scaled = aero_frac * avg_watt * (rho / 1.225) * angle_factor;
+    let pw_adjusted = non_aero + aero_scaled;
+
+    // Enkel CI inntil faktisk usikkerhetsmodell kobles inn
+    let precision_ci = (avg_watt * 0.055).abs();
 
     Ok(json!({
         "mode": "normal",
@@ -92,11 +123,27 @@ pub fn analyze_session_rust(
         "cda": calibration.cda,
         "crr": calibration.crr,
         "mae": calibration.mae,
-        "reason": calibration.reason.unwrap_or_default()
+        "reason": calibration.reason.unwrap_or_default(),
+        // Weather observability
+        "weather_applied": weather_applied,
+        "wind_angle_deg": angle_deg,
+        "air_density_kg_per_m3": rho,
+        // DoD: faktisk påvirket av vær
+        "precision_watt": pw_adjusted,
+        "precision_watt_ci": precision_ci
     }))
 }
 
-// Eksponer Rust-funksjonen som public analyze_session (for bakoverkomp.)
+// Bakoverkompatibel public wrapper (3 parametre)
+pub fn analyze_session_rust(
+    watts: Vec<f64>,
+    pulses: Vec<f64>,
+    device_watts: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    analyze_session_core(watts, pulses, device_watts, None, None)
+}
+
+// Eksponer wrapperen som public analyze_session (for bakoverkomp.)
 pub use self::analyze_session_rust as analyze_session;
 
 // ───────── PyO3 seksjon (kun når feature=python) ─────────
@@ -104,7 +151,6 @@ pub use self::analyze_session_rust as analyze_session;
 mod pybridge {
     use super::*;
     use pyo3::prelude::*;
-    use pyo3::wrap_pyfunction;
 
     #[pyfunction]
     pub fn calculate_efficiency_series(
@@ -140,20 +186,30 @@ mod pybridge {
         Ok((avg_eff, session_status, per_point_eff, per_point_status))
     }
 
-    #[pyfunction(name = "analyze_session")]
-    pub fn analyze_session_py(
-        py: Python<'_>,
-        watts: Vec<f64>,
-        pulses: Vec<f64>,
-        device_watts: Option<bool>,
-    ) -> PyResult<Py<PyAny>> {
-        let result = super::analyze_session_rust(watts, pulses, device_watts)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
-        let json_str = result.to_string();
+    // Utvidet analyze_session for Python (uten Python<'_>-arg i signaturen)
+    // - kompatibel med gamle kall (3 args)
+    // - støtter valgfrie værparametre (wind_angle_deg, air_density_kg_per_m3)
+    #[pyfunction(name = "analyze_session", signature = (
+    watts, pulses, device_watts, wind_angle_deg=None, air_density_kg_per_m3=None
+))]
+pub fn analyze_session_py(
+    watts: Vec<f64>,
+    pulses: Vec<f64>,
+    device_watts: Option<bool>,
+    wind_angle_deg: Option<f64>,
+    air_density_kg_per_m3: Option<f64>,
+) -> PyResult<Py<PyAny>> {
+    let result = super::analyze_session_core(
+        watts, pulses, device_watts, wind_angle_deg, air_density_kg_per_m3
+    ).map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
+
+    let json_str = result.to_string();
+    pyo3::Python::with_gil(|py| {
         let json_mod = pyo3::types::PyModule::import(py, "json")?;
         let py_obj = json_mod.getattr("loads")?.call1((json_str,))?;
         Ok(py_obj.into_py(py))
-    }
+    })
+}
 
     #[pyclass]
     #[derive(Debug, Clone)]
@@ -289,33 +345,36 @@ mod pybridge {
         })
     }
 
-    #[pyfunction(name = "compute_power_with_wind_json")]
-    pub fn compute_power_with_wind_json(
-        samples_json: &str,
-        profile_json: &str,
-        weather_json: &str,
-    ) -> PyResult<String> {
-        use pyo3::exceptions::PyValueError;
+ #[pyfunction(name = "compute_power_with_wind_json")]
+pub fn compute_power_with_wind_json(
+    samples_json: &str,
+    profile_json: &str,
+    weather_json: &str,
+) -> PyResult<String> {
+    use pyo3::exceptions::PyValueError;
 
-        let samples: Vec<Sample> = serde_json::from_str(samples_json)
-            .map_err(|e| PyValueError::new_err(format!("samples parse error: {e}")))?;
-        let profile: Profile = serde_json::from_str(profile_json)
-            .map_err(|e| PyValueError::new_err(format!("profile parse error: {e}")))?;
-        let weather: Weather = serde_json::from_str(weather_json)
-            .map_err(|e| PyValueError::new_err(format!("weather parse error: {e}")))?;
+    // Riktig type: Vec<Sample>
+    let samples: Vec<Sample> = serde_json::from_str(samples_json)
+        .map_err(|e| PyValueError::new_err(format!("samples parse error: {e}")))?;
 
-        let out = physics::compute_power_with_wind(&samples, &profile, &weather);
-        let s = serde_json::to_string(&json!({
-            "watts": out.power,
-            "wind_rel": out.wind_rel,
-            "v_rel": out.v_rel,
-        }))
-        .map_err(|e| PyValueError::new_err(format!("serialize error: {e}")))?;
-        Ok(s)
-    }
-} // <— VIKTIG: lukker mod pybridge riktig her
+    let profile: Profile = serde_json::from_str(profile_json)
+        .map_err(|e| PyValueError::new_err(format!("profile parse error: {e}")))?;
+    let weather: Weather = serde_json::from_str(weather_json)
+        .map_err(|e| PyValueError::new_err(format!("weather parse error: {e}")))?;
 
-// ───── Python-eksport (PyO3) på toppnivå ─────
+    let out = physics::compute_power_with_wind(&samples, &profile, &weather);
+    let s = serde_json::to_string(&serde_json::json!({
+        "watts": out.power,
+        "wind_rel": out.wind_rel,
+        "v_rel": out.v_rel,
+    }))
+    .map_err(|e| PyValueError::new_err(format!("serialize error: {e}")))?;
+    Ok(s)
+}
+
+} // <- lukker mod pybridge
+
+// ───── Python-eksport (PyO3) ─────
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]
@@ -323,7 +382,7 @@ use pyo3::wrap_pyfunction;
 
 #[cfg(feature = "python")]
 #[pymodule]
-fn cyclegraph_core(_py: Python, m: &PyModule) -> PyResult<()> {
+fn cyclegraph_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pybridge::compute_power_with_wind_json, m)?)?;
     m.add_function(wrap_pyfunction!(pybridge::calculate_efficiency_series, m)?)?;
     m.add_function(wrap_pyfunction!(pybridge::analyze_session_py, m)?)?;
@@ -374,19 +433,18 @@ mod m7_tests {
 
     // ---------- IO structs for golden (Uten serde_derive) ----------
     #[derive(Debug, Clone, Copy)]
-struct ExpField { value: f32, tol: f32 }
+    struct ExpField { value: f32, tol: f32 }
 
-#[derive(Debug, Clone)]
-struct Expected {
-    #[allow(dead_code)] // eller #[allow(unused)]
-    ftp: Option<f32>,
-    np: Option<ExpField>,
-    i_f: Option<ExpField>,
-    vi: Option<ExpField>,
-    pa_hr: Option<ExpField>,
-    w_per_beat: Option<ExpField>,
-}
-
+    #[derive(Debug, Clone)]
+    struct Expected {
+        #[allow(dead_code)]
+        ftp: Option<f32>,
+        np: Option<ExpField>,
+        i_f: Option<ExpField>,
+        vi: Option<ExpField>,
+        pa_hr: Option<ExpField>,
+        w_per_beat: Option<ExpField>,
+    }
 
     fn manifest_path(p: &str) -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p) }
 
@@ -401,8 +459,8 @@ struct Expected {
     fn parse_num(s: &str) -> Option<f32> {
         let mut t = s.trim();
         if t.is_empty() { return None; }
-        t = t.trim_matches(|c| c == '"' || c == '\'');
-        let t = t.replace(',', ".");
+        let t = t.trim_matches(|c| c == '"' || c == '\'')
+                  .replace(',', ".");
         let mut buf = String::new();
         let mut seen_digit = false;
         for ch in t.chars() {
@@ -432,7 +490,11 @@ struct Expected {
         let full = manifest_path(csv_path);
         let content = std::fs::read_to_string(&full).expect("open csv text");
         let delim = sniff_delimiter(&content);
-        let mut rdr = csv::ReaderBuilder::new().delimiter(delim).has_headers(true).flexible(true).from_reader(content.as_bytes());
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(delim)
+            .has_headers(true)
+            .flexible(true)
+            .from_reader(content.as_bytes());
         let headers = rdr.headers().expect("headers").clone();
         let i_hr = find_col(&headers, &["hr","heartrate","heart_rate","bpm","pulse"]).expect("no HR column in golden csv");
         let i_pw = find_col(&headers, &["device_watts","watts","power","power_w","pwr"]).expect("no power column in golden csv");
@@ -460,9 +522,7 @@ struct Expected {
     fn parse_expected(json_text: &str) -> Expected {
         let v: serde_json::Value = serde_json::from_str(json_text).unwrap();
         let gf = |obj: &serde_json::Value, key: &str| -> Option<ExpField> {
-            let o = obj.get(key)?;
-            let val = o.get("value")?.as_f64()? as f32;
-            let tol = o.get("tol")?.as_f64()? as f32;
+            let o = obj.get(key)?; let val = o.get("value")?.as_f64()? as f32; let tol = o.get("tol")?.as_f64()? as f32;
             Some(ExpField { value: val, tol })
         };
         Expected {
@@ -543,8 +603,8 @@ mod py_tests {
         let watts = vec![];
         let pulses = vec![120.0, 125.0, 130.0];
         let device_watts = Some(true);
-        Python::with_gil(|py| -> pyo3::PyResult<()> {
-            let result = crate::pybridge::analyze_session_py(py, watts.clone(), pulses.clone(), device_watts).unwrap();
+        pyo3::Python::with_gil(|py| -> pyo3::PyResult<()> {
+            let result = crate::pybridge::analyze_session_py(watts.clone(), pulses.clone(), device_watts, None, None).unwrap();
             let result_ref = result.as_ref(py);
             let mode: &str = result_ref.get_item("mode")?.extract()?;
             let reason: &str = result_ref.get_item("no_power_reason")?.extract()?;

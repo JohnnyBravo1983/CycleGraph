@@ -23,6 +23,10 @@
     "precision_watt": { "type": "number" },
     "precision_watt_ci": { "type": "number", "minimum": 0 },
 
+    "weather_applied": { "type": "boolean" },
+    "wind_angle_deg": { "type": "number", "minimum": 0, "maximum": 180 },
+    "air_density_kg_per_m3": { "type": "number", "minimum": 0.9, "maximum": 1.5 },
+
     "publish_state": {
       "type": "string",
       "enum": ["none", "pending", "published", "failed"],
@@ -39,4 +43,3 @@
     }
   }
 }
-

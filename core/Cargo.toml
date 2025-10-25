@@ -13,13 +13,14 @@ name = "cyclegraph_core"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Aktiver Python extension-modus KUN når vi bygger wheel
-python = ["pyo3/extension-module","pyo3/abi3-py39"]
-default = []
+# Gjør at PyO3-eksport ALWAYS er med i dev/venv (løser PyInit-mangelen)
+python = []
+default = ["python"]
 
 [dependencies]
-# PyO3 – ikke ha "extension-module" her; styres av feature over
-pyo3 = { version = "0.20", features = ["abi3"] }
+# PyO3 som extension module + ABI3 (min. py39 – juster til din laveste støttede Python)
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"] }
+
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

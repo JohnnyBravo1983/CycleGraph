@@ -14,6 +14,41 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tools\publish_ride
 
 Hvis token er utløpt/førstegang:
 
+# Les client info fra .env (juster evt. STRAVA_CLIENT_ID/REDIRECT om ikke lastet)
+$env:STRAVA_CLIENT_ID = "171819"
+$env:STRAVA_REDIRECT_URI = "http://127.0.0.1:5179/api/debug/oauth_capture"
+
+# Bygg authorize URL
+$redirEnc = [uri]::EscapeDataString($env:STRAVA_REDIRECT_URI)
+$scope = "read,activity:read,activity:read_all,activity:write"
+$url = "https://www.strava.com/oauth/authorize?client_id=$($env:STRAVA_CLIENT_ID)&redirect_uri=$redirEnc&response_type=code&scope=$scope&approval_prompt=force"
+
+# Åpne i standard nettleser
+Start-Process $url
+
+# Vis URL i terminalen (i tilfelle du trenger å kopiere den manuelt)
+Write-Host "`nÅpner autoriseringslenke i nettleser:"
+Write-Host $url
+🔄 Deretter:
+Strava åpnes i nettleseren — klikk “Authorize”.
+
+Du blir sendt til http://127.0.0.1:5179/api/debug/oauth_capture?...code=XXXXXX....
+
+Kopier verdien av code= fra adressefeltet (f.eks. ffcb62823132e6505e43d76d4940759d54cad436).
+
+Når du har koden, kan du bruke denne for å få nye tokens:
+
+powershell
+Kopier kode
+$code = "<lim inn koden her>"
+$body = @{
+  client_id     = $env:STRAVA_CLIENT_ID
+  client_secret = "90845b55b04d073a1568465ac1e0ca55da269c82"
+  code          = $code
+  grant_type    = "authorization_code"
+}
+$res = Invoke-RestMethod -Method Post -Uri "https://www.strava.com/oauth/token" -Body $body
+$res | Select-Object access_token, refresh_token, expires_at
 # Åpner authorize-URL → lim inn code → oppdaterer .env automatisk
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tools\strava_reauth.ps1
 

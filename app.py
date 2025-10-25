@@ -8,9 +8,9 @@ try:
     from dotenv import load_dotenv
     load_dotenv(override=True)  # viktig: alltid hente oppdatert .env
 except Exception:
-    # Mangler python-dotenv skal ikke knekke appen; vi validerer senere
-    pass
+    pass  # dotenv er valgfritt; valideres senere
 
+import math
 import time
 import logging
 import hashlib
@@ -20,6 +20,9 @@ from typing import Any, Dict, Optional, Callable, List
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from cyclegraph.weather_client import get_weather_for_session, WeatherError
 
 # -----------------------------------------------------------------------------
 # Konfig
@@ -55,13 +58,11 @@ _start_iso = datetime.now(timezone.utc).isoformat()
 CORE_IMPORT_OK = True
 CORE_IMPORT_ERROR = None
 try:
-    # Import-guard: sikrer at PyO3-bindingen er tilgjengelig (maturin develop)
     import cyclegraph_core  # noqa: F401
 except Exception as e:
     CORE_IMPORT_OK = False
     CORE_IMPORT_ERROR = repr(e)
 
-# Strava env-krav for token-check
 REQUIRED_ENV_KEYS: List[str] = [
     "STRAVA_CLIENT_ID",
     "STRAVA_CLIENT_SECRET",
@@ -79,7 +80,7 @@ def _missing_env(env_keys: List[str]) -> List[str]:
     return missing
 
 # -----------------------------------------------------------------------------
-# Session storage + publish helpers (beholdt)
+# Session storage + publish helpers
 # -----------------------------------------------------------------------------
 try:
     from cyclegraph.session_storage import (
@@ -111,7 +112,6 @@ def get_settings_cached():
     return _settings_cache
 
 def maybe_publish_to_strava(session_id: str, token: str, enabled: bool) -> Dict[str, Any]:
-    """Wrapper som alltid returnerer dict."""
     try:
         from cyclegraph.publish import maybe_publish_to_strava as impl
         out = impl(session_id, token, enabled)
@@ -120,18 +120,16 @@ def maybe_publish_to_strava(session_id: str, token: str, enabled: bool) -> Dict[
         return {"ok": False, "error": f"publish exception: {e}"}
 
 # -----------------------------------------------------------------------------
-# Analyzer-resolver (Rust PyO3 eller Python) – beholdt, lett kommentert
+# Analyzer-resolver (Rust PyO3 eller Python)
 # -----------------------------------------------------------------------------
 _ANALYZER: Optional[Callable[..., Dict[str, Any]]] = None
-_ANALYZER_MODE: Optional[str] = None  # "series" (watts,pulses,device_watts) eller "dict" (session)
+_ANALYZER_MODE: Optional[str] = None  # "series" eller "dict"
 
 def _resolve_analyzer():
-    """Finn analyzeren og hvilken modus den krever."""
     global _ANALYZER, _ANALYZER_MODE
     if _ANALYZER is not None:
         return _ANALYZER
-
-    # 1) Rust-modul (PyO3) med series-signatur
+    # PyO3 først
     try:
         import cyclegraph_core as m  # type: ignore
         cand = getattr(m, "analyze_session", None)
@@ -141,11 +139,12 @@ def _resolve_analyzer():
             if params[:2] == ["watts", "pulses"]:
                 _ANALYZER = cand
                 _ANALYZER_MODE = "series"
+                logger.info("Analyzer resolved: cyclegraph_core.analyze_session (series)")
                 return _ANALYZER
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"PyO3 analyzer not available: {e}")
 
-    # 2) Python analyzer (series eller dict)
+    # Python fallback
     for mod in ("cyclegraph.analyzer", "cyclegraph.analyze"):
         try:
             m = __import__(mod, fromlist=["*"])
@@ -157,17 +156,18 @@ def _resolve_analyzer():
                     if params[:2] == ["watts", "pulses"]:
                         _ANALYZER = cand
                         _ANALYZER_MODE = "series"
+                        logger.info(f"Analyzer resolved: {mod}.{cand_name} (series)")
                     else:
                         _ANALYZER = cand
                         _ANALYZER_MODE = "dict"
+                        logger.info(f"Analyzer resolved: {mod}.{cand_name} (dict)")
                     return _ANALYZER
         except Exception:
             continue
-
     return None
 
 # -----------------------------------------------------------------------------
-# Serie/physics extractors – beholdt
+# Serie/physics extractors
 # -----------------------------------------------------------------------------
 def _first_nonempty(*cands):
     for c in cands:
@@ -176,13 +176,8 @@ def _first_nonempty(*cands):
     return None
 
 def _extract_streams(session: Dict[str, Any]):
-    """
-    Les ut potensielle inndata. Ikke kast HTTPException her; valider i api_analyze().
-    """
     s = session
     streams = s.get("streams", {}) or {}
-
-    # Powermeter/HR
     watts = _first_nonempty(
         s.get("watts"),
         s.get("power"),
@@ -199,8 +194,6 @@ def _extract_streams(session: Dict[str, Any]):
         (s.get("data") or {}).get("streams", {}).get("pulses")
             if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
-
-    # Physics mode inputs
     velocity = _first_nonempty(
         streams.get("velocity_smooth"),
         (s.get("data") or {}).get("streams", {}).get("velocity_smooth")
@@ -211,7 +204,6 @@ def _extract_streams(session: Dict[str, Any]):
         (s.get("data") or {}).get("streams", {}).get("altitude")
             if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
-
     device_watts = s.get("device_watts")
     if device_watts is None:
         device_watts = s.get("has_power_meter") or s.get("power_meter") or False
@@ -233,7 +225,7 @@ def _extract_streams(session: Dict[str, Any]):
     )
 
 # -----------------------------------------------------------------------------
-# Resultat-merger – beholdt
+# Resultat-merger
 # -----------------------------------------------------------------------------
 def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
     out = dict(session)
@@ -275,7 +267,14 @@ def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
     return out
 
 # -----------------------------------------------------------------------------
-# Oppstartshook (logging + metrikk)
+# Request-modell (valgfri vær-override)
+# -----------------------------------------------------------------------------
+class AnalyzeRequest(BaseModel):
+    wind_angle_deg: Optional[float] = None
+    air_density_kg_per_m3: Optional[float] = None
+
+# -----------------------------------------------------------------------------
+# Oppstartshook
 # -----------------------------------------------------------------------------
 @app.on_event("startup")
 def _on_startup() -> None:
@@ -293,10 +292,6 @@ def _on_startup() -> None:
 # -----------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
-    """
-    200 OK: system oppe; inkluderer startup_duration_seconds og core=ok
-    503: core-import feilet (krever 'maturin develop' i riktig venv)
-    """
     if not CORE_IMPORT_OK:
         raise HTTPException(status_code=503, detail={
             "ok": False,
@@ -319,7 +314,7 @@ def api_get_session(sid: str):
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
 @app.post("/api/sessions/{sid}/analyze")
-def api_analyze(sid: str):
+def api_analyze(sid: str, body: AnalyzeRequest | None = None):
     analyzer = _resolve_analyzer()
     if analyzer is None:
         raise HTTPException(
@@ -330,46 +325,107 @@ def api_analyze(sid: str):
             ),
         )
 
+    # --- Last session ---
     try:
         session = load_session(sid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
-    # Hent potensielle serier
+    # --- Hent potensielle serier ---
     watts, pulses, device_watts, velocity, altitude = _extract_streams(session)
-    has_powermeter = bool(watts)             # serie-modus
-    has_physics    = bool(velocity) and bool(altitude)  # fysikk-modus
+    has_powermeter = bool(watts)
+    has_physics = bool(velocity) and bool(altitude)
 
+    # --- WEATHER: body override > weather_client ---
+    wind_angle_deg: Optional[float]
+    air_density_kg_per_m3: Optional[float]
+    used_override = False
+
+    if body and (body.wind_angle_deg is not None or body.air_density_kg_per_m3 is not None):
+        wind_angle_deg = body.wind_angle_deg
+        air_density_kg_per_m3 = body.air_density_kg_per_m3
+        used_override = True
+        logger.info(f"Analyze override: using weather from request body ({wind_angle_deg=}, {air_density_kg_per_m3=})")
+    else:
+        try:
+            wind_angle_deg, air_density_kg_per_m3 = get_weather_for_session(session)
+        except WeatherError as we:
+            raise HTTPException(status_code=502, detail=f"Weather fetch/compute failed: {we}")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Weather unexpected error: {e}")
+
+    # Valider
+    if any(
+        (v is None) or (isinstance(v, float) and math.isnan(v))
+        for v in (wind_angle_deg, air_density_kg_per_m3)
+    ):
+        raise HTTPException(status_code=422, detail="Weather values NaN/None")
+
+    # --- Kjør analyze ---
+    call_path = "unknown"
     try:
         if _ANALYZER_MODE == "series":
             if not has_powermeter:
-                # Series-analyzer krever watts/puls – gi tydelig beskjed
                 raise HTTPException(
                     status_code=501,
                     detail=(
                         "Analyzer i 'series'-modus krever watts+puls (powermeter). "
-                        "Du har ikke watts. Aktiver en dict-basert analyzer som støtter fysikk-modus "
-                        "(analyze_session(session)) eller skaff powermeter-watts."
+                        "Mangler watts. Aktiver dict-analyzer (analyze_session(session)) eller skaff powermeter."
                     ),
                 )
-            analysis = analyzer(watts, pulses or [], device_watts)
+            # 1) Prøv nøkkelord (PyO3 håndterer dette best)
+            try:
+                analysis = analyzer(
+                    watts, pulses or [], device_watts,
+                    wind_angle_deg=float(wind_angle_deg),  # type: ignore[arg-type]
+                    air_density_kg_per_m3=float(air_density_kg_per_m3)  # type: ignore[arg-type]
+                )
+                call_path = "series:kwargs-5"
+            except TypeError as e1:
+                # 2) Prøv 5 posisjonelle
+                try:
+                    analysis = analyzer(
+                        watts, pulses or [], device_watts,
+                        float(wind_angle_deg), float(air_density_kg_per_m3)
+                    )
+                    call_path = "series:positional-5"
+                except TypeError as e2:
+                    # 3) Fallback: 3-args
+                    logger.warning(f"5-arg analyze unsupported, falling back to 3-args. e1={e1}; e2={e2}")
+                    analysis = analyzer(watts, pulses or [], device_watts)
+                    call_path = "series:positional-3"
         else:
-            # Dict-analyzer kan støtte begge moduser. Minst én modus må være mulig.
             if not (has_powermeter or has_physics):
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Mangler data: trenger enten watts+hr (powermeter) ELLER velocity_smooth(+altitude) for fysikk-beregning."
+                        "Mangler data: trenger enten watts+hr (powermeter) ELLER "
+                        "velocity_smooth(+altitude) for fysikk-beregning."
                     ),
                 )
+            session.setdefault("weather", {})
+            session["weather"]["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
+            session["weather"]["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
             analysis = analyzer(session)
+            call_path = "dict:session"
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"analyze_session feilet: {e}")
 
+    # --- Slå sammen resultat og persist værfelter ---
     merged = _merge_analysis(session, analysis)
+    merged["weather_applied"] = True
+    merged["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
+    merged["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
 
+    logger.info(
+        f"Weather applied: wind_angle={float(wind_angle_deg):.2f}°, "
+        f"rho={float(air_density_kg_per_m3):.4f} | call_path={call_path} | override={used_override}"
+    )
+
+    # --- Lagre og svar ---
     try:
         save_session(sid, merged)
     except Exception as e:
@@ -384,8 +440,16 @@ def api_analyze(sid: str):
             "CdA": merged.get("CdA"),
             "crr_used": merged.get("crr_used"),
             "reason": merged.get("reason"),
+            "weather_applied": merged.get("weather_applied"),
+            "wind_angle_deg": merged.get("wind_angle_deg"),
+            "air_density_kg_per_m3": merged.get("air_density_kg_per_m3"),
         },
-        "debug": {"analyzer_mode": _ANALYZER_MODE, "has_raw": "analysis_raw" in merged},
+        "debug": {
+            "analyzer_mode": _ANALYZER_MODE,
+            "call_path": call_path,
+            "used_override": used_override,
+            "has_raw": "analysis_raw" in merged
+        },
     }
 
 @app.post("/api/sessions/{sid}/publish")
@@ -395,14 +459,13 @@ def api_publish(sid: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
-    # --- Toggle: ENV og session må begge være true ---
     def _env_bool(name: str):
         val = os.getenv(name)
         if val is None:
             return None
         return str(val).strip().lower() in ("1", "true", "yes", "on")
 
-    env_toggle = _env_bool("CG_PUBLISH_TOGGLE")         # None / True / False
+    env_toggle = _env_bool("CG_PUBLISH_TOGGLE")
     session_toggle = bool(sess.get("publish_toggle", False))
 
     publish_enabled = (env_toggle and session_toggle) if (env_toggle is not None) else session_toggle
@@ -412,7 +475,6 @@ def api_publish(sid: str):
         return {"ok": False, "skipped": True, "reason": "publish_toggle=false"}
 
     settings = get_settings_cached()
-
     token = os.getenv("STRAVA_ACCESS_TOKEN") or (
         getattr(settings, "strava_access_token", None) if settings else None
     )
@@ -435,10 +497,8 @@ def api_publish(sid: str):
     ci = sess.get("precision_watt_ci")
     cda = sess.get("CdA")
     crr = sess.get("crr_used")
-    # ASCII-bindestrek → unngå 'â' i Windows-konsollen
     msg = f"Precision Watt: {pw} (CI {ci}) | CdA {cda} | Crr {crr} - posted by CycleGraph"
 
-    # publish
     raw = maybe_publish_to_strava(str(sid), str(token), True)
     result = raw if isinstance(raw, dict) else {}
     ok = bool(result.get("ok"))
@@ -464,7 +524,7 @@ def api_publish(sid: str):
     }
 
 # -----------------------------------------------------------------------------
-# Debug-endepunkter (utvidet token_present i tråd med Trinn 1-krav)
+# Debug-endepunkter
 # -----------------------------------------------------------------------------
 @app.get("/api/debug/publish_flags/{sid}")
 def debug_flags(sid: str):
@@ -479,12 +539,6 @@ def debug_flags(sid: str):
 
 @app.get("/api/debug/token_present")
 def debug_token_present():
-    """
-    Ny kontrakt:
-      - 200 og { "ok": true } hvis alle required STRAVA_* nøkler finnes
-      - 500 og { ok:false, reason:'missing_env', missing:[...] } hvis noe mangler
-    Beholder "has_token" for bakoverkompatibilitet (true hvis ACCESS_TOKEN er satt).
-    """
     missing = _missing_env(REQUIRED_ENV_KEYS)
     has_access_token = bool(os.getenv("STRAVA_ACCESS_TOKEN"))
     if missing:
@@ -512,7 +566,7 @@ def debug_publish_probe(sid: str):
     }
 
 # -----------------------------------------------------------------------------
-# Stubs (beholdt)
+# Stubs
 # -----------------------------------------------------------------------------
 @app.get("/api/timeseries/stub")
 def timeseries_stub():
