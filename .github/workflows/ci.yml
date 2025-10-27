@@ -60,7 +60,17 @@ jobs:
         shell: bash
         run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
-      - name: "Install Python deps"
+      # OPPRETT OG AKTIVER VENV FOR HELE JOBBEN
+      - name: "Create and activate venv"
+        shell: bash
+        run: |
+          python -m venv .venv
+          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          # verifiser at 'python' peker til venv
+          python -c "import sys,sysconfig; print('Using Python:', sys.executable); print('base:', sysconfig.get_config_var('base'))"
+
+      - name: "Install Python deps (in venv)"
         run: |
           python -m pip install -U pip
           pip install maturin pytest
