@@ -55,35 +55,47 @@ jobs:
       - name: "Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
 
-      # Gjør PyO3 bevisst på korrekt Python (baner vei for riktig linking)
+      # Peker PyO3 mot korrekt Python
       - name: "Export PYO3_PYTHON"
         shell: bash
         run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
-      # OPPRETT OG AKTIVER VENV FOR HELE JOBBEN
+      # Opprett og aktiver venv (for maturin develop)
       - name: "Create and activate venv"
         shell: bash
         run: |
           python -m venv .venv
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          # verifiser at 'python' peker til venv
-          python -c "import sys,sysconfig; print('Using Python:', sys.executable); print('base:', sysconfig.get_config_var('base'))"
+          python -c "import sys; print('Using Python:', sys.executable)"
 
+      # Installer avhengigheter
       - name: "Install Python deps (in venv)"
+        shell: bash
         run: |
           python -m pip install -U pip
           pip install maturin pytest
+          # Hvis prosjektet har requirements-filer, bruk dem
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          # Baseline (hvis requirements ikke dekker alt)
+          pip install --exists-action=i \
+            click \
+            "fastapi>=0.110" \
+            "fastapi[testclient]" \
+            pydantic \
+            httpx \
+            requests \
+            python-dotenv
 
-      # Noen tester forventer tokens/state tilgjengelig
+      # Test-fixtures
       - name: "Provide test tokens/state"
         run: |
           cp cli/tokens_example.py cli/tokens.py
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
-      # Speiler full-jobben: saniter miljø som kan påvirke linking
+      # Sanitér miljø
       - name: "Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)"
         if: runner.os == 'Linux'
         shell: bash
@@ -99,13 +111,19 @@ jobs:
           ls -la core
           test -f core/Cargo.toml && echo "Found core/Cargo.toml"
 
+      # Bygg & installer PyO3-modulen
       - name: "Build & install Python module with maturin (feature=python)"
         working-directory: core
         run: maturin develop --features python
 
       - name: "Verify Python import"
         run: |
-          python -c "import cyclegraph_core as cg; import sys; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
+          python -c "import cyclegraph_core as cg; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
+
+      # Sørg for at imports som 'cli', 'cyclegraph' etc. finner repo-roten
+      - name: "Export PYTHONPATH"
+        shell: bash
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
 
       - name: "pytest"
         run: pytest -q
@@ -186,7 +204,6 @@ jobs:
           python -m pip install "$WHEEL"
           python -c "import cyclegraph_core, inspect; print('cyclegraph_core OK:', getattr(cyclegraph_core,'__file__','<pkg>'))"
 
-      # Viktig: kjør Rust tester uten default-features (unngå PyO3-linking i test-binarer)
       - name: "Run Rust unit tests (lib)"
         working-directory: core
         run: cargo test --lib --no-default-features -- --nocapture
