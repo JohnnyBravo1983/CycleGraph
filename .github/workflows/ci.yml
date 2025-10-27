@@ -14,9 +14,12 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       schemas: ${{ steps.filter.outputs.schemas }}
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - id: filter
+      - name: "Checkout"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: "Filter changed paths"
+        id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -25,104 +28,64 @@ jobs:
             schemas:
               - 'schema/**'
 
-  core:
-    needs: changes
+  rust-tests:
+    name: "Rust tests (no python)"
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-C codegen-units=8"
-      CARGO_TERM_COLOR: always
-      PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: "Checkout"
+        uses: actions/checkout@v4
+      - name: "Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
+      - name: "Cargo test (pure Rust; no default features)"
+        run: cargo test -p cyclegraph_core --no-default-features --verbose
 
-      - uses: actions/setup-python@v5
+  py-tests:
+    name: "Python bindings + pytest"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Setup Python"
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: "Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo registry, git, and target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            core/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('core/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
+      # NEW: Gjør PyO3 bevisst på nøyaktig Python
+      - name: "Export PYO3_PYTHON"
+        shell: bash
+        run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
-      - name: Install Python deps
+      - name: "Install Python deps"
         run: |
           python -m pip install -U pip
-          python -m pip install -U maturin pytest requests python-dotenv click
-          python -c "import click, sys; print('click', click.__version__); print('python', sys.version.split()[0])"
+          pip install maturin pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Provide test tokens/state
+      - name: "Sanity - show core tree and Cargo.toml"
         run: |
-          cp cli/tokens_example.py cli/tokens.py
-          mkdir -p state
-          cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
+          pwd
+          ls -la
+          ls -la core
+          test -f core/Cargo.toml && echo "Found core/Cargo.toml"
 
-      - name: Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          unset CARGO_TARGET_DIR || true
-          unset LD_LIBRARY_PATH || true
-          echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
-          echo "After sanitize:"
-          env | sort | grep -E 'CARGO_TARGET_DIR|LD_LIBRARY_PATH' || true
-
-      - name: Build Rust wheel
+      - name: "Build & install Python module with maturin (feature=python)"
         working-directory: core
-        env:
-          LD_LIBRARY_PATH: ""
         run: |
-          echo "Effective LD_LIBRARY_PATH='${LD_LIBRARY_PATH:-<empty>}'"
-          echo "CARGO_TARGET_DIR should be unset → '${CARGO_TARGET_DIR-<unset>}'"
-          maturin build --release -i python3.12 --features python
+          maturin develop --features python
 
-      - name: Install latest-built wheel
+      - name: "Verify Python import"
         run: |
-          WHEEL=$(ls -t core/target/wheels/*.whl | head -n 1)
-          python -m pip install "$WHEEL"
-          python -c "import cyclegraph_core, inspect; print('cyclegraph_core OK:', getattr(cyclegraph_core,'__file__','<pkg>'))"
+          python -c "import cyclegraph_core as cg; import sys; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
 
-      - name: Run Rust unit tests (lib)
-        working-directory: core
-        run: cargo test --lib -- --nocapture
-
-      - name: Run golden test (self-heal on fail)
-        working-directory: core
-        env:
-          CG_GOLDEN_DEBUG: "1"
-        run: |
-          set -e
-          if cargo test --lib golden_sessions_match_with_tolerance -- --nocapture; then
-            echo "Golden test OK"
-          else
-            echo "Golden FAIL → regen expected"
-            CG_UPDATE_GOLDEN=1 cargo test --lib golden_sessions_match_with_tolerance -- --nocapture || true
-            cargo test --lib golden_sessions_match_with_tolerance -- --nocapture
-          fi
-
-      - name: Run Python CLI tests (if present)
-        run: |
-          set -e
-          python -m pytest -k "physics_cli" --ignore=cli/test_fetch.py || {
-            code=$?
-            if [ $code -eq 5 ]; then
-              echo "No matching tests – skipping."
-              exit 0
-            else
-              exit $code
-            fi
-          }
+      - name: "pytest"
+        run: pytest -q
 
   full:
+    name: "Full pipeline (wheel + rust + frontend + schemas)"
     needs: changes
     runs-on: ubuntu-latest
     if: >
@@ -136,17 +99,21 @@ jobs:
       CARGO_TERM_COLOR: always
       PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: "Checkout"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: "Setup Python"
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: "Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo registry, git, and target
+      - name: "Cache Cargo registry, git, and target"
         uses: actions/cache@v4
         with:
           path: |
@@ -157,19 +124,18 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: Install Python deps
+      - name: "Install Python deps"
         run: |
           python -m pip install -U pip
           python -m pip install -U maturin pytest requests python-dotenv click
-          python -c "import click, sys; print('click', click.__version__); print('python', sys.version.split()[0])"
 
-      - name: Provide test tokens/state
+      - name: "Provide test tokens/state"
         run: |
           cp cli/tokens_example.py cli/tokens.py
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
-      - name: Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)
+      - name: "Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)"
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -179,7 +145,7 @@ jobs:
           echo "After sanitize:"
           env | sort | grep -E 'CARGO_TARGET_DIR|LD_LIBRARY_PATH' || true
 
-      - name: Build Rust wheel
+      - name: "Build Rust wheel"
         working-directory: core
         env:
           LD_LIBRARY_PATH: ""
@@ -188,37 +154,40 @@ jobs:
           echo "CARGO_TARGET_DIR should be unset → '${CARGO_TARGET_DIR-<unset>}'"
           maturin build --release -i python3.12 --features python
 
-      - name: Install latest-built wheel
+      - name: "Install latest-built wheel"
         run: |
           WHEEL=$(ls -t core/target/wheels/*.whl | head -n 1)
           python -m pip install "$WHEEL"
           python -c "import cyclegraph_core, inspect; print('cyclegraph_core OK:', getattr(cyclegraph_core,'__file__','<pkg>'))"
 
-      - name: Run Rust unit tests (lib)
+      # CHANGED: Kjør Rust unit tests uten default-features (unngå PyO3/py-linking i test-binarene)
+      - name: "Run Rust unit tests (lib)"
         working-directory: core
-        run: cargo test --lib -- --nocapture
+        run: cargo test --lib --no-default-features -- --nocapture
 
-      - name: Run golden test (self-heal on fail)
+      # CHANGED: Samme for golden-testen
+      - name: "Run golden test (self-heal on fail)"
         working-directory: core
         env:
           CG_GOLDEN_DEBUG: "1"
         run: |
           set -e
-          if cargo test --lib golden_sessions_match_with_tolerance -- --nocapture; then
+          if cargo test --lib --no-default-features golden_sessions_match_with_tolerance -- --nocapture; then
             echo "Golden test OK"
           else
             echo "Golden FAIL → regen expected"
-            CG_UPDATE_GOLDEN=1 cargo test --lib golden_sessions_match_with_tolerance -- --nocapture || true
-            cargo test --lib golden_sessions_match_with_tolerance -- --nocapture
+            CG_UPDATE_GOLDEN=1 cargo test --lib --no-default-features golden_sessions_match_with_tolerance -- --nocapture || true
+            cargo test --lib --no-default-features golden_sessions_match_with_tolerance -- --nocapture
           fi
 
-      - uses: actions/setup-node@v4
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: "frontend/package-lock.json"
 
-      - name: Frontend – install deps (retry)
+      - name: "Frontend – install deps (retry)"
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         shell: bash
@@ -230,22 +199,22 @@ jobs:
             npm ci && break || (echo "npm ci failed (attempt $i), sleeping…"; sleep 10)
           done
 
-      - name: Frontend – typecheck
+      - name: "Frontend – typecheck"
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run typecheck
 
-      - name: Frontend – build
+      - name: "Frontend – build"
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run build
 
-      - name: Frontend – tests (vitest)
+      - name: "Frontend – tests (vitest)"
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run test -- --run
 
-      - name: JSON Schemas – compile (AJV)
+      - name: "JSON Schemas – compile (AJV)"
         if: hashFiles('schema/*.json') != ''
         working-directory: frontend
         run: |
