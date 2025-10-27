@@ -37,7 +37,8 @@ jobs:
       - name: "Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
       - name: "Cargo test (pure Rust; no default features)"
-        run: cargo test -p cyclegraph_core --no-default-features --verbose
+        working-directory: core
+        run: cargo test --no-default-features --verbose
 
   py-tests:
     name: "Python bindings + pytest"
@@ -54,7 +55,7 @@ jobs:
       - name: "Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
 
-      # NEW: Gjør PyO3 bevisst på nøyaktig Python
+      # Gjør PyO3 bevisst på korrekt Python (baner vei for riktig linking)
       - name: "Export PYO3_PYTHON"
         shell: bash
         run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
@@ -65,6 +66,22 @@ jobs:
           pip install maturin pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # Noen tester forventer tokens/state tilgjengelig
+      - name: "Provide test tokens/state"
+        run: |
+          cp cli/tokens_example.py cli/tokens.py
+          mkdir -p state
+          cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
+
+      # Speiler full-jobben: saniter miljø som kan påvirke linking
+      - name: "Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)"
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          unset CARGO_TARGET_DIR || true
+          unset LD_LIBRARY_PATH || true
+          echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
+
       - name: "Sanity - show core tree and Cargo.toml"
         run: |
           pwd
@@ -74,8 +91,7 @@ jobs:
 
       - name: "Build & install Python module with maturin (feature=python)"
         working-directory: core
-        run: |
-          maturin develop --features python
+        run: maturin develop --features python
 
       - name: "Verify Python import"
         run: |
@@ -160,12 +176,11 @@ jobs:
           python -m pip install "$WHEEL"
           python -c "import cyclegraph_core, inspect; print('cyclegraph_core OK:', getattr(cyclegraph_core,'__file__','<pkg>'))"
 
-      # CHANGED: Kjør Rust unit tests uten default-features (unngå PyO3/py-linking i test-binarene)
+      # Viktig: kjør Rust tester uten default-features (unngå PyO3-linking i test-binarer)
       - name: "Run Rust unit tests (lib)"
         working-directory: core
         run: cargo test --lib --no-default-features -- --nocapture
 
-      # CHANGED: Samme for golden-testen
       - name: "Run golden test (self-heal on fail)"
         working-directory: core
         env:
