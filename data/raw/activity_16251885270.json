@@ -1,0 +1,2044 @@
+﻿{
+    "resource_state":  3,
+    "athlete":  {
+                    "id":  55313385,
+                    "resource_state":  1
+                },
+    "name":  "Afternoon Ride",
+    "distance":  31855.0,
+    "moving_time":  4416,
+    "elapsed_time":  4416,
+    "total_elevation_gain":  302.0,
+    "type":  "Ride",
+    "sport_type":  "Ride",
+    "workout_type":  null,
+    "device_name":  "Garmin Venu 2",
+    "id":  16251885270,
+    "start_date":  "2025-10-25T11:06:38Z",
+    "start_date_local":  "2025-10-25T13:06:38Z",
+    "timezone":  "(GMT+01:00) Europe/Oslo",
+    "utc_offset":  7200.0,
+    "location_city":  null,
+    "location_state":  null,
+    "location_country":  null,
+    "achievement_count":  3,
+    "kudos_count":  9,
+    "comment_count":  0,
+    "athlete_count":  1,
+    "photo_count":  0,
+    "map":  {
+                "id":  "a16251885270",
+                "polyline":  "a}riJcm|~@H[TFHFXf@fALnAFdANb@BJR?ZOtEAbBi@bXCVIj@Yx@INe@b@{F~EwDjDsBdB}RlQkBfBiDnDiDbDeFlFiBdBeA~@oBvAa@TuAp@aCx@yA^oBZa@D_BD_EIkDJa@?SKk@y@QFIHe@|@MNq@b@i@VmDdAsAZiHrBe@PmAh@qHvEcAt@_Ax@uA|@cBh@oADSCqBa@cC}@_AOcB?m@JaA\\]VcApAi@|AOt@S~BQ~DSbGOvIk@`SKrC]hDo@bD]fAsF|MeAbDg@rBo@lDMxACbA?n@FfAJj@T~@`@t@h@f@bCx@fAb@lBdArCvAjBr@tDz@xBt@vEfBzErArAr@p@f@tExEv@r@^`@x@bAr@dB^tAJn@RbBFdA@|CCfAWjCYtAk@|Ay@rA_FfE_@b@y@pASb@s@tBa@~BUrBeHddBa@~KU`FI`C?`AHbD^hDRdAX`AfAhCfAxALJfAf@z@DNAjAa@nAaAlBgBdAs@z@[bAMz@?t@HtAj@TNt@r@j@t@n@bAn@zATp@fAdEvNfl@nCrKxE|Rb@pB\\bCJrArA~TTjFVnBpBj\\X|E?|ADl@XhB^fFNvC@|BBXZ|AJrA|Crf@|@zMr@dJrGjbADxBC`BGtBKnBWfD_AdLChAFb@LTPFf@AvASzB?pAGbB?fAFxAN~@VbDXzCFxELfCBfBH`@H^P`At@n@v@Xf@d@l@RPj@X`@HzAFbB?tDB|@A|Ac@fC{@vDyArCaAtBm@PAv@F`@L|@l@tDjD`Br@~@HLA`B]n@SzEcBjBu@xC_AtAi@b@Kx@MpB@|Ah@dAh@r@\\p@P`AH\\?pCM\\@`@FjA^|GrDb@L^Bb@GrDqBNCRAzBJxBM~@QdJmBbBGfAZXNV?T_@HQpEcOzAsEdEuMpEeNbAcDLw@HwAG{@EYIUMSa@WQCoAB{@Ci@Uc@g@a@}@WiAIg@q@aIo@eLKuCCoBHkBNaARw@rAiEhYcw@Pi@|@_EBQ?c@COGGICGB_@Tm@B}ACmB?eJGgB@{ACwDC}C?{AF{ARoDjA_IzCgBj@oAP{BLuIKeGCiCGsEAcCGcEAeDG{BYoLwBmAYKKEQFk@HMJGz@QNG\\YXc@JWNs@@]Ay@YiDO{A[mA_@}@Q_A?MHc@Za@f@uATy@RqAN_BHuD?sEDeB`@wD\\kBNoAf@aBd@i@^QNSTKh@Mb@O~@i@jAS|DcBxDsAn@Wj@]XUv@y@r@sAzAqEZuAXuBb@cG\\uC~@aFZsCHiBFkBHoGYuR?yBJmAJ_@PWd@c@f@Ud@M`Cc@b@a@\\s@XmBj@gGBc@AeAc@gECcAB_AJy@JWVa@dA{@Vi@R{@pAyH\\eCXqDJeDBmHFkAHc@Ja@^q@vAkBr@eAJUn@cBbB{EfAoCp@gC^yBTk@NQL?^NfAz@LF~@PnBGdC[lA?\\BzAX`@Jt@DXETKPOPYJWFe@F}A\\{DNoA?i@Kg@]s@a@q@MKSKe@G{@GwBIg@Dw@PQ?_@SUo@_@uBQcBAg@Bc@J]NWz@q@n@q@bAiBZe@jBoBlBiCLWXu@Ny@BaADoMJkCA_@Kw@CiBFgHEqBKcAWyAk@}Bc@qAmAaCMQyCyESk@Km@GkA@qFFeCPeEZ{DRw@Z{Dl@{Ct@oCr@yERS\\FHCFGv@eC`CsInAeG~@mF^cDZ}DVkENoEDyEAqBA_COuEWwEsBiTm@{HsEwz@OwB[eBOqCS}BOe@W_@MMcB?UDQVWPI@QLU@o@CcEE_A@y@H}ADcJbCk@JkA\\cFjAaAZ]NiBb@aAd@}Bh@_Bd@aDp@q@HYAq@I}Ao@eBcAmAc@eDZu@?kAMwAi@gAk@eAq@yAw@q@c@SQc@o@q@oAiBiFgAoC{@mC}AmDq@oA_A{A_EiFKEM@c@J_AYQ?OJgAdByAjBQFSGwBeAoAk@_Ay@Y_@a@u@g@m@eBcCwA{BwCcEKKw@]iAm@qB}@mDiAa@OU?QTQlACDM?QK",
+                "resource_state":  3,
+                "summary_polyline":  "{sriJ}p{~@SdJYrAS`@ke@bb@oWnWwElDwEjBkF`AmNFSKk@y@[Ps@lA{Az@kPtEsBz@qHvEyElDcBh@oADeCe@cC}@cDOmC`AcApAi@|A[vBY|FoA|e@KrC]hDo@bD]fAsF|MeAbDg@rBo@lDMxACrBRrBj@dBt@v@jE|AlJpEtDz@pI|CzErAdCzAlHnH~@jAl@|Aj@dC\\zECrDWjCYtAk@|Ay@rA_FfE_AlAm@jAs@tBm@vDg@bK_I~mBIbEPrEj@~DX`AfAhCfAxAtAr@jABjAa@bG}E~Bi@pBHtAj@jAbAzAxBdAlCfAdEfSzx@|FnVh@vErA~TTjFVnBpBj\\X|EDjCXhB^fFNvC@|B^vBJrAbP`dCDxBKvEcB|TChAFb@LTpCMpHGdKhAdRb@`AZ`At@bC~ClAb@zAFvI@pP{FfCo@xAT|@l@tDjD`Br@~@HnB_@fRwG|AYpB@hGbCpHDjA^|GrDbAPb@GbEuBnCHxBMdL_CbBGxBj@^q@pEcOrNoc@bAcDTqBEyA]cAs@[kC?i@Uc@g@a@}@WiA{@iJs@kMK_FHkBNaAp@aCnCaInVaq@nAiF?eAQKg@Xm@Bgd@I{ARoDjAgLfEkE^gl@k@kPqCmAYQ]Py@fAYl@a@d@{@Ns@?wAi@eG{@kCQmAHc@Za@f@uAh@kCN_BHuDDyH`@wDl@{Df@aBd@i@dAq@lA]~@i@bMkEtBkAv@y@r@sAzAqEZuAXuBb@cG\\uC~@aFd@}FP{JYuR?yBJmA\\w@d@c@lAc@`Cc@b@a@\\s@XmBn@kHAeAc@gE?cCVqA|A}AVi@dBuJv@wHJeDBmHFkATeAvDyFzEoMp@gC^yBTk@NQl@NfAz@lAXbIc@pEn@`Aa@\\q@Fe@F}Al@kG?i@Kg@_AeBa@WyEYqBV_@SUo@_@uBSkCBc@Zu@jBcB~AoCjBoBlBiCf@mANy@HqOJkCMwACiBFgHEqBc@}CoAoEmAaCgDkFSk@Km@GkAHwJl@aKRw@Z{Dl@{Ct@oCr@yERSn@Cv@eC`CsInCsN^cDZ}DVkENoE@kMa@gKcDk^gFo_A[eBc@oGOe@e@m@yBDi@h@q@PsFIwEP_UxFkGtBqLjCkAKqGwCeDZaCM_DuA_DiBq@c@w@aAq@oAmFgO}AmDqBkD_EiF}@FqAYOJaDpEe@?gEqB_Ay@yLgQaFcC"
+            },
+    "trainer":  false,
+    "commute":  false,
+    "manual":  false,
+    "private":  false,
+    "visibility":  "everyone",
+    "flagged":  false,
+    "gear_id":  "b14561085",
+    "start_latlng":  [
+                         59.412173,
+                         10.472669
+                     ],
+    "end_latlng":  [
+                       59.412225,
+                       10.473924
+                   ],
+    "average_speed":  7.214,
+    "max_speed":  13.92,
+    "average_watts":  166.2,
+    "device_watts":  false,
+    "kilojoules":  733.8,
+    "has_heartrate":  true,
+    "average_heartrate":  139.4,
+    "max_heartrate":  158.0,
+    "heartrate_opt_out":  false,
+    "display_hide_heartrate_option":  true,
+    "elev_high":  104.8,
+    "elev_low":  -126.6,
+    "upload_id":  17336227349,
+    "upload_id_str":  "17336227349",
+    "external_id":  "garmin_ping_494709655770",
+    "from_accepted_tag":  false,
+    "pr_count":  0,
+    "total_photo_count":  0,
+    "has_kudoed":  false,
+    "description":  null,
+    "calories":  897.0,
+    "perceived_exertion":  null,
+    "prefer_perceived_exertion":  null,
+    "segment_efforts":  [
+                            {
+                                "id":  3417166322959095380,
+                                "resource_state":  2,
+                                "name":  "Holtandalen uten rundkjøringer - Sprint",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  170,
+                                "moving_time":  170,
+                                "start_date":  "2025-10-25T11:08:17Z",
+                                "start_date_local":  "2025-10-25T13:08:17Z",
+                                "distance":  1553.4,
+                                "start_index":  50,
+                                "end_index":  97,
+                                "device_watts":  false,
+                                "average_heartrate":  134.1,
+                                "max_heartrate":  142.0,
+                                "segment":  {
+                                                "id":  5009558,
+                                                "resource_state":  2,
+                                                "name":  "Holtandalen uten rundkjøringer - Sprint",
+                                                "activity_type":  "Ride",
+                                                "distance":  1553.4,
+                                                "average_grade":  0.0,
+                                                "maximum_grade":  3.8,
+                                                "elevation_high":  7.8,
+                                                "elevation_low":  3.6,
+                                                "start_latlng":  [
+                                                                     59.411223,
+                                                                     10.465626
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.423961,
+                                                                   10.454641
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Horten",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322957476436,
+                                "resource_state":  2,
+                                "name":  "Evighetssprinten",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  88,
+                                "moving_time":  88,
+                                "start_date":  "2025-10-25T11:16:34Z",
+                                "start_date_local":  "2025-10-25T13:16:34Z",
+                                "distance":  766.638,
+                                "start_index":  209,
+                                "end_index":  232,
+                                "device_watts":  false,
+                                "average_heartrate":  141.6,
+                                "max_heartrate":  148.0,
+                                "segment":  {
+                                                "id":  1794328,
+                                                "resource_state":  2,
+                                                "name":  "Evighetssprinten",
+                                                "activity_type":  "Ride",
+                                                "distance":  766.638,
+                                                "average_grade":  0.0,
+                                                "maximum_grade":  7.8,
+                                                "elevation_high":  25.2,
+                                                "elevation_low":  14.5,
+                                                "start_latlng":  [
+                                                                     59.43991254083812,
+                                                                     10.431468347087502
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.43331045098603,
+                                                                   10.427970997989178
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Horten",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322958960212,
+                                "resource_state":  2,
+                                "name":  "Evighetsbakken (vei)",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  263,
+                                "moving_time":  263,
+                                "start_date":  "2025-10-25T11:17:41Z",
+                                "start_date_local":  "2025-10-25T13:17:41Z",
+                                "distance":  1010.2,
+                                "start_index":  226,
+                                "end_index":  289,
+                                "device_watts":  false,
+                                "average_heartrate":  147.1,
+                                "max_heartrate":  151.0,
+                                "segment":  {
+                                                "id":  11828705,
+                                                "resource_state":  2,
+                                                "name":  "Evighetsbakken (vei)",
+                                                "activity_type":  "Ride",
+                                                "distance":  1010.2,
+                                                "average_grade":  4.6,
+                                                "maximum_grade":  10.0,
+                                                "elevation_high":  -16.6,
+                                                "elevation_low":  -62.8,
+                                                "start_latlng":  [
+                                                                     59.434446,
+                                                                     10.428965
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.434507,
+                                                                   10.417183
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Horten",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322960340564,
+                                "resource_state":  2,
+                                "name":  "Evighetssletta vestover",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  146,
+                                "moving_time":  146,
+                                "start_date":  "2025-10-25T11:22:18Z",
+                                "start_date_local":  "2025-10-25T13:22:18Z",
+                                "distance":  1029.58,
+                                "start_index":  293,
+                                "end_index":  337,
+                                "device_watts":  false,
+                                "average_heartrate":  144.5,
+                                "max_heartrate":  152.0,
+                                "segment":  {
+                                                "id":  1373012,
+                                                "resource_state":  2,
+                                                "name":  "Evighetssletta vestover",
+                                                "activity_type":  "Ride",
+                                                "distance":  1029.58,
+                                                "average_grade":  3.0,
+                                                "maximum_grade":  14.4,
+                                                "elevation_high":  85.3,
+                                                "elevation_low":  52.3,
+                                                "start_latlng":  [
+                                                                     59.43464040756053,
+                                                                     10.415918827056583
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.436239004133405,
+                                                                   10.39802312850922
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Nykirke",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322957867604,
+                                "resource_state":  2,
+                                "name":  "Kopstadveien",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  138,
+                                "moving_time":  138,
+                                "start_date":  "2025-10-25T11:28:36Z",
+                                "start_date_local":  "2025-10-25T13:28:36Z",
+                                "distance":  903.15,
+                                "start_index":  402,
+                                "end_index":  445,
+                                "device_watts":  false,
+                                "average_heartrate":  146.7,
+                                "max_heartrate":  154.0,
+                                "segment":  {
+                                                "id":  1589259,
+                                                "resource_state":  2,
+                                                "name":  "Kopstadveien",
+                                                "activity_type":  "Ride",
+                                                "distance":  903.15,
+                                                "average_grade":  1.4,
+                                                "maximum_grade":  6.3,
+                                                "elevation_high":  95.4,
+                                                "elevation_low":  80.6,
+                                                "start_latlng":  [
+                                                                     59.42586489021778,
+                                                                     10.381945967674255
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.42336264066398,
+                                                                   10.367021234706044
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Nykirke",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322957024852,
+                                "resource_state":  2,
+                                "name":  "Over Kopstadkrysset",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  288,
+                                "moving_time":  288,
+                                "start_date":  "2025-10-25T11:28:36Z",
+                                "start_date_local":  "2025-10-25T13:28:36Z",
+                                "distance":  2132.8,
+                                "start_index":  402,
+                                "end_index":  495,
+                                "device_watts":  false,
+                                "average_heartrate":  144.4,
+                                "max_heartrate":  154.0,
+                                "segment":  {
+                                                "id":  9839575,
+                                                "resource_state":  2,
+                                                "name":  "Over Kopstadkrysset",
+                                                "activity_type":  "Ride",
+                                                "distance":  2132.8,
+                                                "average_grade":  0.3,
+                                                "maximum_grade":  11.3,
+                                                "elevation_high":  98.2,
+                                                "elevation_low":  80.2,
+                                                "start_latlng":  [
+                                                                     59.425822,
+                                                                     10.381844
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.420733,
+                                                                   10.34644
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Nykirke",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322959211092,
+                                "resource_state":  2,
+                                "name":  "Knapstad-Hauan baklengs",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  465,
+                                "moving_time":  465,
+                                "start_date":  "2025-10-25T11:35:39Z",
+                                "start_date_local":  "2025-10-25T13:35:39Z",
+                                "distance":  3566.0,
+                                "start_index":  537,
+                                "end_index":  669,
+                                "device_watts":  false,
+                                "average_heartrate":  144.5,
+                                "max_heartrate":  155.0,
+                                "segment":  {
+                                                "id":  28992901,
+                                                "resource_state":  2,
+                                                "name":  "Knapstad-Hauan baklengs",
+                                                "activity_type":  "Ride",
+                                                "distance":  3566.0,
+                                                "average_grade":  -0.2,
+                                                "maximum_grade":  5.2,
+                                                "elevation_high":  111.4,
+                                                "elevation_low":  95.2,
+                                                "start_latlng":  [
+                                                                     59.419648,
+                                                                     10.335066
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.388429,
+                                                                   10.334342
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Våle",
+                                                "state":  "Vestfold og Telemark",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322959346260,
+                                "resource_state":  2,
+                                "name":  "Hengsrudveien v. Hauganveien - Knapstad",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  244,
+                                "moving_time":  244,
+                                "start_date":  "2025-10-25T11:43:32Z",
+                                "start_date_local":  "2025-10-25T13:43:32Z",
+                                "distance":  2165.1,
+                                "start_index":  672,
+                                "end_index":  759,
+                                "device_watts":  false,
+                                "average_heartrate":  142.1,
+                                "max_heartrate":  151.0,
+                                "segment":  {
+                                                "id":  14543619,
+                                                "resource_state":  2,
+                                                "name":  "Hengsrudveien v. Hauganveien - Knapstad",
+                                                "activity_type":  "Ride",
+                                                "distance":  2165.1,
+                                                "average_grade":  -1.8,
+                                                "maximum_grade":  3.6,
+                                                "elevation_high":  101.9,
+                                                "elevation_low":  63.9,
+                                                "start_latlng":  [
+                                                                     59.387958,
+                                                                     10.334163
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.381145,
+                                                                   10.362971
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Våle",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322956752468,
+                                "resource_state":  2,
+                                "name":  "Pauliveien sørøst fra E18 til Skoppum ved jernbaneovergang",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  571,
+                                "moving_time":  571,
+                                "start_date":  "2025-10-25T11:54:08Z",
+                                "start_date_local":  "2025-10-25T13:54:08Z",
+                                "distance":  3693.9,
+                                "start_index":  869,
+                                "end_index":  1086,
+                                "device_watts":  false,
+                                "average_heartrate":  141.8,
+                                "max_heartrate":  158.0,
+                                "segment":  {
+                                                "id":  28753789,
+                                                "resource_state":  2,
+                                                "name":  "Pauliveien sørøst fra E18 til Skoppum ved jernbaneovergang",
+                                                "activity_type":  "Ride",
+                                                "distance":  3693.9,
+                                                "average_grade":  -0.5,
+                                                "maximum_grade":  32.3,
+                                                "elevation_high":  107.1,
+                                                "elevation_low":  47.7,
+                                                "start_latlng":  [
+                                                                     59.402075,
+                                                                     10.367447
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.383807,
+                                                                   10.409868
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  null,
+                                                "state":  "Vestfold og Telemark",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  3,
+                                "achievements":  [
+                                                     {
+                                                         "type_id":  3,
+                                                         "type":  "pr",
+                                                         "rank":  3
+                                                     }
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  true
+                            },
+                            {
+                                "id":  3417166322958767700,
+                                "resource_state":  2,
+                                "name":  "Pauliveien sprint climb",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  109,
+                                "moving_time":  109,
+                                "start_date":  "2025-10-25T11:54:09Z",
+                                "start_date_local":  "2025-10-25T13:54:09Z",
+                                "distance":  343.6,
+                                "start_index":  870,
+                                "end_index":  894,
+                                "device_watts":  false,
+                                "average_heartrate":  150.1,
+                                "max_heartrate":  154.0,
+                                "segment":  {
+                                                "id":  24295399,
+                                                "resource_state":  2,
+                                                "name":  "Pauliveien sprint climb",
+                                                "activity_type":  "Ride",
+                                                "distance":  343.6,
+                                                "average_grade":  0.1,
+                                                "maximum_grade":  0.7,
+                                                "elevation_high":  362.8,
+                                                "elevation_low":  362.2,
+                                                "start_latlng":  [
+                                                                     59.402008,
+                                                                     10.367567
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.401043,
+                                                                   10.373095
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Skoppum",
+                                                "state":  "Vestfold og Telemark",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322957426260,
+                                "resource_state":  2,
+                                "name":  "Pauliveien - E18 til Reirveien",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  518,
+                                "moving_time":  518,
+                                "start_date":  "2025-10-25T11:54:12Z",
+                                "start_date_local":  "2025-10-25T13:54:12Z",
+                                "distance":  3497.8,
+                                "start_index":  871,
+                                "end_index":  1068,
+                                "device_watts":  false,
+                                "average_heartrate":  142.0,
+                                "max_heartrate":  158.0,
+                                "segment":  {
+                                                "id":  17382007,
+                                                "resource_state":  2,
+                                                "name":  "Pauliveien - E18 til Reirveien",
+                                                "activity_type":  "Ride",
+                                                "distance":  3497.8,
+                                                "average_grade":  -0.7,
+                                                "maximum_grade":  14.0,
+                                                "elevation_high":  109.0,
+                                                "elevation_low":  49.4,
+                                                "start_latlng":  [
+                                                                     59.401968,
+                                                                     10.367745
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.384744,
+                                                                   10.407372
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  null,
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  3,
+                                "achievements":  [
+                                                     {
+                                                         "type_id":  3,
+                                                         "type":  "pr",
+                                                         "rank":  3
+                                                     }
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322959607380,
+                                "resource_state":  2,
+                                "name":  "Pauliveien opp fra vest",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  328,
+                                "moving_time":  328,
+                                "start_date":  "2025-10-25T11:54:16Z",
+                                "start_date_local":  "2025-10-25T13:54:16Z",
+                                "distance":  1525.6,
+                                "start_index":  873,
+                                "end_index":  969,
+                                "device_watts":  false,
+                                "average_heartrate":  150.1,
+                                "max_heartrate":  158.0,
+                                "segment":  {
+                                                "id":  9689023,
+                                                "resource_state":  2,
+                                                "name":  "Pauliveien opp fra vest",
+                                                "activity_type":  "Ride",
+                                                "distance":  1525.6,
+                                                "average_grade":  2.1,
+                                                "maximum_grade":  17.0,
+                                                "elevation_high":  68.8,
+                                                "elevation_low":  37.2,
+                                                "start_latlng":  [
+                                                                     59.401865,
+                                                                     10.367809
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.394411,
+                                                                   10.386585
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  null,
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322960279124,
+                                "resource_state":  2,
+                                "name":  "Brekke-Løs",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  417,
+                                "moving_time":  417,
+                                "start_date":  "2025-10-25T11:54:38Z",
+                                "start_date_local":  "2025-10-25T13:54:38Z",
+                                "distance":  2669.9,
+                                "start_index":  880,
+                                "end_index":  1031,
+                                "device_watts":  false,
+                                "average_heartrate":  146.0,
+                                "max_heartrate":  158.0,
+                                "segment":  {
+                                                "id":  9148392,
+                                                "resource_state":  2,
+                                                "name":  "Brekke-Løs",
+                                                "activity_type":  "Ride",
+                                                "distance":  2669.9,
+                                                "average_grade":  0.0,
+                                                "maximum_grade":  11.9,
+                                                "elevation_high":  111.6,
+                                                "elevation_low":  80.0,
+                                                "start_latlng":  [
+                                                                     59.401465,
+                                                                     10.368847
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.390161,
+                                                                   10.403491
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  null,
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  true
+                            },
+                            {
+                                "id":  3417166322958154324,
+                                "resource_state":  2,
+                                "name":  "Pauliveien nedover til Skoppum",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  209,
+                                "moving_time":  209,
+                                "start_date":  "2025-10-25T11:59:25Z",
+                                "start_date_local":  "2025-10-25T13:59:25Z",
+                                "distance":  2104.8,
+                                "start_index":  964,
+                                "end_index":  1069,
+                                "device_watts":  false,
+                                "average_heartrate":  130.0,
+                                "max_heartrate":  154.0,
+                                "segment":  {
+                                                "id":  17382015,
+                                                "resource_state":  2,
+                                                "name":  "Pauliveien nedover til Skoppum",
+                                                "activity_type":  "Ride",
+                                                "distance":  2104.8,
+                                                "average_grade":  -2.7,
+                                                "maximum_grade":  3.9,
+                                                "elevation_high":  109.0,
+                                                "elevation_low":  49.4,
+                                                "start_latlng":  [
+                                                                     59.394466,
+                                                                     10.384083
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.384656,
+                                                                   10.40736
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Skoppum",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  3,
+                                "achievements":  [
+                                                     {
+                                                         "type_id":  3,
+                                                         "type":  "pr",
+                                                         "rank":  3
+                                                     }
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322960332372,
+                                "resource_state":  2,
+                                "name":  "Broa - Bikeshop",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  88,
+                                "moving_time":  88,
+                                "start_date":  "2025-10-25T12:03:39Z",
+                                "start_date_local":  "2025-10-25T14:03:39Z",
+                                "distance":  844.9,
+                                "start_index":  1086,
+                                "end_index":  1136,
+                                "device_watts":  false,
+                                "average_heartrate":  115.9,
+                                "max_heartrate":  142.0,
+                                "segment":  {
+                                                "id":  39616090,
+                                                "resource_state":  2,
+                                                "name":  "Broa - Bikeshop",
+                                                "activity_type":  "Ride",
+                                                "distance":  844.9,
+                                                "average_grade":  -3.8,
+                                                "maximum_grade":  10.2,
+                                                "elevation_high":  60.8,
+                                                "elevation_low":  26.4,
+                                                "start_latlng":  [
+                                                                     59.38371,
+                                                                     10.409925
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.383928,
+                                                                   10.417995
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Horten",
+                                                "state":  "Vestfold og Telemark",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322959221332,
+                                "resource_state":  2,
+                                "name":  "Skoppum-Undergang Borre",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  226,
+                                "moving_time":  226,
+                                "start_date":  "2025-10-25T12:07:49Z",
+                                "start_date_local":  "2025-10-25T14:07:49Z",
+                                "distance":  1766.5,
+                                "start_index":  1192,
+                                "end_index":  1251,
+                                "device_watts":  false,
+                                "average_heartrate":  134.9,
+                                "max_heartrate":  140.0,
+                                "segment":  {
+                                                "id":  20104183,
+                                                "resource_state":  2,
+                                                "name":  "Skoppum-Undergang Borre",
+                                                "activity_type":  "Ride",
+                                                "distance":  1766.5,
+                                                "average_grade":  -0.3,
+                                                "maximum_grade":  9.9,
+                                                "elevation_high":  40.6,
+                                                "elevation_low":  29.0,
+                                                "start_latlng":  [
+                                                                     59.384733,
+                                                                     10.433467
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.384259,
+                                                                   10.462642
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Borre",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322958094932,
+                                "resource_state":  2,
+                                "name":  "Sandeveien Sprinten",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  106,
+                                "moving_time":  106,
+                                "start_date":  "2025-10-25T12:09:42Z",
+                                "start_date_local":  "2025-10-25T14:09:42Z",
+                                "distance":  915.194,
+                                "start_index":  1224,
+                                "end_index":  1249,
+                                "device_watts":  false,
+                                "average_heartrate":  135.5,
+                                "max_heartrate":  138.0,
+                                "segment":  {
+                                                "id":  1958609,
+                                                "resource_state":  2,
+                                                "name":  "Sandeveien Sprinten",
+                                                "activity_type":  "Ride",
+                                                "distance":  915.194,
+                                                "average_grade":  -0.7,
+                                                "maximum_grade":  0.3,
+                                                "elevation_high":  35.2,
+                                                "elevation_low":  28.6,
+                                                "start_latlng":  [
+                                                                     59.38218177090556,
+                                                                     10.446551016144053
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.38419248621552,
+                                                                   10.462180080382753
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Borre",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322959856212,
+                                "resource_state":  2,
+                                "name":  "Liten bakke etter tunnelen",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  84,
+                                "moving_time":  84,
+                                "start_date":  "2025-10-25T12:12:01Z",
+                                "start_date_local":  "2025-10-25T14:12:01Z",
+                                "distance":  385.0,
+                                "start_index":  1264,
+                                "end_index":  1286,
+                                "device_watts":  false,
+                                "average_heartrate":  135.4,
+                                "max_heartrate":  142.0,
+                                "segment":  {
+                                                "id":  14912233,
+                                                "resource_state":  2,
+                                                "name":  "Liten bakke etter tunnelen",
+                                                "activity_type":  "Ride",
+                                                "distance":  385.0,
+                                                "average_grade":  3.3,
+                                                "maximum_grade":  12.5,
+                                                "elevation_high":  -48.4,
+                                                "elevation_low":  -61.0,
+                                                "start_latlng":  [
+                                                                     59.385301,
+                                                                     10.465501
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.38876,
+                                                                   10.464658
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Borre",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322958714452,
+                                "resource_state":  2,
+                                "name":  "Shellpølsesprinten",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  233,
+                                "moving_time":  233,
+                                "start_date":  "2025-10-25T12:13:36Z",
+                                "start_date_local":  "2025-10-25T14:13:36Z",
+                                "distance":  1733.6,
+                                "start_index":  1288,
+                                "end_index":  1344,
+                                "device_watts":  false,
+                                "average_heartrate":  137.5,
+                                "max_heartrate":  144.0,
+                                "segment":  {
+                                                "id":  9699397,
+                                                "resource_state":  2,
+                                                "name":  "Shellpølsesprinten",
+                                                "activity_type":  "Ride",
+                                                "distance":  1733.6,
+                                                "average_grade":  0.2,
+                                                "maximum_grade":  2.8,
+                                                "elevation_high":  -32.0,
+                                                "elevation_low":  -43.6,
+                                                "start_latlng":  [
+                                                                     59.389331,
+                                                                     10.464351
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.403516,
+                                                                   10.469778
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Horten",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322960477780,
+                                "resource_state":  2,
+                                "name":  "Siste del før skogen",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  83,
+                                "moving_time":  83,
+                                "start_date":  "2025-10-25T12:13:43Z",
+                                "start_date_local":  "2025-10-25T14:13:43Z",
+                                "distance":  630.6,
+                                "start_index":  1289,
+                                "end_index":  1313,
+                                "device_watts":  false,
+                                "average_heartrate":  133.3,
+                                "max_heartrate":  141.0,
+                                "segment":  {
+                                                "id":  14912269,
+                                                "resource_state":  2,
+                                                "name":  "Siste del før skogen",
+                                                "activity_type":  "Ride",
+                                                "distance":  630.6,
+                                                "average_grade":  0.1,
+                                                "maximum_grade":  1.9,
+                                                "elevation_high":  -47.6,
+                                                "elevation_low":  -52.6,
+                                                "start_latlng":  [
+                                                                     59.389798,
+                                                                     10.464267
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.395353,
+                                                                   10.462311
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Borre",
+                                                "state":  "Vestfold",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "everyone",
+                                "hidden":  false
+                            },
+                            {
+                                "id":  3417166322957257300,
+                                "resource_state":  2,
+                                "name":  "Arne Beckers Reverse",
+                                "activity":  {
+                                                 "id":  16251885270,
+                                                 "visibility":  "everyone",
+                                                 "resource_state":  1
+                                             },
+                                "athlete":  {
+                                                "id":  55313385,
+                                                "resource_state":  1
+                                            },
+                                "elapsed_time":  122,
+                                "moving_time":  122,
+                                "start_date":  "2025-10-25T12:17:53Z",
+                                "start_date_local":  "2025-10-25T14:17:53Z",
+                                "distance":  828.7,
+                                "start_index":  1356,
+                                "end_index":  1396,
+                                "device_watts":  false,
+                                "average_heartrate":  129.9,
+                                "max_heartrate":  139.0,
+                                "segment":  {
+                                                "id":  39616209,
+                                                "resource_state":  2,
+                                                "name":  "Arne Beckers Reverse",
+                                                "activity_type":  "Ride",
+                                                "distance":  828.7,
+                                                "average_grade":  0.9,
+                                                "maximum_grade":  10.3,
+                                                "elevation_high":  49.4,
+                                                "elevation_low":  41.6,
+                                                "start_latlng":  [
+                                                                     59.404862,
+                                                                     10.47044
+                                                                 ],
+                                                "end_latlng":  [
+                                                                   59.411556,
+                                                                   10.474302
+                                                               ],
+                                                "elevation_profile":  null,
+                                                "elevation_profiles":  null,
+                                                "climb_category":  0,
+                                                "city":  "Horten",
+                                                "state":  "Vestfold og Telemark",
+                                                "country":  "Norway",
+                                                "private":  false,
+                                                "hazardous":  false,
+                                                "starred":  false
+                                            },
+                                "pr_rank":  null,
+                                "achievements":  [
+
+                                                 ],
+                                "visibility":  "only_me",
+                                "hidden":  false
+                            }
+                        ],
+    "splits_metric":  [
+                          {
+                              "distance":  1031.5,
+                              "elapsed_time":  147,
+                              "elevation_difference":  52.0,
+                              "moving_time":  147,
+                              "split":  1,
+                              "average_speed":  7.02,
+                              "average_grade_adjusted_speed":  8.43,
+                              "average_heartrate":  110.0223880597015,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1027.2,
+                              "elapsed_time":  115,
+                              "elevation_difference":  -0.4,
+                              "moving_time":  115,
+                              "split":  2,
+                              "average_speed":  8.93,
+                              "average_grade_adjusted_speed":  8.95,
+                              "average_heartrate":  138.81739130434784,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  947.6,
+                              "elapsed_time":  105,
+                              "elevation_difference":  -21.6,
+                              "moving_time":  105,
+                              "split":  3,
+                              "average_speed":  9.02,
+                              "average_grade_adjusted_speed":  8.64,
+                              "average_heartrate":  121.77142857142857,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1004.6,
+                              "elapsed_time":  96,
+                              "elevation_difference":  -18.6,
+                              "moving_time":  96,
+                              "split":  4,
+                              "average_speed":  10.46,
+                              "average_grade_adjusted_speed":  10.16,
+                              "average_heartrate":  131.61458333333334,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  998.3,
+                              "elapsed_time":  122,
+                              "elevation_difference":  0.0,
+                              "moving_time":  122,
+                              "split":  5,
+                              "average_speed":  8.18,
+                              "average_grade_adjusted_speed":  8.19,
+                              "average_heartrate":  146.2377049180328,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  992.3,
+                              "elapsed_time":  130,
+                              "elevation_difference":  -6.0,
+                              "moving_time":  130,
+                              "split":  6,
+                              "average_speed":  7.63,
+                              "average_grade_adjusted_speed":  7.62,
+                              "average_heartrate":  142.08461538461538,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1020.4,
+                              "elapsed_time":  249,
+                              "elevation_difference":  25.8,
+                              "moving_time":  249,
+                              "split":  7,
+                              "average_speed":  4.1,
+                              "average_grade_adjusted_speed":  4.54,
+                              "average_heartrate":  148.10843373493975,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  995.2,
+                              "elapsed_time":  142,
+                              "elevation_difference":  23.6,
+                              "moving_time":  142,
+                              "split":  8,
+                              "average_speed":  7.01,
+                              "average_grade_adjusted_speed":  7.55,
+                              "average_heartrate":  144.8661971830986,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1004.5,
+                              "elapsed_time":  151,
+                              "elevation_difference":  12.6,
+                              "moving_time":  151,
+                              "split":  9,
+                              "average_speed":  6.65,
+                              "average_grade_adjusted_speed":  6.98,
+                              "average_heartrate":  145.17880794701986,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  980.2,
+                              "elapsed_time":  130,
+                              "elevation_difference":  9.6,
+                              "moving_time":  130,
+                              "split":  10,
+                              "average_speed":  7.54,
+                              "average_grade_adjusted_speed":  7.88,
+                              "average_heartrate":  141.72307692307692,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1041.5,
+                              "elapsed_time":  147,
+                              "elevation_difference":  3.8,
+                              "moving_time":  147,
+                              "split":  11,
+                              "average_speed":  7.09,
+                              "average_grade_adjusted_speed":  7.24,
+                              "average_heartrate":  146.63945578231292,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  978.2,
+                              "elapsed_time":  124,
+                              "elevation_difference":  4.2,
+                              "moving_time":  124,
+                              "split":  12,
+                              "average_speed":  7.89,
+                              "average_grade_adjusted_speed":  8.1,
+                              "average_heartrate":  138.13709677419354,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  999.3,
+                              "elapsed_time":  174,
+                              "elevation_difference":  11.8,
+                              "moving_time":  174,
+                              "split":  13,
+                              "average_speed":  5.74,
+                              "average_grade_adjusted_speed":  5.99,
+                              "average_heartrate":  146.8448275862069,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  984.5,
+                              "elapsed_time":  132,
+                              "elevation_difference":  0.0,
+                              "moving_time":  132,
+                              "split":  14,
+                              "average_speed":  7.46,
+                              "average_grade_adjusted_speed":  7.52,
+                              "average_heartrate":  146.78030303030303,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1014.4,
+                              "elapsed_time":  129,
+                              "elevation_difference":  2.0,
+                              "moving_time":  129,
+                              "split":  15,
+                              "average_speed":  7.86,
+                              "average_grade_adjusted_speed":  7.97,
+                              "average_heartrate":  141.15503875968992,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  999.8,
+                              "elapsed_time":  117,
+                              "elevation_difference":  -20.8,
+                              "moving_time":  117,
+                              "split":  16,
+                              "average_speed":  8.55,
+                              "average_grade_adjusted_speed":  8.21,
+                              "average_heartrate":  144.0940170940171,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1000.8,
+                              "elapsed_time":  110,
+                              "elevation_difference":  -21.8,
+                              "moving_time":  110,
+                              "split":  17,
+                              "average_speed":  9.1,
+                              "average_grade_adjusted_speed":  8.81,
+                              "average_heartrate":  142.6,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  998.3,
+                              "elapsed_time":  114,
+                              "elevation_difference":  -8.6,
+                              "moving_time":  114,
+                              "split":  18,
+                              "average_speed":  8.76,
+                              "average_grade_adjusted_speed":  8.73,
+                              "average_heartrate":  141.19298245614036,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  996.5,
+                              "elapsed_time":  152,
+                              "elevation_difference":  3.8,
+                              "moving_time":  152,
+                              "split":  19,
+                              "average_speed":  6.56,
+                              "average_grade_adjusted_speed":  6.69,
+                              "average_heartrate":  143.375,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  990.1,
+                              "elapsed_time":  138,
+                              "elevation_difference":  -9.6,
+                              "moving_time":  138,
+                              "split":  20,
+                              "average_speed":  7.17,
+                              "average_grade_adjusted_speed":  7.04,
+                              "average_heartrate":  147.5,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1004.0,
+                              "elapsed_time":  126,
+                              "elevation_difference":  -43.6,
+                              "moving_time":  126,
+                              "split":  21,
+                              "average_speed":  7.97,
+                              "average_grade_adjusted_speed":  7.51,
+                              "average_heartrate":  134.87301587301587,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  994.0,
+                              "elapsed_time":  196,
+                              "elevation_difference":  -26.0,
+                              "moving_time":  196,
+                              "split":  22,
+                              "average_speed":  5.07,
+                              "average_grade_adjusted_speed":  5.03,
+                              "average_heartrate":  148.7295918367347,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1039.8,
+                              "elapsed_time":  184,
+                              "elevation_difference":  -9.6,
+                              "moving_time":  184,
+                              "split":  23,
+                              "average_speed":  5.65,
+                              "average_grade_adjusted_speed":  5.72,
+                              "average_heartrate":  148.7608695652174,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  963.7,
+                              "elapsed_time":  87,
+                              "elevation_difference":  -32.0,
+                              "moving_time":  87,
+                              "split":  24,
+                              "average_speed":  11.08,
+                              "average_grade_adjusted_speed":  10.43,
+                              "average_heartrate":  127.5632183908046,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1001.4,
+                              "elapsed_time":  133,
+                              "elevation_difference":  -26.8,
+                              "moving_time":  133,
+                              "split":  25,
+                              "average_speed":  7.53,
+                              "average_grade_adjusted_speed":  7.31,
+                              "average_heartrate":  127.796992481203,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  999.7,
+                              "elapsed_time":  142,
+                              "elevation_difference":  -10.6,
+                              "moving_time":  142,
+                              "split":  26,
+                              "average_speed":  7.04,
+                              "average_grade_adjusted_speed":  6.97,
+                              "average_heartrate":  127.00704225352112,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1006.8,
+                              "elapsed_time":  143,
+                              "elevation_difference":  -8.4,
+                              "moving_time":  143,
+                              "split":  27,
+                              "average_speed":  7.04,
+                              "average_grade_adjusted_speed":  7.02,
+                              "average_heartrate":  137.87412587412587,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  993.3,
+                              "elapsed_time":  114,
+                              "elevation_difference":  -7.6,
+                              "moving_time":  114,
+                              "split":  28,
+                              "average_speed":  8.71,
+                              "average_grade_adjusted_speed":  8.61,
+                              "average_heartrate":  135.06140350877192,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  1028.0,
+                              "elapsed_time":  169,
+                              "elevation_difference":  3.2,
+                              "moving_time":  169,
+                              "split":  29,
+                              "average_speed":  6.08,
+                              "average_grade_adjusted_speed":  6.24,
+                              "average_heartrate":  134.18343195266272,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  970.3,
+                              "elapsed_time":  130,
+                              "elevation_difference":  -2.6,
+                              "moving_time":  130,
+                              "split":  30,
+                              "average_speed":  7.46,
+                              "average_grade_adjusted_speed":  7.47,
+                              "average_heartrate":  135.98461538461538,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  997.2,
+                              "elapsed_time":  141,
+                              "elevation_difference":  7.2,
+                              "moving_time":  141,
+                              "split":  31,
+                              "average_speed":  7.07,
+                              "average_grade_adjusted_speed":  7.25,
+                              "average_heartrate":  135.66666666666666,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  851.6,
+                              "elapsed_time":  127,
+                              "elevation_difference":  3.2,
+                              "moving_time":  127,
+                              "split":  32,
+                              "average_speed":  6.71,
+                              "average_grade_adjusted_speed":  6.85,
+                              "average_heartrate":  130.37007874015748,
+                              "pace_zone":  0
+                          }
+                      ],
+    "splits_standard":  [
+                            {
+                                "distance":  1637.5,
+                                "elapsed_time":  214,
+                                "elevation_difference":  55.2,
+                                "moving_time":  214,
+                                "split":  1,
+                                "average_speed":  7.65,
+                                "average_grade_adjusted_speed":  8.66,
+                                "average_heartrate":  119.29850746268657,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1590.7,
+                                "elapsed_time":  170,
+                                "elevation_difference":  -38.4,
+                                "moving_time":  170,
+                                "split":  2,
+                                "average_speed":  9.36,
+                                "average_grade_adjusted_speed":  8.95,
+                                "average_heartrate":  126.68235294117648,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1613.9,
+                                "elapsed_time":  179,
+                                "elevation_difference":  -1.6,
+                                "moving_time":  179,
+                                "split":  3,
+                                "average_speed":  9.02,
+                                "average_grade_adjusted_speed":  9.03,
+                                "average_heartrate":  140.39106145251398,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1605.6,
+                                "elapsed_time":  283,
+                                "elevation_difference":  -6.0,
+                                "moving_time":  283,
+                                "split":  4,
+                                "average_speed":  5.67,
+                                "average_grade_adjusted_speed":  5.71,
+                                "average_heartrate":  145.3356890459364,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1648.9,
+                                "elapsed_time":  270,
+                                "elevation_difference":  46.6,
+                                "moving_time":  270,
+                                "split":  5,
+                                "average_speed":  6.11,
+                                "average_grade_adjusted_speed":  6.74,
+                                "average_heartrate":  146.5,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1567.5,
+                                "elapsed_time":  212,
+                                "elevation_difference":  8.4,
+                                "moving_time":  212,
+                                "split":  6,
+                                "average_speed":  7.39,
+                                "average_grade_adjusted_speed":  7.62,
+                                "average_heartrate":  143.00943396226415,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1657.5,
+                                "elapsed_time":  245,
+                                "elevation_difference":  17.4,
+                                "moving_time":  245,
+                                "split":  7,
+                                "average_speed":  6.77,
+                                "average_grade_adjusted_speed":  7.04,
+                                "average_heartrate":  145.87755102040816,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1578.2,
+                                "elapsed_time":  243,
+                                "elevation_difference":  11.8,
+                                "moving_time":  243,
+                                "split":  8,
+                                "average_speed":  6.49,
+                                "average_grade_adjusted_speed":  6.74,
+                                "average_heartrate":  143.3045267489712,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1587.1,
+                                "elapsed_time":  202,
+                                "elevation_difference":  0.8,
+                                "moving_time":  202,
+                                "split":  9,
+                                "average_speed":  7.86,
+                                "average_grade_adjusted_speed":  7.92,
+                                "average_heartrate":  143.1039603960396,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1626.7,
+                                "elapsed_time":  204,
+                                "elevation_difference":  -16.4,
+                                "moving_time":  204,
+                                "split":  10,
+                                "average_speed":  7.97,
+                                "average_grade_adjusted_speed":  7.88,
+                                "average_heartrate":  143.87254901960785,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1629.2,
+                                "elapsed_time":  179,
+                                "elevation_difference":  -24.0,
+                                "moving_time":  179,
+                                "split":  11,
+                                "average_speed":  9.1,
+                                "average_grade_adjusted_speed":  8.97,
+                                "average_heartrate":  141.91061452513966,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1594.7,
+                                "elapsed_time":  234,
+                                "elevation_difference":  -2.8,
+                                "moving_time":  234,
+                                "split":  12,
+                                "average_speed":  6.81,
+                                "average_grade_adjusted_speed":  6.86,
+                                "average_heartrate":  144.31623931623932,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1599.6,
+                                "elapsed_time":  199,
+                                "elevation_difference":  -51.4,
+                                "moving_time":  199,
+                                "split":  13,
+                                "average_speed":  8.04,
+                                "average_grade_adjusted_speed":  7.67,
+                                "average_heartrate":  140.8643216080402,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1594.0,
+                                "elapsed_time":  347,
+                                "elevation_difference":  -18.2,
+                                "moving_time":  347,
+                                "split":  14,
+                                "average_speed":  4.59,
+                                "average_grade_adjusted_speed":  4.7,
+                                "average_heartrate":  149.164265129683,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1615.9,
+                                "elapsed_time":  150,
+                                "elevation_difference":  -59.8,
+                                "moving_time":  150,
+                                "split":  15,
+                                "average_speed":  10.77,
+                                "average_grade_adjusted_speed":  10.07,
+                                "average_heartrate":  130.72,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1610.0,
+                                "elapsed_time":  208,
+                                "elevation_difference":  -32.0,
+                                "moving_time":  208,
+                                "split":  16,
+                                "average_speed":  7.74,
+                                "average_grade_adjusted_speed":  7.58,
+                                "average_heartrate":  124.4423076923077,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1614.2,
+                                "elapsed_time":  238,
+                                "elevation_difference":  -6.0,
+                                "moving_time":  238,
+                                "split":  17,
+                                "average_speed":  6.78,
+                                "average_grade_adjusted_speed":  6.8,
+                                "average_heartrate":  138.1344537815126,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1599.2,
+                                "elapsed_time":  230,
+                                "elevation_difference":  -3.8,
+                                "moving_time":  230,
+                                "split":  18,
+                                "average_speed":  6.95,
+                                "average_grade_adjusted_speed":  7.03,
+                                "average_heartrate":  134.45652173913044,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1659.3,
+                                "elapsed_time":  227,
+                                "elevation_difference":  1.2,
+                                "moving_time":  227,
+                                "split":  19,
+                                "average_speed":  7.31,
+                                "average_grade_adjusted_speed":  7.36,
+                                "average_heartrate":  137.6079295154185,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1225.3,
+                                "elapsed_time":  182,
+                                "elevation_difference":  7.2,
+                                "moving_time":  182,
+                                "split":  20,
+                                "average_speed":  6.73,
+                                "average_grade_adjusted_speed":  6.91,
+                                "average_heartrate":  130.13186813186815,
+                                "pace_zone":  0
+                            }
+                        ],
+    "laps":  [
+                 {
+                     "id":  57911764639,
+                     "resource_state":  2,
+                     "name":  "Lap 1",
+                     "activity":  {
+                                      "id":  16251885270,
+                                      "visibility":  "everyone",
+                                      "resource_state":  1
+                                  },
+                     "athlete":  {
+                                     "id":  55313385,
+                                     "resource_state":  1
+                                 },
+                     "elapsed_time":  1386,
+                     "moving_time":  1386,
+                     "start_date":  "2025-10-25T11:06:38Z",
+                     "start_date_local":  "2025-10-25T13:06:38Z",
+                     "distance":  10000.0,
+                     "average_speed":  7.22,
+                     "max_speed":  13.68,
+                     "lap_index":  1,
+                     "split":  1,
+                     "start_index":  0,
+                     "end_index":  385,
+                     "total_elevation_gain":  186.2,
+                     "device_watts":  false,
+                     "average_watts":  220.2,
+                     "average_heartrate":  138.5,
+                     "max_heartrate":  155.0
+                 },
+                 {
+                     "id":  57911764650,
+                     "resource_state":  2,
+                     "name":  "Lap 2",
+                     "activity":  {
+                                      "id":  16251885270,
+                                      "visibility":  "everyone",
+                                      "resource_state":  1
+                                  },
+                     "athlete":  {
+                                     "id":  55313385,
+                                     "resource_state":  1
+                                 },
+                     "elapsed_time":  1336,
+                     "moving_time":  1336,
+                     "start_date":  "2025-10-25T11:29:46Z",
+                     "start_date_local":  "2025-10-25T13:29:46Z",
+                     "distance":  10000.0,
+                     "average_speed":  7.49,
+                     "max_speed":  12.72,
+                     "lap_index":  2,
+                     "split":  2,
+                     "start_index":  386,
+                     "end_index":  780,
+                     "total_elevation_gain":  100.2,
+                     "device_watts":  false,
+                     "average_watts":  161.3,
+                     "average_heartrate":  144.1,
+                     "max_heartrate":  155.0
+                 },
+                 {
+                     "id":  57911764663,
+                     "resource_state":  2,
+                     "name":  "Lap 3",
+                     "activity":  {
+                                      "id":  16251885270,
+                                      "visibility":  "everyone",
+                                      "resource_state":  1
+                                  },
+                     "athlete":  {
+                                     "id":  55313385,
+                                     "resource_state":  1
+                                 },
+                     "elapsed_time":  1423,
+                     "moving_time":  1423,
+                     "start_date":  "2025-10-25T11:52:08Z",
+                     "start_date_local":  "2025-10-25T13:52:08Z",
+                     "distance":  10000.0,
+                     "average_speed":  7.03,
+                     "max_speed":  13.92,
+                     "lap_index":  3,
+                     "split":  3,
+                     "start_index":  781,
+                     "end_index":  1282,
+                     "total_elevation_gain":  76.4,
+                     "device_watts":  false,
+                     "average_watts":  118.5,
+                     "average_heartrate":  137.0,
+                     "max_heartrate":  158.0
+                 },
+                 {
+                     "id":  57911764673,
+                     "resource_state":  2,
+                     "name":  "Lap 4",
+                     "activity":  {
+                                      "id":  16251885270,
+                                      "visibility":  "everyone",
+                                      "resource_state":  1
+                                  },
+                     "athlete":  {
+                                     "id":  55313385,
+                                     "resource_state":  1
+                                 },
+                     "elapsed_time":  268,
+                     "moving_time":  268,
+                     "start_date":  "2025-10-25T12:15:56Z",
+                     "start_date_local":  "2025-10-25T14:15:56Z",
+                     "distance":  1854.96,
+                     "average_speed":  6.92,
+                     "max_speed":  9.04,
+                     "lap_index":  4,
+                     "split":  4,
+                     "start_index":  1283,
+                     "end_index":  1349,
+                     "total_elevation_gain":  19.0,
+                     "device_watts":  false,
+                     "average_watts":  167.1,
+                     "average_heartrate":  133.0,
+                     "max_heartrate":  144.0
+                 }
+             ],
+    "gear":  {
+                 "id":  "b14561085",
+                 "primary":  false,
+                 "name":  "la Pierre ",
+                 "nickname":  "la Pierre ",
+                 "resource_state":  2,
+                 "retired":  false,
+                 "distance":  7030506,
+                 "converted_distance":  7030.5
+             },
+    "photos":  {
+                   "primary":  null,
+                   "count":  0
+               },
+    "stats_visibility":  [
+                             {
+                                 "type":  "heart_rate",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "pace",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "power",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "speed",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "calories",
+                                 "visibility":  "everyone"
+                             }
+                         ],
+    "hide_from_home":  false,
+    "embed_token":  "9df00dbc85e7ca917de1dc38457ee48246ed99a0",
+    "available_zones":  [
+
+                        ]
+}

@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # Gjør at PyO3-eksport ALWAYS er med i dev/venv (løser PyInit-mangelen)
-python = []
+python = ["pyo3/extension-module", "pyo3/abi3-py38"] 
 default = ["python"]
 
 [dependencies]

@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 # -----------------------------------------------------------------------------
 # Pre-flight: .env (last .env tidlig og med override)
 # -----------------------------------------------------------------------------
@@ -15,6 +14,8 @@ import time
 import logging
 import hashlib
 import inspect
+import json
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Callable, List, Literal
 
@@ -27,10 +28,12 @@ from cyclegraph.weather_client import get_weather_for_session, WeatherError
 # -----------------------------------------------------------------------------
 # Konfig
 # -----------------------------------------------------------------------------
+
 API_HOST = os.getenv("CG_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("CG_API_PORT", "5179"))  # default 5179
 
 app = FastAPI(title="CycleGraph API", version="0.1.0")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -46,8 +49,9 @@ app.add_middleware(
 # -----------------------------------------------------------------------------
 # Router-registrering
 # -----------------------------------------------------------------------------
+
 from server.routes import sessions
-app.include_router(sessions.router)
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cyclegraph.app")
@@ -58,6 +62,7 @@ def ts_ms(dt: datetime) -> int:
 # -----------------------------------------------------------------------------
 # Oppstartsmåling & core-import guard (for /api/health 503 ved feil)
 # -----------------------------------------------------------------------------
+
 _t0 = time.perf_counter()
 _start_iso = datetime.now(timezone.utc).isoformat()
 
@@ -71,7 +76,7 @@ except Exception as e:
 
 REQUIRED_ENV_KEYS: List[str] = [
     "STRAVA_CLIENT_ID",
-    "STRAVA_CLIENT_SECRET",
+    "STRAVA_CLIENT_SECRET", 
     "STRAVA_REFRESH_TOKEN",
     "STRAVA_ACCESS_TOKEN",
     "STRAVA_TOKEN_EXPIRES_AT",
@@ -88,6 +93,7 @@ def _missing_env(env_keys: List[str]) -> List[str]:
 # -----------------------------------------------------------------------------
 # Session storage + publish helpers
 # -----------------------------------------------------------------------------
+
 try:
     from cyclegraph.session_storage import (
         load_session as cg_load_session,
@@ -106,6 +112,7 @@ def save_session(session_id: str, data: Dict[str, Any]) -> None:
     cg_save_session(session_id, data)
 
 _settings_cache = None
+
 def get_settings_cached():
     global _settings_cache
     if _settings_cache is not None:
@@ -126,17 +133,47 @@ def maybe_publish_to_strava(session_id: str, token: str, enabled: bool) -> Dict[
         return {"ok": False, "error": f"publish exception: {e}"}
 
 # -----------------------------------------------------------------------------
+# Profil-normaliserings helper
+# -----------------------------------------------------------------------------
+
+def _norm_profile(p: dict) -> dict:
+    def _first(*keys, default=None):
+        for k in keys:
+            if k in p and p[k] is not None:
+                return p[k]
+        return default
+    # Tillat begge konvensjoner, returner i ett konsistent format
+    return {
+        "CdA": float(_first("cda", "CdA", "CDA", default=0.28)),
+        "Crr": float(_first("crr", "Crr", "CRR", default=0.004)),
+        "weight_kg": float(_first("weight_kg", "weightKg", "WeightKg", default=78.0)),
+        "device": _first("device", "Device", default="strava"),
+    }
+
+# -----------------------------------------------------------------------------
 # Analyzer-resolver (Rust PyO3 eller Python) + with_profile støtte
 # -----------------------------------------------------------------------------
+
 _ANALYZER: Optional[Callable[..., Dict[str, Any]]] = None
 _ANALYZER_MODE: Optional[str] = None  # "series" eller "dict"
 _HAS_ANALYZE_WITH_PROFILE: bool = False
+_HAS_COMPUTE_POWER_WITH_WIND: bool = False
 
 def _resolve_analyzer():
     """Finn beste tilgjengelige analyzer."""
-    global _ANALYZER, _ANALYZER_MODE, _HAS_ANALYZE_WITH_PROFILE
+    global _ANALYZER, _ANALYZER_MODE, _HAS_ANALYZE_WITH_PROFILE, _HAS_COMPUTE_POWER_WITH_WIND
+    
     if _ANALYZER is not None:
         return _ANALYZER
+
+    # Sjekk om core har compute_power_with_wind (foretrukket)
+    try:
+        from cyclegraph_core import compute_power_with_wind as _cpww
+        if callable(_cpww):
+            _HAS_COMPUTE_POWER_WITH_WIND = True
+            logger.info("Analyzer available: cyclegraph_core.compute_power_with_wind (modern)")
+    except Exception:
+        _HAS_COMPUTE_POWER_WITH_WIND = False
 
     # Sjekk om core har analyze_session_with_profile
     try:
@@ -182,11 +219,13 @@ def _resolve_analyzer():
                     return _ANALYZER
         except Exception:
             continue
+
     return None
 
 # -----------------------------------------------------------------------------
 # Serie/physics extractors
 # -----------------------------------------------------------------------------
+
 def _first_nonempty(*cands):
     for c in cands:
         if isinstance(c, (list, tuple)) and len(c) > 0:
@@ -202,7 +241,7 @@ def _extract_streams(session: Dict[str, Any]):
         streams.get("watts"),
         streams.get("power"),
         (s.get("data") or {}).get("streams", {}).get("watts")
-            if isinstance((s.get("data") or {}).get("streams"), dict) else None,
+        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
     pulses = _first_nonempty(
         s.get("pulses"),
@@ -210,17 +249,17 @@ def _extract_streams(session: Dict[str, Any]):
         streams.get("pulses"),
         streams.get("hr"),
         (s.get("data") or {}).get("streams", {}).get("pulses")
-            if isinstance((s.get("data") or {}).get("streams"), dict) else None,
+        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
     velocity = _first_nonempty(
         streams.get("velocity_smooth"),
         (s.get("data") or {}).get("streams", {}).get("velocity_smooth")
-            if isinstance((s.get("data") or {}).get("streams"), dict) else None,
+        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
     altitude = _first_nonempty(
         streams.get("altitude"),
         (s.get("data") or {}).get("streams", {}).get("altitude")
-            if isinstance((s.get("data") or {}).get("streams"), dict) else None,
+        if isinstance((s.get("data") or {}).get("streams", dict)) else None,
     )
     device_watts = s.get("device_watts")
     if device_watts is None:
@@ -245,6 +284,7 @@ def _extract_streams(session: Dict[str, Any]):
 # -----------------------------------------------------------------------------
 # Resultat-merger
 # -----------------------------------------------------------------------------
+
 def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
     out = dict(session)
     out["analysis_raw"] = analysis
@@ -279,6 +319,7 @@ def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
     prof = pick("profile")
     if prof is not None:
         out["profile"] = prof
+
     wa = pick("weather_applied")
     if wa is not None:
         out["weather_applied"] = bool(wa)
@@ -295,6 +336,7 @@ def _merge_analysis(session: Dict[str, Any], analysis: Any) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 # Request-modeller (vær-override + profil + options.force_recompute)
 # -----------------------------------------------------------------------------
+
 class ProfileIn(BaseModel):
     CdA: Optional[float] = Field(default=None, ge=0.15, le=0.6)
     Crr: Optional[float] = Field(default=None, ge=0.002, le=0.02)
@@ -310,6 +352,43 @@ class AnalyzeRequest(BaseModel):
     profile: Optional[ProfileIn] = None
     options: Optional[AnalyzeOptions] = None
 
+# ---- Inline payload modeller (gir requestBody i OpenAPI) ----
+
+class Sample(BaseModel):
+    timestamp_ms: Optional[int] = Field(None, description="Epoch ms")
+    time: Optional[str] = Field(None, description="ISO8601Z")
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    elev: Optional[float] = None
+    speed: Optional[float] = None
+    hr: Optional[float] = None
+    cadence: Optional[float] = None
+    watts: Optional[float] = None
+    temp: Optional[float] = None
+
+class Record(BaseModel):
+    timestamp_ms: int
+    pw: Optional[float] = None
+    np: Optional[float] = None
+    source: Optional[str] = None
+    calibrated: Optional[bool] = None
+
+class Profile(BaseModel):
+    CdA: Optional[float] = 0.28
+    Crr: Optional[float] = 0.004
+    weight_kg: Optional[float] = 78.0
+    device: Optional[str] = "strava"
+
+class InlineAnalyzeRequest(BaseModel):
+    profile: Optional[Profile] = None
+    samples: Optional[List[Sample]] = None
+    records: Optional[List[Record]] = None
+
+# Utvidet kombinasjonsmodell for å beholde eksisterende felt + inline
+class AnalyzeRequest2(AnalyzeRequest):
+    samples: Optional[List[Sample]] = None
+    records: Optional[List[Record]] = None
+
 # profilerings-metrikker (enkle tellere for observabilitet)
 PROFILE_USED_TOTAL = 0
 PROFILE_MISSING_TOTAL = 0
@@ -317,6 +396,7 @@ PROFILE_MISSING_TOTAL = 0
 # -----------------------------------------------------------------------------
 # Profil-hjelpere
 # -----------------------------------------------------------------------------
+
 DEFAULT_PROFILE: Dict[str, Any] = {"CdA": 0.30, "Crr": 0.005, "weight_kg": 80.0, "device": "unknown"}
 
 def _merge_profile(base: Optional[Dict[str, Any]], override: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -333,10 +413,10 @@ def _debug_power_proxy(profile: Dict[str, Any]) -> Dict[str, float]:
     """
     CdA = float(profile.get("CdA") or 0.30)
     Crr = float(profile.get("Crr") or 0.005)
-    w   = float(profile.get("weight_kg") or 80.0)
+    w = float(profile.get("weight_kg") or 80.0)
     total = 120.0 + CdA*520.0 + Crr*1800.0 + (w-75.0)*2.5
-    drag  = CdA*400.0 + 60.0
-    roll  = Crr*1200.0 + max(0.0, (w-75.0))*0.9
+    drag = CdA*400.0 + 60.0
+    roll = Crr*1200.0 + max(0.0, (w-75.0))*0.9
     aero_fraction = drag/total if total > 0 else None
     return {
         "total_watt": round(total, 1),
@@ -347,8 +427,50 @@ def _debug_power_proxy(profile: Dict[str, Any]) -> Dict[str, float]:
     }
 
 # -----------------------------------------------------------------------------
+# Inline normaliserings-hjelpere
+# -----------------------------------------------------------------------------
+
+def _iso_to_ms(iso: str) -> int:
+    # Robust ISO8601 → epoch ms
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return int(dt.timestamp() * 1000)
+
+def _records_to_samples(records: List[Record]) -> List[dict]:
+    out = []
+    for r in records:
+        out.append({
+            "timestamp_ms": r.timestamp_ms,
+            "watts": r.pw,  # speed/alt/HR ukjent – kan evt. estimeres i core
+        })
+    return out
+
+def _normalize_samples(samples: List[Sample]) -> List[dict]:
+    out = []
+    for s in samples:
+        ts = s.timestamp_ms
+        if ts is None and s.time:
+            try:
+                ts = _iso_to_ms(s.time)
+            except Exception:
+                pass
+        item = {
+            "timestamp_ms": ts,
+            "lat": s.lat,
+            "lon": s.lon,
+            "elev": s.elev,
+            "speed": s.speed,
+            "hr": s.hr,
+            "cadence": s.cadence,
+            "watts": s.watts,
+            "temp": s.temp,
+        }
+        out.append(item)
+    return out
+
+# -----------------------------------------------------------------------------
 # Oppstartshook
 # -----------------------------------------------------------------------------
+
 @app.on_event("startup")
 def _on_startup() -> None:
     dur = time.perf_counter() - _t0
@@ -360,15 +482,34 @@ def _on_startup() -> None:
     logger.info(f"Startup duration ~ {dur:.3f}s")
     logger.info(f"STRAVA_CLIENT_ID={cid}")
 
+@app.on_event("startup")
+async def _debug_dump_routes():
+    print("DEBUG ROUTES AT STARTUP:", file=sys.stderr)
+    for r in app.routes:
+        try:
+            ep = getattr(r, "endpoint", None)
+            mod = getattr(ep, "__module__", None)
+            name = getattr(ep, "__name__", None)
+            path = getattr(r, "path", None)
+            methods = getattr(r, "methods", None)
+            try:
+                src = (inspect.getsourcefile(ep) or inspect.getfile(ep)) if ep else None
+            except Exception:
+                src = None
+            print(f"  methods={methods} path={path} → {mod}.{name} src={src}", file=sys.stderr)
+        except Exception as e:
+            print(f"  route-print-error: {e}", file=sys.stderr)
+
 # -----------------------------------------------------------------------------
 # API: Health / Get / Analyze / Publish
 # -----------------------------------------------------------------------------
+
 @app.get("/api/health")
 def health():
     if not CORE_IMPORT_OK:
         raise HTTPException(status_code=503, detail={
             "ok": False,
-            "reason": "core_import_failed",
+            "reason": "core_import_failed", 
             "error": CORE_IMPORT_ERROR,
         })
     dur = time.perf_counter() - _t0
@@ -386,14 +527,30 @@ def api_get_session(sid: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
-@app.post("/api/sessions/{sid}/analyze")
-def api_analyze(
-    sid: str,
-    body: AnalyzeRequest | None = Body(default=None),
-    force_recompute_q: bool = Query(False, alias="force_recompute"),
-    x_cyclegraph_force: Optional[int] = Header(default=None, alias="X-CycleGraph-Force"),
-):
+
+    """
+    Støtter to datakilder:
+    1) Inline timeserie (samples/records) dersom ANALYZE_ALLOW_INLINE=1
+    2) Persistert session (tidligere oppførsel)
+    Fallback: stub-resultat dersom USE_STUB_FALLBACK=1 og ingen data finnes.
+    """
     global PROFILE_USED_TOTAL, PROFILE_MISSING_TOTAL
+
+    # DEBUG MARK for å bekrefte at vi er i riktig handler
+    print("DEBUG MARK: top of analyze handler", file=sys.stderr)
+    print(f"DEBUG WHO: module={__name__} file={__file__}", file=sys.stderr)
+
+    # Hent toggles
+    settings = get_settings_cached()
+    allow_inline = False
+    use_stub = True
+    if settings is not None:
+        if isinstance(settings, dict):
+            allow_inline = bool(settings.get("ANALYZE_ALLOW_INLINE", False))
+            use_stub = bool(settings.get("USE_STUB_FALLBACK", True))
+        else:
+            allow_inline = bool(getattr(settings, "ANALYZE_ALLOW_INLINE", False))
+            use_stub = bool(getattr(settings, "USE_STUB_FALLBACK", True))
 
     analyzer = _resolve_analyzer()
     if analyzer is None and not CORE_IMPORT_OK:
@@ -406,11 +563,54 @@ def api_analyze(
             ),
         )
 
-    # --- Last session (persist) ---
-    try:
-        session = load_session(sid)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
+    # --- Datakildevalg: inline vs persist ------------------------------------
+    inline_session: Optional[Dict[str, Any]] = None
+    source = "unknown"
+    norm_samples = None
+
+    if allow_inline and body is not None and (body.samples or body.records):
+        # Normaliser inline
+        if body.samples:
+            norm_samples = _normalize_samples(body.samples)
+        else:
+            norm_samples = _records_to_samples(body.records or [])
+
+        # Konstruer en minimal session-blob med streams
+        watts_series = [s.get("watts") for s in norm_samples if s.get("watts") is not None]
+        hr_series = [s.get("hr") for s in norm_samples if s.get("hr") is not None]
+        speed_series = [s.get("speed") for s in norm_samples if s.get("speed") is not None]
+        elev_series = [s.get("elev") for s in norm_samples if s.get("elev") is not None]
+
+        inline_session = {
+            "id": sid,
+            "streams": {
+                "watts": watts_series if watts_series else None,
+                "hr": hr_series if hr_series else None,
+                "velocity_smooth": speed_series if speed_series else None,
+                "altitude": elev_series if elev_series else None,
+            },
+            "device_watts": bool(watts_series),
+        }
+        if body.profile:
+            inline_session["profile"] = {
+                "CdA": body.profile.CdA,
+                "Crr": body.profile.Crr,
+                "weight_kg": body.profile.weight_kg,
+                "device": body.profile.device,
+            }
+        source = "inline"
+
+    # --- Last session (persist) hvis ikke inline
+    if inline_session is not None:
+        session = inline_session
+    else:
+        try:
+            session = load_session(sid)
+            source = "persist"
+        except Exception as e:
+            session = {}
+            source = "none"
+            logger.warning(f"load_session feilet for sid={sid}: {e}")
 
     # --- Bestem force_recompute ---
     force_from_body = bool(body and body.options and body.options.force_recompute)
@@ -418,31 +618,186 @@ def api_analyze(
     persisted_before = bool(session)
 
     # --- Bygg brukt profil (profile_used) ---
-    body_profile = (body.profile.model_dump(exclude_none=True) if (body and body.profile) else {})
+    body_profile_dict: Dict[str, Any] = {}
     if body and body.profile:
+        body_profile_dict = {
+            "CdA": body.profile.CdA,
+            "Crr": body.profile.Crr,
+            "weight_kg": body.profile.weight_kg,
+            "device": getattr(body.profile, "device", "unknown"),
+        }
         PROFILE_USED_TOTAL += 1
     else:
         PROFILE_MISSING_TOTAL += 1
 
     if force:
-        # ignorer eksisterende profil i session
-        profile_used = _merge_profile(DEFAULT_PROFILE, body_profile)
+        profile_used = _merge_profile(DEFAULT_PROFILE, body_profile_dict)
     else:
         base = (session.get("profile") if isinstance(session, dict) else None) or DEFAULT_PROFILE
-        profile_used = _merge_profile(base, body_profile)
+        profile_used = _merge_profile(base, body_profile_dict)
 
     logger.info(
-        "Profile used (pre-analyze): sid=%s CdA=%s Crr=%s weight=%s device=%s force=%s persisted_before=%s",
+        "Profile used (pre-analyze): sid=%s CdA=%s Crr=%s weight=%s device=%s force=%s persisted_before=%s source=%s",
         sid,
-        profile_used.get("CdA"), profile_used.get("Crr"),
-        profile_used.get("weight_kg"), profile_used.get("device"),
-        force, persisted_before
+        profile_used.get("CdA"),
+        profile_used.get("Crr"),
+        profile_used.get("weight_kg"),
+        profile_used.get("device"),
+        force,
+        persisted_before,
+        source
     )
 
     # --- Hent potensielle serier ---
     watts, pulses, device_watts, velocity, altitude = _extract_streams(session)
     has_powermeter = bool(watts)
     has_physics = bool(velocity) and bool(altitude)
+
+    # Debug: synlig i stderr
+    print(
+        f"DEBUG inline counts: watts={len(watts or [])} hr={len(pulses or [])} speed={len(velocity or [])}",
+        flush=True
+    )
+
+    # Dersom vi fortsatt ikke har noen serier og kilden ikke ga data:
+    if not (has_powermeter or has_physics):
+        if use_stub:
+            proxy_vals = _debug_power_proxy(profile_used)
+            merged = {
+                "precision_watt": proxy_vals["total_watt"],
+                "CdA": profile_used.get("CdA"),
+                "crr_used": profile_used.get("Crr"),
+                "weather_applied": False,
+                "wind_angle_deg": 0.0,
+                "air_density_kg_per_m3": 0.0,
+                "total_watt": proxy_vals["total_watt"],
+                "drag_watt": proxy_vals["drag_watt"],
+                "rolling_watt": proxy_vals["rolling_watt"],
+                "aero_fraction": proxy_vals["aero_fraction"],
+                "profile": dict(profile_used),
+                "analysis_raw": {"reason": "stub_fallback"},
+            }
+            try:
+                save_session(sid, merged)
+            except Exception as e:
+                logger.warning(f"save_session feilet i stub for sid={sid}: {e}")
+            logger.info("Analyze stub fallback: sid=%s", sid)
+            return {
+                "ok": True,
+                "session_id": sid,
+                "metrics": {
+                    "precision_watt": merged.get("precision_watt"),
+                    "precision_watt_ci": merged.get("precision_watt_ci"),
+                    "CdA": merged.get("CdA"),
+                    "crr_used": merged.get("crr_used"),
+                    "reason": "stub_fallback",
+                    "weather_applied": merged.get("weather_applied"),
+                    "wind_angle_deg": merged.get("wind_angle_deg"),
+                    "air_density_kg_per_m3": merged.get("air_density_kg_per_m3"),
+                    "total_watt": merged.get("total_watt"),
+                    "drag_watt": merged.get("drag_watt"),
+                    "rolling_watt": merged.get("rolling_watt"),
+                    "aero_fraction": merged.get("aero_fraction"),
+                },
+                "debug": {
+                    "analyzer_mode": _ANALYZER_MODE,
+                    "call_path": "stub",
+                    "used_override": False,
+                    "has_raw": True,
+                    "profile_used_total": PROFILE_USED_TOTAL,
+                    "profile_missing_total": PROFILE_MISSING_TOTAL,
+                    "force_recompute": force,
+                },
+                "profile": profile_used,
+            }
+        raise HTTPException(
+            status_code=400,
+            detail="No inline/persisted timeseries available; stub disabled by USE_STUB_FALLBACK=0",
+        )
+
+    # --- NY KODE: Direkte Rust-integrasjon for inline data ---
+    call_path = "unknown"
+    analysis = None
+
+    if _HAS_COMPUTE_POWER_WITH_WIND and norm_samples:
+        print(f"DEBUG FLAG: HAS_COMPUTE_POWER_WITH_WIND={_HAS_COMPUTE_POWER_WITH_WIND} inline={bool(norm_samples)}", file=sys.stderr)
+        print(f"DEBUG INLINE: samples_in={len(norm_samples or [])}", file=sys.stderr)
+        
+        try:
+            from cyclegraph_core import compute_power_with_wind as rust_compute_power
+            
+            # Normaliser profilen før bruk
+            profile_normalized = _norm_profile(body_profile_dict if body and body.profile else {})
+            
+            # Bygg weather dict
+            weather = {}
+            if body and body.wind_angle_deg is not None:
+                weather["wind_angle_deg"] = body.wind_angle_deg
+            if body and body.air_density_kg_per_m3 is not None:
+                weather["air_density_kg_per_m3"] = body.air_density_kg_per_m3
+            
+            print("DEBUG PATH: using compute_power_with_wind (3-args)", file=sys.stderr)
+            print(f"DEBUG SAMPLES[0]: {norm_samples[0] if norm_samples else None}", file=sys.stderr)
+            print(f"DEBUG PROFILE (normalized): {profile_normalized}", file=sys.stderr)
+            
+            # Prøv 3-args direkte (foretrukket)
+            try:
+                result_json = rust_compute_power(norm_samples, profile_normalized, weather)
+                call_path = "compute_power_with_wind:3-args"
+            except TypeError:
+                # Fallback: kall via JSON-streng
+                print("DEBUG PATH: using compute_power_with_wind (json)", file=sys.stderr)
+                payload = {
+                    "samples": norm_samples,
+                    "profile": profile_normalized,
+                    "weather": weather,
+                }
+                result_json = rust_compute_power(json.dumps(payload))
+                call_path = "compute_power_with_wind:json"
+            
+            print(f"DEBUG PATH: using compute_power_with_wind, n={len(norm_samples)}", file=sys.stderr)
+            print(f"DEBUG RESULT HEAD: {result_json[:200]}", file=sys.stderr)
+            
+            # Parse resultatet
+            result = json.loads(result_json)
+            
+            def _avg(xs): 
+                return (sum(xs)/len(xs)) if xs else 0.0
+
+            drag = result.get("drag_watt")
+            roll = result.get("rolling_watt")
+            prec = result.get("precision_watt")
+
+            # fallback hvis Rust returnerer serier:
+            if drag is None and "drag_watt_series" in result:
+                drag = _avg(result["drag_watt_series"])
+            if roll is None and "rolling_watt_series" in result:
+                roll = _avg(result["rolling_watt_series"])
+            if prec is None and "precision_watt_series" in result:
+                prec = _avg(result["precision_watt_series"])
+
+            # Bygg analyse-resultat
+            analysis = {
+                "drag_watt": float(drag or 0.0),
+                "rolling_watt": float(roll or 0.0),
+                "precision_watt": float(prec or 0.0),
+                "calibrated": False,
+                "profile": json.dumps(profile_normalized),
+                "reason": "ok"
+            }
+            
+            # Legg til debug info
+            dbg = result.get("debug", {})
+            dbg.update({
+                "analyzer_mode": "compute_power_with_wind",
+                "received_inline": bool(norm_samples),
+                "samples_in": len(norm_samples),
+            })
+            analysis["_debug"] = dbg
+                
+        except Exception as e:
+            logger.warning(f"compute_power_with_wind feilet: {e}, fallback til standard analyzer")
+            # Fallback til standard analyzer hvis den nye feiler
 
     # --- WEATHER: body override > weather_client ---
     wind_angle_deg: Optional[float]
@@ -477,60 +832,115 @@ def api_analyze(
     session["weather"]["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
     session["weather"]["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
 
-    # --- Kjør analyze ---
-    call_path = "unknown"
-    try:
-        if _HAS_ANALYZE_WITH_PROFILE:
-            from cyclegraph_core import analyze_session_with_profile as analyze_with_profile  # type: ignore
-            # send inn *brukt* profil eksplisitt
-            analysis = analyze_with_profile(session, profile_used)
-            call_path = "core:with_profile(session+profile)"
-        elif _ANALYZER_MODE == "series":
-            if not has_powermeter:
-                raise HTTPException(
-                    status_code=501,
-                    detail=(
-                        "Analyzer i 'series'-modus krever watts+puls (powermeter). "
-                        "Mangler watts. Aktiver dict-analyzer (analyze_session(session)) eller skaff powermeter."
-                    ),
-                )
-            # 1) Prøv nøkkelord (PyO3 håndterer dette best)
-            try:
-                analysis = analyzer(
-                    watts, pulses or [], device_watts,
-                    wind_angle_deg=float(wind_angle_deg),  # type: ignore[arg-type]
-                    air_density_kg_per_m3=float(air_density_kg_per_m3)  # type: ignore[arg-type]
-                )
-                call_path = "series:kwargs-5"
-            except TypeError as e1:
-                # 2) Prøv 5 posisjonelle
-                try:
-                    analysis = analyzer(
-                        watts, pulses or [], device_watts,
-                        float(wind_angle_deg), float(air_density_kg_per_m3)
+    # --- Fallback til standard analyzer hvis compute_power_with_wind ikke ble brukt ---
+    if analysis is None:
+        try:
+            if _HAS_ANALYZE_WITH_PROFILE:
+                from cyclegraph_core import analyze_session_with_profile as analyze_with_profile  # type: ignore
+                analysis = analyze_with_profile(session, profile_used)
+                call_path = "core:with_profile(session+profile)"
+            elif _ANALYZER_MODE == "series":
+                if not has_powermeter:
+                    raise HTTPException(
+                        status_code=501,
+                        detail=(
+                            "Analyzer i 'series'-modus krever watts+puls (powermeter). "
+                            "Mangler watts. Aktiver dict-analyzer (analyze_session(session)) eller skaff powermeter."
+                        ),
                     )
-                    call_path = "series:positional-5"
-                except TypeError as e2:
-                    # 3) Fallback: 3-args
-                    logger.warning("5-arg analyze unsupported, falling back to 3-args. e1=%s; e2=%s", e1, e2)
+                sig = None
+                names: List[str] = []
+                try:
+                    sig = inspect.signature(analyzer)
+                    names = list(sig.parameters.keys())
+                except Exception:
+                    names = []
+
+                # Foretrekk kwargs med speed/profile hvis tilgjengelig
+                tried = []
+                def _try_call(**kwargs):
+                    nonlocal tried
+                    tried.append(kwargs)
+                    return analyzer(**kwargs)
+
+                # 1) kwargs med speed + profile + vær (mest moderne)
+                if ("speed" in names or "velocity" in names) and "profile" in names:
+                    try:
+                        kw = {
+                            "watts": watts,
+                            "pulses": pulses or [],
+                            "device_watts": device_watts,
+                            ("speed" if "speed" in names else "velocity"): (velocity or []),
+                            "profile": profile_used,
+                            "wind_angle_deg": float(wind_angle_deg),
+                            "air_density_kg_per_m3": float(air_density_kg_per_m3),
+                        }
+                        analysis = _try_call(**kw)
+                        call_path = "series:kwargs-speed+profile+weather"
+                    except TypeError:
+                        analysis = None  # fallthrough
+
+                # 2) kwargs med speed + vær (uten profile)
+                if call_path == "unknown" and ("speed" in names or "velocity" in names):
+                    try:
+                        kw = {
+                            "watts": watts,
+                            "pulses": pulses or [],
+                            "device_watts": device_watts,
+                            ("speed" if "speed" in names else "velocity"): (velocity or []),
+                            "wind_angle_deg": float(wind_angle_deg),
+                            "air_density_kg_per_m3": float(air_density_kg_per_m3),
+                        }
+                        analysis = _try_call(**kw)
+                        call_path = "series:kwargs-speed+weather"
+                    except TypeError:
+                        analysis = None
+
+                # 3) kwargs uten speed (som før) – med vær
+                if call_path == "unknown":
+                    try:
+                        kw = {
+                            "watts": watts,
+                            "pulses": pulses or [],
+                            "device_watts": device_watts,
+                            "wind_angle_deg": float(wind_angle_deg),
+                            "air_density_kg_per_m3": float(air_density_kg_per_m3),
+                        }
+                        analysis = _try_call(**kw)
+                        call_path = "series:kwargs-5"
+                    except TypeError:
+                        analysis = None
+
+                # 4) posisjonell 5
+                if call_path == "unknown":
+                    try:
+                        analysis = analyzer(
+                            watts, pulses or [], device_watts,
+                            float(wind_angle_deg), float(air_density_kg_per_m3)
+                        )
+                        call_path = "series:positional-5"
+                    except TypeError:
+                        analysis = None
+
+                # 5) posisjonell 3 (eldre fallback)
+                if call_path == "unknown":
                     analysis = analyzer(watts, pulses or [], device_watts)
                     call_path = "series:positional-3"
-        else:
-            if not (has_powermeter or has_physics):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Mangler data: trenger enten watts+hr (powermeter) ELLER "
-                        "velocity_smooth(+altitude) for fysikk-beregning."
-                    ),
-                )
-            analysis = analyzer(session)
-            call_path = "dict:session"
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"analyze_session feilet: {e}")
+            else:
+                if not (has_powermeter or has_physics):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Mangler data: trenger enten watts+hr (powermeter) ELLER "
+                            "velocity_smooth(+altitude) for fysikk-beregning."
+                        ),
+                    )
+                analysis = analyzer(session)
+                call_path = "dict:session"
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"analyze_session feilet: {e}")
 
     # --- Slå sammen resultat og persist vær-/profilfelter ---
     merged = _merge_analysis(session, analysis)
@@ -550,16 +960,13 @@ def api_analyze(
     has_components_in_core = all(k in analysis_raw for k in ("total_watt", "drag_watt", "rolling_watt"))
 
     if has_components_in_core:
-        # Core leverer tall: legg dem på top-level.
         merged["total_watt"] = analysis_raw.get("total_watt")
         merged["drag_watt"] = analysis_raw.get("drag_watt")
         merged["rolling_watt"] = analysis_raw.get("rolling_watt")
         merged["aero_fraction"] = analysis_raw.get("aero_fraction")
     else:
-        # Core leverte ikke komponenter -> produser profilsensitive tall.
         proxy_vals = _debug_power_proxy(profile_used)
         for k in ("total_watt", "drag_watt", "rolling_watt", "aero_fraction"):
-            # Idiomatikk: ved force overskriver vi, ellers bare fyller hvis mangler
             if force or (k not in merged):
                 merged[k] = proxy_vals[k]
 
@@ -570,7 +977,7 @@ def api_analyze(
         raise HTTPException(status_code=500, detail=f"save_session feilet: {e}")
 
     logger.info(
-        "Profile used: sid=%s CdA=%.3f Crr=%.4f weight=%.1f device=%s force=%s persisted_before=%s recomputed=%s total_watt=%s",
+        "Profile used: sid=%s CdA=%.3f Crr=%.4f weight=%.1f device=%s force=%s persisted_before=%s recomputed=%s total_watt=%s source=%s",
         sid,
         float(profile_used.get("CdA") or 0.0),
         float(profile_used.get("Crr") or 0.0),
@@ -580,6 +987,7 @@ def api_analyze(
         str(persisted_before),
         "True",
         str(merged.get("total_watt")),
+        source,
     )
     logger.info(
         "Weather applied: wind_angle=%.2f°, rho=%.4f | call_path=%s | override=%s",
@@ -632,8 +1040,8 @@ def api_publish(sid: str):
 
     env_toggle = _env_bool("CG_PUBLISH_TOGGLE")
     session_toggle = bool(sess.get("publish_toggle", False))
-
     publish_enabled = (env_toggle and session_toggle) if (env_toggle is not None) else session_toggle
+
     if not publish_enabled:
         set_publish_failed(sess, "publish_toggle=false")
         save_session(sid, sess)
@@ -671,11 +1079,11 @@ def api_publish(sid: str):
 
     stamp = int(time.time())
     phash = hashlib.sha256(f"{activity_id}-{stamp}-{msg}".encode()).hexdigest()[:16]
+
     if ok:
         set_publish_done(sess, phash)
     else:
         set_publish_failed(sess, err or "publish failed")
-
     save_session(sid, sess)
 
     return {
@@ -691,6 +1099,7 @@ def api_publish(sid: str):
 # -----------------------------------------------------------------------------
 # Debug-endepunkter
 # -----------------------------------------------------------------------------
+
 @app.get("/api/debug/publish_flags/{sid}")
 def debug_flags(sid: str):
     settings = get_settings_cached()
@@ -733,6 +1142,7 @@ def debug_publish_probe(sid: str):
 # -----------------------------------------------------------------------------
 # Stubs
 # -----------------------------------------------------------------------------
+
 @app.get("/api/timeseries/stub")
 def timeseries_stub():
     now = datetime.now(timezone.utc)
@@ -783,6 +1193,7 @@ def favicon():
 # -----------------------------------------------------------------------------
 # Lokal kjøring
 # -----------------------------------------------------------------------------
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host=API_HOST, port=API_PORT, reload=True)

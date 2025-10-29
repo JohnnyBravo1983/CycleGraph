@@ -1,0 +1,218 @@
+﻿{
+    "resource_state":  3,
+    "athlete":  {
+                    "id":  55313385,
+                    "resource_state":  1
+                },
+    "name":  "Morning Run",
+    "distance":  2795.7,
+    "moving_time":  1681,
+    "elapsed_time":  1681,
+    "total_elevation_gain":  0,
+    "type":  "Run",
+    "sport_type":  "Run",
+    "workout_type":  null,
+    "device_name":  "Garmin Venu 2",
+    "id":  16219304059,
+    "start_date":  "2025-10-22T07:55:26Z",
+    "start_date_local":  "2025-10-22T09:55:26Z",
+    "timezone":  "(GMT+02:00) Africa/Blantyre",
+    "utc_offset":  7200.0,
+    "location_city":  null,
+    "location_state":  null,
+    "location_country":  null,
+    "achievement_count":  0,
+    "kudos_count":  9,
+    "comment_count":  2,
+    "athlete_count":  1,
+    "photo_count":  0,
+    "map":  {
+                "id":  "a16219304059",
+                "polyline":  "",
+                "resource_state":  3,
+                "summary_polyline":  ""
+            },
+    "trainer":  true,
+    "commute":  false,
+    "manual":  false,
+    "private":  false,
+    "visibility":  "everyone",
+    "flagged":  false,
+    "gear_id":  null,
+    "start_latlng":  [
+
+                     ],
+    "end_latlng":  [
+
+                   ],
+    "average_speed":  1.663,
+    "max_speed":  4.34,
+    "average_cadence":  75.3,
+    "has_heartrate":  true,
+    "average_heartrate":  144.2,
+    "max_heartrate":  174.0,
+    "heartrate_opt_out":  false,
+    "display_hide_heartrate_option":  true,
+    "elev_high":  0.0,
+    "elev_low":  0.0,
+    "upload_id":  17303420244,
+    "upload_id_str":  "17303420244",
+    "external_id":  "garmin_ping_493576414311",
+    "from_accepted_tag":  false,
+    "pr_count":  0,
+    "total_photo_count":  0,
+    "has_kudoed":  false,
+    "description":  "Hit økt motbakke jogging.  Løping gjør at man blir ydmyket 🤣Egen evaluering av form  Sykling 7,5/10 Løping 2/10 hvis jeg er snill 🤣🤣🤣",
+    "calories":  373.0,
+    "perceived_exertion":  null,
+    "prefer_perceived_exertion":  false,
+    "segment_efforts":  [
+
+                        ],
+    "splits_metric":  [
+                          {
+                              "distance":  1006.8,
+                              "elapsed_time":  449,
+                              "elevation_difference":  0.0,
+                              "moving_time":  449,
+                              "split":  1,
+                              "average_speed":  2.24,
+                              "average_grade_adjusted_speed":  2.24,
+                              "average_heartrate":  131.37193763919822,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  994.7,
+                              "elapsed_time":  577,
+                              "elevation_difference":  0.0,
+                              "moving_time":  577,
+                              "split":  2,
+                              "average_speed":  1.72,
+                              "average_grade_adjusted_speed":  1.72,
+                              "average_heartrate":  143.40034662045062,
+                              "pace_zone":  0
+                          },
+                          {
+                              "distance":  794.1,
+                              "elapsed_time":  655,
+                              "elevation_difference":  0.0,
+                              "moving_time":  655,
+                              "split":  3,
+                              "average_speed":  1.21,
+                              "average_grade_adjusted_speed":  1.21,
+                              "average_heartrate":  153.71603053435115,
+                              "pace_zone":  0
+                          }
+                      ],
+    "splits_standard":  [
+                            {
+                                "distance":  1609.6,
+                                "elapsed_time":  776,
+                                "elevation_difference":  0.0,
+                                "moving_time":  776,
+                                "split":  1,
+                                "average_speed":  2.07,
+                                "average_grade_adjusted_speed":  2.07,
+                                "average_heartrate":  136.39561855670104,
+                                "pace_zone":  0
+                            },
+                            {
+                                "distance":  1186.0,
+                                "elapsed_time":  905,
+                                "elevation_difference":  0.0,
+                                "moving_time":  905,
+                                "split":  2,
+                                "average_speed":  1.31,
+                                "average_grade_adjusted_speed":  1.31,
+                                "average_heartrate":  150.90497237569062,
+                                "pace_zone":  0
+                            }
+                        ],
+    "laps":  [
+                 {
+                     "id":  57794515709,
+                     "resource_state":  2,
+                     "name":  "Lap 1",
+                     "activity":  {
+                                      "id":  16219304059,
+                                      "visibility":  "everyone",
+                                      "resource_state":  1
+                                  },
+                     "athlete":  {
+                                     "id":  55313385,
+                                     "resource_state":  1
+                                 },
+                     "elapsed_time":  1681,
+                     "moving_time":  1681,
+                     "start_date":  "2025-10-22T07:55:26Z",
+                     "start_date_local":  "2025-10-22T09:55:26Z",
+                     "distance":  2795.65,
+                     "average_speed":  1.66,
+                     "max_speed":  4.34,
+                     "lap_index":  1,
+                     "split":  1,
+                     "start_index":  0,
+                     "end_index":  230,
+                     "total_elevation_gain":  0,
+                     "average_cadence":  75.3,
+                     "device_watts":  false,
+                     "average_heartrate":  144.2,
+                     "max_heartrate":  174.0,
+                     "pace_zone":  0
+                 }
+             ],
+    "best_efforts":  [
+
+                     ],
+    "photos":  {
+                   "primary":  null,
+                   "count":  0
+               },
+    "stats_visibility":  [
+                             {
+                                 "type":  "heart_rate",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "pace",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "power",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "speed",
+                                 "visibility":  "everyone"
+                             },
+                             {
+                                 "type":  "calories",
+                                 "visibility":  "everyone"
+                             }
+                         ],
+    "hide_from_home":  false,
+    "embed_token":  "cb11c55ba00286b258c185d8c661b37acf940314",
+    "similar_activities":  {
+                               "effort_count":  0,
+                               "average_speed":  0,
+                               "min_average_speed":  0,
+                               "mid_average_speed":  0,
+                               "max_average_speed":  0,
+                               "pr_rank":  null,
+                               "frequency_milestone":  null,
+                               "trend":  {
+                                             "speeds":  [
+
+                                                        ],
+                                             "current_activity_index":  null,
+                                             "min_speed":  0,
+                                             "mid_speed":  0,
+                                             "max_speed":  0,
+                                             "direction":  0
+                                         },
+                               "resource_state":  2
+                           },
+    "available_zones":  [
+
+                        ]
+}

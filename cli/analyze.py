@@ -14,9 +14,7 @@ TRINN 3 (Sprint 6): Strukturerte JSON-logger
 
 from __future__ import annotations
 
-from cyclegraph.pipeline import persist_and_maybe_publish
-
-
+# Standardbibliotek
 import argparse
 import csv
 import glob
@@ -27,31 +25,46 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
-# Flyttet: bruker config.load_cfg for å unngå sirkulærimport
-from .config import load_cfg  # noqa: F401
-# NB: selve session-kjøringen ligger i cli/session.py (cmd_session)
+# Prosjekt/importer
+from cyclegraph.pipeline import persist_and_maybe_publish
 
-# (Valgfritt) andre CLI-avhengigheter
-from cli.weather_client_mock import WeatherClient  # noqa: F401  (hvis ikke brukt, kan fjernes)
-from cli.formatters.strava_publish import PublishPieces, build_publish_texts  # noqa: F401
-from cli.strava_client import StravaClient  # noqa: F401
-
-# Rust-funksjon for kalibrering (valgfri, fail-safe import)
+# Unngå sirkulærimport – bruk relativ import til config
 try:
-    from cyclegraph_core import calibrate_session as rust_calibrate_session  # type: ignore
+    from .config import load_cfg  # type: ignore  # noqa: F401
 except Exception:
-    rust_calibrate_session = None  # kjør uten kalibrering hvis ikke eksponert
+    # Fallback: forsøk absolutt sti om modul layout varierer i noen miljøer
+    from cli.config import load_cfg  # type: ignore  # noqa: F401
+
+# Valgfrie CLI-avhengigheter (grei å ha som try/except)
+try:
+    from cli.weather_client_mock import WeatherClient  # noqa: F401
+except Exception:
+    WeatherClient = None  # type: ignore
+
+try:
+    from cli.formatters.strava_publish import PublishPieces, build_publish_texts  # noqa: F401
+except Exception:
+    PublishPieces = None  # type: ignore
+    def build_publish_texts(*_args, **_kwargs):  # type: ignore
+        return None
+
+try:
+    from cli.strava_client import StravaClient  # noqa: F401
+except Exception:
+    StravaClient = None  # type: ignore
 
 # Vi trenger å lese samples hvis --calibrate brukes
 try:
     from cli.io import read_session_csv  # type: ignore
 except Exception:
-    read_session_csv = None  # pylint: disable=invalid-name
+    try:
+        from .io import read_session_csv  # type: ignore
+    except Exception:
+        read_session_csv = None  # type: ignore
 
-# Helper for S7: normaliser rapport (schema_version + avg_hr) for CLI-path
-# (Ryddig import med trygg fallback)
+# Helper for å standardisere schema/avg_hr for CLI-path
 try:
     from .session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
 except Exception:
@@ -59,31 +72,33 @@ except Exception:
         from cli.session_api import _ensure_schema_and_avg_hr  # type: ignore  # noqa: F401
     except Exception:
         def _ensure_schema_and_avg_hr(report: dict) -> dict:
-            """Fallback-helper hvis session_api ikke kan importeres."""
             r = dict(report) if report else {}
-            # 🔁 Oppdatert default for S7
             r.setdefault("schema_version", "1.1")
             if "avg_hr" not in r:
-                # 1) prøv avg_pulse (legacy)
                 ap = r.get("avg_pulse")
                 if isinstance(ap, (int, float)):
                     r["avg_hr"] = float(ap)
                 else:
-                    # 2) metrics.avg_hr
                     metrics = r.get("metrics") or {}
                     m_avg = metrics.get("avg_hr")
                     if isinstance(m_avg, (int, float)):
                         r["avg_hr"] = float(m_avg)
                     else:
-                        # 3) serier (hr/hr_series/metrics.hr_series)
                         hr_series = r.get("hr_series") or r.get("hr") or metrics.get("hr_series")
                         if hr_series:
                             vals = [float(x) for x in hr_series if x is not None]
                             r["avg_hr"] = (sum(vals) / len(vals)) if vals else 0.0
                         else:
-                            # 4) siste utvei
                             r["avg_hr"] = 0.0
             return r
+
+# Rust-binding: kalibrering (5 args) → dict
+try:
+    # Eksponert fra cyclegraph_core (PyO3): rust_calibrate_session(watts, speed_ms, altitude_m, profile, weather) -> dict
+    from cyclegraph_core import rust_calibrate_session  # type: ignore
+except Exception:
+    rust_calibrate_session = None  # type: ignore
+
 
 # ─────────────────────────────────────────────────────────────
 # S6/S7: Felles normalisering + emitter for CLI-stdout JSON
@@ -453,9 +468,15 @@ def load_baseline_wpb(history_dir: str, cur_sid: str, cur_dur_min: float):
 # (Historisk – beholdt for bakoverkompatibilitet)
 # -----------------------------
 def _run_calibration_from_args(args: argparse.Namespace) -> int:
+    """
+    Kjører enkel kalibrering fra en CSV (første fil i args.input).
+    Bruker cyclegraph_core.rust_calibrate_session(watts, speed_ms, altitude_m, profile, weather) -> dict.
+    Ingen json.loads på resultater; alt er allerede Python-objekter.
+    """
     if rust_calibrate_session is None:
         print("⚠️ Kalibrering ikke tilgjengelig (rust_calibrate_session ikke eksponert).", file=sys.stderr)
         return 3
+
     if read_session_csv is None:
         print("⚠️ Kan ikke lese samples (read_session_csv mangler).", file=sys.stderr)
         return 3
@@ -471,49 +492,90 @@ def _run_calibration_from_args(args: argparse.Namespace) -> int:
         print(f"ADVARSEL: {paths[0]} har ingen gyldige samples.", file=sys.stderr)
         return 2
 
-    # Plukk ut watts/hr
+    # Plukk ut serier vi trenger
     POWER_KEYS = ("watts", "watt", "power", "power_w", "pwr")
-    HR_KEYS    = ("hr", "heartrate", "heart_rate", "bpm", "pulse")
+    SPEED_KEYS = ("speed_ms", "speed", "v", "velocity")
+    ALTI_KEYS  = ("altitude_m", "altitude", "alti", "elev_m", "elevation")
 
     def norm_keys(d: dict) -> dict:
         return {(str(k).lower().strip() if k is not None else ""): v for k, v in d.items()}
 
-    valid = []
+    watts: list[float] = []
+    speed_ms: list[float] = []
+    altitude_m: list[float] = []
+
     for s in samples:
         if not isinstance(s, dict):
             continue
         sn = norm_keys(s)
-        pw = next((sn[k] for k in POWER_KEYS if k in sn and sn[k] not in (None, "")), None)
-        hr = next((sn[k] for k in HR_KEYS if k in sn and sn[k] not in (None, "")), None)
-        if pw is None or hr is None:
+
+        def pick(keys: tuple[str, ...]):
+            for k in keys:
+                if k in sn and sn[k] not in (None, ""):
+                    return sn[k]
+            return None
+
+        pw = pick(POWER_KEYS)
+        sp = pick(SPEED_KEYS)
+        al = pick(ALTI_KEYS)
+
+        if pw is None or sp is None or al is None:
             continue
         try:
-            valid.append((float(pw), float(hr)))
+            watts.append(float(pw))
+            speed_ms.append(float(sp))
+            altitude_m.append(float(al))
         except (TypeError, ValueError):
             continue
 
-    if not valid:
-        print("⚠️ Fant ingen gyldige watt/hr-par for kalibrering.", file=sys.stderr)
+    if not watts or not speed_ms or not altitude_m:
+        print("⚠️ Fant ikke komplette (watt, speed_ms, altitude_m) serier for kalibrering.", file=sys.stderr)
         return 3
 
-    watts = [w for w, _ in valid]
-    pulses = [h for _, h in valid]
+    # Minimal profil + vær (du kan senere koble til ekte profil/weather)
+    profile: dict[str, object] = {
+        "total_weight": 85.0,
+        "bike_type": "road",
+        "crr": None,
+        "cda": None,
+        "calibrated": False,
+        "calibration_mae": None,
+        "estimat": True,
+    }
+    weather: dict[str, object] = {
+        "wind_ms": 0.0,
+        "wind_dir_deg": 0.0,
+        "air_temp_c": 15.0,
+        "air_pressure_hpa": 1013.0,
+    }
 
-    # Kjør rust-kalibrering; API kan variere – vi håndterer dict/JSON/string
+    # Kjør Rust-kalibrering: returnerer dict
     try:
-        result = rust_calibrate_session(watts, pulses)  # type: ignore
+        result = rust_calibrate_session(watts, speed_ms, altitude_m, profile, weather)  # type: ignore[arg-type]
     except Exception as e:
         print(f"Kalibrering feilet i Rust: {e}", file=sys.stderr)
         return 3
 
-    try:
-        data = json.loads(result) if isinstance(result, str) else result
-    except Exception:
-        data = result
+    if not isinstance(result, dict):
+        print(f"Uventet returtype fra rust_calibrate_session: {type(result)}", file=sys.stderr)
+        return 3
 
-    mae = data.get("mae") if isinstance(data, dict) else None
-    print(f"✅ Kalibrering OK. MAE={mae}" if mae is not None else "✅ Kalibrering OK.", file=sys.stderr)
-    # Her kunne vi evt. lagret til profile.json via Python-siden også
+    # result inneholder: cda, crr, mae, calibrated, profile (dict)
+    mae = result.get("mae")
+    calibrated = result.get("calibrated")
+    prof = result.get("profile")
+
+    # IKKE json.loads her – prof er allerede dict
+    if isinstance(prof, dict):
+        pass  # her kan du evt. skrive prof til fil senere
+
+    msg_bits = []
+    if isinstance(mae, (int, float)):
+        msg_bits.append(f"MAE={mae}")
+    if isinstance(calibrated, bool):
+        msg_bits.append(f"calibrated={calibrated}")
+    print("✅ Kalibrering OK. " + ", ".join(msg_bits) if msg_bits else "✅ Kalibrering OK.", file=sys.stderr)
+
     return 0
 
 
