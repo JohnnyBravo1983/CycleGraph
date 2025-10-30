@@ -175,8 +175,8 @@ fn rust_calibrate_session_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&Py
     let a_len = to_list_len(alti_obj.as_ref(py));
 
     // Default-verdier som er numeriske (for å tilfredsstille testen)
-    let mut cda = 0.30_f64;
-    let mut crr = 0.005_f64;
+    let cda = 0.30_f64;
+    let crr = 0.005_f64;
     let mut mae = 12.0_f64;
     let mut calibrated = true;
 

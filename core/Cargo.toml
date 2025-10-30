@@ -13,13 +13,15 @@ name = "cyclegraph_core"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Gjør at PyO3-eksport ALWAYS er med i dev/venv (løser PyInit-mangelen)
-python = ["pyo3/extension-module", "pyo3/abi3-py38"] 
+# Sørger for at PyO3 extension-modulen alltid bygges i dev-miljøet (uten ABI3)
+python = ["pyo3/extension-module"]
+
+# Default bygger Python-modulen (extension-modulen) for utvikling
 default = ["python"]
 
 [dependencies]
 # PyO3 som extension module + ABI3 (min. py39 – juster til din laveste støttede Python)
-pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "=0.20.3", features = ["extension-module"] }
 
 
 serde = { version = "1.0", features = ["derive"] }

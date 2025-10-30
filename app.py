@@ -51,7 +51,7 @@ app.add_middleware(
 # -----------------------------------------------------------------------------
 
 from server.routes import sessions
-app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
+app.include_router(sessions.router)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cyclegraph.app")
