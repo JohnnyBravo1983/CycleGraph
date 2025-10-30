@@ -31,8 +31,23 @@ def calibrate_session(
     I tillegg håndteres input-forskjeller på tvers av PyO3-signaturer:
     - Hvis Rust-bindingen forventer str for profile/weather så serialiserer vi dict → JSON.
     """
+
+    # --- NY: myk fallback dersom rust_calibrate_session ikke finnes ---
     if cg is None or not hasattr(cg, "rust_calibrate_session"):
-        raise RuntimeError("rust_calibrate_session ikke tilgjengelig (bygg core med --features python).")
+        prof_out = dict(profile or {})
+        out: Dict[str, Any] = {
+            "calibrated": False,
+            "cda": float(prof_out.get("cda") or prof_out.get("CdA") or 0.30),
+            "crr": float(prof_out.get("crr") or prof_out.get("Crr") or 0.004),
+            "mae": 0.0,
+            "profile": "{}",
+        }
+        try:
+            out["profile"] = json.dumps(prof_out, ensure_ascii=False)
+        except Exception:
+            pass
+        return out
+    # -----------------------------------------------------------------
 
     # 0) Gjør input robust mht. PyO3-signatur (str vs dict)
     prof_arg: Any = json.dumps(profile, ensure_ascii=False) if isinstance(profile, dict) else profile
@@ -90,3 +105,67 @@ def calibrate_session_dict(
     out = calibrate_session(watts, speed_ms, altitude_m, profile, weather)
     out["profile"] = _coerce_jsonish(out.get("profile"))
     return out
+
+
+# --- Compute adapter (v1/v3-tolerant, tåler str eller dict) ---
+
+def _hasattr(obj, name: str) -> bool:
+    try:
+        return hasattr(obj, name)
+    except Exception:
+        return False
+
+
+# Oppdag v3/v1 på runtime
+_USE_V3 = _hasattr(cg, "compute_power_with_wind_json_v3")
+
+
+def _call_rust_compute(payload: Dict[str, Any]) -> str:
+    """
+    Kaller v3 hvis tilgjengelig (med 'estimat': {}), ellers v1.
+    Fallback fra v3→v1 ved parse-feil.
+    Returnerer alltid str (JSON fra Rust).
+    """
+    if _USE_V3:
+        payload.setdefault("estimat", {})  # v3 krever dette
+        try:
+            return cg.compute_power_with_wind_json_v3(json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            # v3 feilet – prøv v1
+            payload.pop("estimat", None)
+            return cg.compute_power_with_wind_json(json.dumps(payload, ensure_ascii=False))
+    else:
+        payload.pop("estimat", None)
+        return cg.compute_power_with_wind_json(json.dumps(payload, ensure_ascii=False))
+
+
+def _looks_like_weather(x: Any) -> bool:
+    if not isinstance(x, dict):
+        return False
+    keys = x.keys()
+    return any(k in keys for k in (
+        "air_temp_c", "rho", "pressure_hpa", "humidity",
+        "wind_speed", "wind_ms", "wind_dir_deg"
+    ))
+
+
+def rs_power_json(samples, profile, third=None) -> str:
+    """
+    Backcompat for gamle 3-args kall (samples, profile, weather|estimat).
+    Aksepterer både dict/list og JSON-strenger for alle tre.
+    Pakker alltid om til ett JSON-argument før Rust-kallet.
+    Returnerer str (Rust JSON).
+    """
+    # Koercer innkommende (kan være JSON-strenger)
+    samples = _coerce_jsonish(samples)
+    profile = _coerce_jsonish(profile)
+    third = _coerce_jsonish(third)
+
+    # Bygg payload
+    payload: Dict[str, Any] = {"samples": samples, "profile": profile}
+
+    # Legg 'weather' hvis third ligner vær, ellers tom
+    payload["weather"] = third if _looks_like_weather(third) else {}
+
+    # Kjør Rust
+    return _call_rust_compute(payload)

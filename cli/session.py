@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
+from cli.rust_bindings import rs_power_json 
 
 import click
 
@@ -549,27 +550,28 @@ except Exception:
     def maybe_apply_big_engine_badge(_report: Dict[str, Any]) -> None:
         return
 
-try:
-    from cyclegraph_core import compute_power_with_wind_json as rs_power_json
-except Exception:
-    rs_power_json = None
+# ── NY COMPUTE_POWER_WIND ADAPTER ─────────────────────────────────────────────
+import json
 
-# Strava-klient kan mangle → trygg fallback-stub
+# Prøv v3 først (som krever 'estimat'), ellers bruk v1
 try:
-    from .strava_client import StravaClient  # type: ignore
+    from cyclegraph_core import compute_power_with_wind_json_v3 as _rs_compute_json
+    _USE_V3 = True
 except Exception:
-    class StravaClient:  # fallback stub
-        def __init__(self, lang: str = "no") -> None:
-            self.lang = lang
-        def publish_to_strava(self, _pieces, dry_run: bool = True):
-            # gjør ingenting i fallback
-            return (None, "skipped")
+    _USE_V3 = False
+    try:
+        from cyclegraph_core import compute_power_with_wind_json as _rs_compute_json
+    except Exception:
+        _rs_compute_json = None
 
-# build_publish_texts ligger i formatters/strava_publish
-try:
-    from .formatters.strava_publish import build_publish_texts
-except Exception:  # fallback hvis kjørt uten pakke-kontekst
-    from cli.formatters.strava_publish import build_publish_texts  # type: ignore
+def _looks_like_weather(x: dict) -> bool:
+    if not isinstance(x, dict):
+        return False
+    return any(k in x for k in (
+        "air_temp_c","rho","pressure_hpa","humidity","wind_speed","wind_ms","wind_dir_deg"
+    ))
+
+
 
 # ─────────────────────────────────────────────────────────────
 # Lokale helpers (slik at vi ikke trenger cli.ids/cli.metrics)
@@ -1765,7 +1767,7 @@ def cmd_session(args: argparse.Namespace) -> int:
             print(f"ADVARSEL: {path} har ingen gyldige samples.", file=sys.stderr)
             continue
 
-        # Flag for “mangler device-wattdata”
+        # Flag for "mangler device-wattdata"
         no_device_power = not _has_power_in_samples(samples)
 
         sid = session_id_from_path(path)
@@ -1838,12 +1840,8 @@ def cmd_session(args: argparse.Namespace) -> int:
             )
 
         # --- Vind/kraft fra kjernen (PowerOutputs) ---
-        try:
-            from cyclegraph_core import compute_power_with_wind_json as rs_power_json
-        except Exception:
-            rs_power_json = None
-
-        if rs_power_json is not None:
+        # BRUKER NY ADAPTER HER
+        if _rs_compute_json is not None:
             # Normaliser fra read_session_csv
             with _timed("normalize_core_samples"):
                 core_samples = [_normalize_sample_for_core(s) for s in samples]
@@ -1885,11 +1883,8 @@ def cmd_session(args: argparse.Namespace) -> int:
                 print(f"DEBUG CORE: weather_for_core={weather_for_core}", file=sys.stderr)
 
             with _timed("compute_power_with_wind"):
-                power_json = rs_power_json(
-                    json.dumps(core_samples, ensure_ascii=False),
-                    json.dumps(profile_for_core, ensure_ascii=False),
-                    json.dumps(weather_for_core, ensure_ascii=False),
-                )
+                # BRUK NY ADAPTER HER - sender dicts direkte
+                power_json = rs_power_json(core_samples, profile_for_core, weather_for_core)
             power_obj = json.loads(power_json) if isinstance(power_json, str) else power_json
 
             cache_hit = False
@@ -2136,4 +2131,4 @@ def cmd_session(args: argparse.Namespace) -> int:
                     print(f"[STRAVA] publisering feilet: {e}", file=sys.stderr)
 
     _log_info(step="done")
-    return 0       
+    return 0

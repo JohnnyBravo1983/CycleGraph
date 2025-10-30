@@ -17,11 +17,16 @@ SCHEMA_VERSION = "0.7.0"
 
 
 # ── Trygge imports av kjernebindinger ─────────────────────────────────────────
+# --- Rust compute (bruk adapteren vår) ---
 try:
-    from cyclegraph_core import compute_power_with_wind_json as rs_power_json
+    from cli.rust_bindings import rs_power_json
 except Exception:
-    rs_power_json = None
+    try:
+        from cyclegraph.cli.rust_bindings import rs_power_json  # fallback hvis pakket namespace
+    except Exception:
+        from .rust_bindings import rs_power_json                 # fallback relativ import
 
+# --- Rust calibrate (fortsatt direkte fra core) ---
 try:
     # Eksponert i core/src/lib.rs som #[pyfunction] rust_calibrate_session
     from cyclegraph_core import rust_calibrate_session as rs_calibrate

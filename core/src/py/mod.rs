@@ -1,229 +1,358 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyAny, PyDict, PyString, PyTuple};
 use pyo3::wrap_pyfunction;
+
+use crate::Weather as CoreWeather;
+
 use serde::Deserialize;
-use serde_json::{self, Value};
+use serde_json::{self as json, Value};
+use serde_path_to_error as spte;
 
-// ---------- JSON adapters for compute/analyze ----------
+// ---------- INPUT TYPES (tolerante) ----------
 
-#[derive(Deserialize)]
-struct AnalyzeRustIn {
-    watts: Vec<f64>,
-    pulses: Vec<f64>,
+#[derive(Debug, Deserialize)]
+struct ProfileIn {
+    #[serde(alias = "CdA", alias = "cda")]
+    cda: f64,
+    #[serde(alias = "Crr", alias = "crr")]
+    crr: f64,
+    #[serde(alias = "weightKg", alias = "weight_kg")]
+    weight_kg: f64,
     #[serde(default)]
-    device_watts: Option<bool>,
+    device: String,
+    #[serde(default)]
+    calibrated: bool,
 }
 
-#[derive(Deserialize)]
-struct ComputePowerIn {
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct EstimatIn {
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    force: bool,
+    #[serde(default)]
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SampleIn {
+    t: f64,
+    #[serde(alias = "v_mps", alias = "v")]
+    v_ms: f64,
+    #[serde(alias = "alt", alias = "elev")]
+    altitude_m: f64,
+    #[serde(default)]
+    heading_deg: f64,
+    #[serde(default)]
+    moving: bool,
+    #[serde(default)]
+    watts: f64,
+    #[serde(default)]
+    rho: f64,
+    // Normaliser vind til ÉN nøkkel (aksepter alias inn)
+    #[serde(default, alias = "wind_ms", alias = "wind_speed")]
+    wind_speed: f64,
+    #[serde(default)]
+    wind_dir_deg: f64,
+    #[serde(default)]
+    air_temp_c: f64,
+    #[serde(default, alias = "air_pressure_hpa", alias = "pressure_hpa")]
+    air_pressure_hpa: f64,
+    #[serde(default)]
+    humidity: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct WeatherIn {
+    #[serde(default, alias = "wind_ms", alias = "wind_speed")]
+    wind_ms: f64,
+    #[serde(default)]
+    wind_dir_deg: f64,
+    #[serde(default)]
+    air_temp_c: f64,
+    #[serde(default, alias = "air_pressure_hpa", alias = "pressure_hpa")]
+    air_pressure_hpa: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ObjectIn {
+    #[serde(default)]
+    samples: Vec<SampleIn>,
+    profile: ProfileIn,
+
+    // Ekte vær hvis tilstede i objekt-stil
+    #[serde(default)]
+    weather: Option<WeatherIn>,
+
+    // Estimat-konfig – aksepter flere alias
+    #[serde(
+        default,
+        alias = "estimat",
+        alias = "estimate",
+        alias = "estimat_cfg",
+        alias = "estimate_cfg"
+    )]
+    estimat_cfg: Option<EstimatIn>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ThirdIn {
+    Weather(WeatherIn),
+    Estimat(EstimatIn),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum InRepr {
+    // TRIPLE/tuple: (samples, profile, third) – third kan være Weather ELLER Estimat
+    Triple((Vec<SampleIn>, ProfileIn, ThirdIn)),
+    // Objektstil
+    Object(ObjectIn),
+}
+
+impl From<(Vec<SampleIn>, ProfileIn, ThirdIn)> for ObjectIn {
+    fn from(t: (Vec<SampleIn>, ProfileIn, ThirdIn)) -> Self {
+        let (samples, profile, third) = t;
+        match third {
+            ThirdIn::Weather(w) => ObjectIn {
+                samples,
+                profile,
+                weather: Some(w),
+                estimat_cfg: None,
+            },
+            ThirdIn::Estimat(e) => ObjectIn {
+                samples,
+                profile,
+                weather: None,
+                estimat_cfg: Some(e),
+            },
+        }
+    }
+}
+
+// ---------- SAFE MAP TIL KJERNETYPER VIA JSON ----------
+
+fn to_core_profile(p: ProfileIn, estimat_present: bool) -> Result<crate::Profile, String> {
+    let mut m = serde_json::Map::new();
+
+    // Vanlige felt (snake_case)
+    m.insert("cda".into(), Value::from(p.cda));
+    m.insert("crr".into(), Value::from(p.crr));
+    m.insert("weight_kg".into(), Value::from(p.weight_kg));
+    m.insert("device".into(), Value::from(p.device));
+    m.insert("calibrated".into(), Value::from(p.calibrated));
+
+    // Viktig: aldri null – sett bool for estimat
+    m.insert("estimat".into(), Value::from(estimat_present));
+
+    // Øvrige ev. felter i kjernen (hold null hvis ikke relevante)
+    if !m.contains_key("total_weight")    { m.insert("total_weight".into(), Value::Null); }
+    if !m.contains_key("bike_type")       { m.insert("bike_type".into(), Value::Null); }
+    if !m.contains_key("calibration_mae") { m.insert("calibration_mae".into(), Value::Null); }
+
+    let txt = Value::Object(m).to_string();
+    let mut de = json::Deserializer::from_str(&txt);
+    spte::deserialize(&mut de).map_err(|e| format!("profile parse at {}: {}", e.path(), e))
+}
+
+fn to_core_sample(s: SampleIn) -> Result<crate::Sample, String> {
+    let mut m = serde_json::Map::new();
+
+    // Pålagte/vanlige felt
+    m.insert("t".into(), Value::from(s.t));
+    m.insert("v_ms".into(), Value::from(s.v_ms));
+    m.insert("altitude_m".into(), Value::from(s.altitude_m));
+
+    // Opsjonelle felt
+    m.insert("heading_deg".into(), Value::from(s.heading_deg));
+    m.insert("moving".into(), Value::from(s.moving));
+    m.insert("watts".into(), Value::from(s.watts));
+    m.insert("rho".into(), Value::from(s.rho));
+    m.insert("wind_ms".into(), Value::from(s.wind_speed)); // normalisert
+    m.insert("wind_dir_deg".into(), Value::from(s.wind_dir_deg));
+    m.insert("air_temp_c".into(), Value::from(s.air_temp_c));
+    m.insert("air_pressure_hpa".into(), Value::from(s.air_pressure_hpa));
+    m.insert("humidity".into(), Value::from(s.humidity));
+
+    let txt = Value::Object(m).to_string();
+    let mut de = json::Deserializer::from_str(&txt);
+    spte::deserialize(&mut de).map_err(|e| format!("sample parse at {}: {}", e.path(), e))
+}
+
+fn to_core_weather(w: WeatherIn) -> CoreWeather {
+    CoreWeather {
+        wind_ms: w.wind_ms,
+        wind_dir_deg: w.wind_dir_deg,
+        air_temp_c: w.air_temp_c,
+        air_pressure_hpa: w.air_pressure_hpa,
+    }
+}
+
+// Les EstimatIn-feltene én gang (stilner “never read”), og lever nøytral weather.
+fn to_core_weather_from_estimat(e: EstimatIn) -> CoreWeather {
+    let _ = (&e.mode, e.version, e.force, e.notes.as_ref());
+    CoreWeather {
+        wind_ms: 0.0,
+        wind_dir_deg: 0.0,
+        air_temp_c: 0.0,
+        air_pressure_hpa: 0.0,
+    }
+}
+
+// ---------- Parsing ----------
+
+fn parse_in_repr(json_str: &str) -> PyResult<ObjectIn> {
+    let mut de = json::Deserializer::from_str(json_str);
+    let repr: InRepr = spte::deserialize(&mut de).map_err(|e| {
+        let path = e.path().to_string();
+        PyValueError::new_err(format!("parse error (ComputePowerIn) at {}: {}", path, e))
+    })?;
+
+    Ok(match repr {
+        InRepr::Object(o) => o,
+        InRepr::Triple(t) => ObjectIn::from(t),
+    })
+}
+
+// ---------- V3 (eksplisitt, for testing) ----------
+
+#[derive(Debug, Deserialize)]
+struct ComputePowerInV3 {
     samples: Vec<crate::Sample>,
     profile: crate::Profile,
     weather: crate::Weather,
+    #[serde(default)]
+    #[allow(dead_code)]
+    estimat: serde_json::Value,
 }
 
-fn call_analyze_session_rust_from_json(json_in: &str) -> Result<String, String> {
-    let parsed: AnalyzeRustIn =
-        serde_json::from_str(json_in).map_err(|e| format!("parse error (AnalyzeRustIn): {e}"))?;
+fn call_compute_power_with_wind_from_json_v3(json_in: &str) -> Result<String, String> {
+    let mut de = serde_json::Deserializer::from_str(json_in);
+    let parsed: ComputePowerInV3 = spte::deserialize(&mut de)
+        .map_err(|e| format!("parse error (ComputePowerIn v3) at {}: {}", e.path(), e))?;
 
-    let v_out: Value = crate::analyze_session_rust(parsed.watts, parsed.pulses, parsed.device_watts)
-        .map_err(|e| format!("analyze_session_rust error: {e}"))?;
-
-    serde_json::to_string(&v_out)
-        .map_err(|e| format!("serialize error (analyze_session_rust result): {e}"))
-}
-
-fn call_compute_power_with_wind_from_json(json_in: &str) -> Result<String, String> {
-    let parsed: ComputePowerIn =
-        serde_json::from_str(json_in).map_err(|e| format!("parse error (ComputePowerIn): {e}"))?;
-
-    let out = crate::compute_power_with_wind_json(&parsed.samples, &parsed.profile, &parsed.weather);
+    let out = crate::compute_power_with_wind_json(
+        &parsed.samples,
+        &parsed.profile,
+        &parsed.weather,
+    );
     Ok(out)
 }
 
-// ---------- helpers ----------
+// ---------- PyO3-funksjoner ----------
 
-fn normalize_jsonish<'py>(py: Python<'py>, obj: &PyAny) -> PyResult<PyObject> {
-    // KUN hvis streng → json.loads; ellers bare pass-through
-    if obj.is_instance_of::<PyString>() {
-        let s: &str = obj.extract()?;
-        let json_mod = py.import("json")?;
-        let loaded = json_mod.call_method1("loads", (s,))?;
-        Ok(loaded.into_py(py))
-    } else {
-        Ok(obj.to_object(py))
-    }
-}
-
-fn to_list_len(obj: &PyAny) -> usize {
-    if let Ok(list) = obj.downcast::<PyList>() {
-        list.len()
-    } else {
-        0
-    }
-}
-
-// ---------- Python-callable functions ----------
-
-/// Python: precision_analyze_rust(json_str: str) -> str
-#[pyfunction]
-fn precision_analyze_rust(_py: Python<'_>, json_str: &str) -> PyResult<String> {
-    call_analyze_session_rust_from_json(json_str).map_err(PyValueError::new_err)
-}
-
-/// Felles dispatcher for compute_power_with_wind*:
-/// Godtar ENTEN:
-///   - 1 pos arg: JSON-streng
-///   - 3 pos args: (samples, profile, weather) — hver kan være Python-objekt ELLER JSON-streng
-fn compute_power_dispatch(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
+/// Overload-vennlig binding: aksepterer enten:
+/// - 1 arg: JSON-streng / vilkårlig objekt (bruker str(obj))
+/// - 3 arg: (samples, profile, third) – serialiseres til JSON, så samme løype.
+///
+/// Eksporteres under standardnavnet som CLI forventer.
+#[pyfunction(name = "compute_power_with_wind_json", signature = (*args, **_kwargs))]
+pub fn compute_power_with_wind_json_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
     match args.len() {
+        // 1-arg: json string / vilkårlig py-objekt -> str(json)
         1 => {
-            let any0 = args.get_item(0)?;
-            let json_str: &str = any0.extract().map_err(|e| {
-                PyValueError::new_err(format!(
-                    "compute_power_with_wind*: expected JSON string as single argument: {e}"
-                ))
-            })?;
-            call_compute_power_with_wind_from_json(json_str).map_err(PyValueError::new_err)
+            let json_in: &PyAny = args.get_item(0)?; // <-- FIX: get_item() returnerer PyResult<&PyAny>
+            let json_str: &str = if let Ok(s) = json_in.downcast::<PyString>() {
+                s.to_str()?
+            } else {
+                json_in.str()?.to_str()?
+            };
+
+            let obj = parse_in_repr(json_str)?;
+            let estimat_present = obj.estimat_cfg.is_some();
+
+            let core_samples = obj.samples.into_iter()
+                .map(to_core_sample)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PyValueError::new_err)?;
+
+            let core_profile = to_core_profile(obj.profile, estimat_present)
+                .map_err(PyValueError::new_err)?;
+
+            let core_weather: CoreWeather = match (obj.weather, obj.estimat_cfg) {
+                (Some(w), _)    => to_core_weather(w),
+                (None, Some(e)) => to_core_weather_from_estimat(e),
+                (None, None)    => CoreWeather { wind_ms: 0.0, wind_dir_deg: 0.0, air_temp_c: 0.0, air_pressure_hpa: 0.0 },
+            };
+
+            Ok(crate::compute_power_with_wind_json(&core_samples, &core_profile, &core_weather))
         }
+
+        // 3-arg: (samples, profile, third) -> bygg JSON via Python json.dumps og kjør samme løype
         3 => {
-            let json_mod = py.import("json").map_err(|e| PyValueError::new_err(format!("import json failed: {e}")))?;
+            let json_mod = py.import("json")?;
+            let dumped: Py<PyAny> = json_mod.getattr("dumps")?.call1((args,))?.into();
+            let json_str: String = dumped.extract(py)?;
 
-            let samples_obj = normalize_jsonish(py, args.get_item(0)?)?;
-            let profile_obj = normalize_jsonish(py, args.get_item(1)?)?;
-            let weather_obj = normalize_jsonish(py, args.get_item(2)?)?;
+            let obj = parse_in_repr(&json_str)?;
+            let estimat_present = obj.estimat_cfg.is_some();
 
-            let d = PyDict::new(py);
-            d.set_item("samples", samples_obj)?;
-            d.set_item("profile", profile_obj)?;
-            d.set_item("weather", weather_obj)?;
+            let core_samples = obj.samples.into_iter()
+                .map(to_core_sample)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PyValueError::new_err)?;
 
-            let json_str: String = json_mod
-                .call_method1("dumps", (d,))?
-                .extract()
-                .map_err(|e| PyValueError::new_err(format!("json.dumps failed: {e}")))?;
-            call_compute_power_with_wind_from_json(&json_str).map_err(PyValueError::new_err)
+            let core_profile = to_core_profile(obj.profile, estimat_present)
+                .map_err(PyValueError::new_err)?;
+
+            let core_weather: CoreWeather = match (obj.weather, obj.estimat_cfg) {
+                (Some(w), _)    => to_core_weather(w),
+                (None, Some(e)) => to_core_weather_from_estimat(e),
+                (None, None)    => CoreWeather { wind_ms: 0.0, wind_dir_deg: 0.0, air_temp_c: 0.0, air_pressure_hpa: 0.0 },
+            };
+
+            Ok(crate::compute_power_with_wind_json(&core_samples, &core_profile, &core_weather))
         }
+
         n => Err(PyValueError::new_err(format!(
-            "compute_power_with_wind* expected 1 (json_str) or 3 (samples, profile, weather) args, got {n}"
+            "compute_power_with_wind_json: expected 1 or 3 args, got {n}"
         ))),
     }
 }
 
-/// Python-navn: compute_power_with_wind(json_or_triple) -> str
-#[pyfunction(name = "compute_power_with_wind", signature = (*args, **_kwargs))]
-fn compute_power_with_wind_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
-    compute_power_dispatch(py, args, _kwargs)
+/// V3: eksplisitt JSON-streng med weather (for test/debug, annet navn)
+#[pyfunction]
+pub fn compute_power_with_wind_json_v3(_py: Python<'_>, json_str: &str) -> PyResult<String> {
+    call_compute_power_with_wind_from_json_v3(json_str).map_err(PyValueError::new_err)
 }
 
-/// Python-navn: compute_power_with_wind_json(json_or_triple) -> str
-#[pyfunction(name = "compute_power_with_wind_json", signature = (*args, **_kwargs))]
-fn compute_power_with_wind_json_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
-    compute_power_dispatch(py, args, _kwargs)
-}
-
-// ---------- Calibration (Python API -> Rust bridge fallback) ----------
-//
-// Støtter:
-//   - 5 args: (watts, speed_ms, altitude_m, profile, weather)
-//   - 1 arg : JSON med feltene over
-//
-// Returnerer dict med numeriske cda/crr/mae + calibrated + profile.
-// Ingen Python json.loads på dict – i 1-arg path bruker vi serde_json i Rust.
-
-#[pyfunction(name = "rust_calibrate_session", signature = (*args, **_kwargs))]
-fn rust_calibrate_session_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<PyObject> {
-    // Hent (watts, speed, alti, profile, weather) som Python-objekter
-    let (watts_obj, speed_obj, alti_obj, profile_obj, _weather_obj): (PyObject, PyObject, PyObject, PyObject, PyObject) =
-        match args.len() {
-            5 => {
-                let w = normalize_jsonish(py, args.get_item(0)?)?;
-                let s = normalize_jsonish(py, args.get_item(1)?)?;
-                let a = normalize_jsonish(py, args.get_item(2)?)?;
-                let p = normalize_jsonish(py, args.get_item(3)?)?;
-                let wth = normalize_jsonish(py, args.get_item(4)?)?;
-                (w, s, a, p, wth)
-            }
-            1 => {
-                // Parse med serde_json i Rust (ikke Python json)
-                let s: &str = args.get_item(0)?.extract()?;
-                let v: Value = serde_json::from_str(s)
-                    .map_err(|e| PyValueError::new_err(format!("invalid JSON for calibration: {e}")))?;
-                let watts_v = v.get("watts").cloned().unwrap_or(Value::Null);
-                let speed_v = v.get("speed_ms").cloned().unwrap_or(Value::Null);
-                let alti_v  = v.get("altitude_m").cloned().unwrap_or(Value::Null);
-                let prof_v  = v.get("profile").cloned().unwrap_or(Value::Null);
-                let wth_v   = v.get("weather").cloned().unwrap_or(Value::Null);
-                (
-                    Python::with_gil(|py| serde_json::to_string(&watts_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&speed_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&alti_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&prof_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&wth_v).unwrap().into_py(py)),
-                )
-            }
-            n => {
-                return Err(PyValueError::new_err(format!(
-                    "rust_calibrate_session expected 1 (json) or 5 (watts, speed_ms, altitude_m, profile, weather) args, got {n}"
-                )))
-            }
-        };
-
-    // Enkle sanity checks (lengder > 0). Fungerer for både list-objekter og JSON-strenger (vi json-loader strengene litt senere).
-    let w_len = to_list_len(watts_obj.as_ref(py));
-    let v_len = to_list_len(speed_obj.as_ref(py));
-    let a_len = to_list_len(alti_obj.as_ref(py));
-
-    // Default-verdier som er numeriske (for å tilfredsstille testen)
-    let cda = 0.30_f64;
-    let crr = 0.005_f64;
-    let mut mae = 12.0_f64;
-    let mut calibrated = true;
-
-    if w_len == 0 || v_len == 0 || a_len == 0 {
-        // Mangelfulle data → sett "calibrated" false, men behold numeriske defaults.
-        calibrated = false;
-        mae = 25.0;
+#[pyfunction]
+fn call_analyze_session_rust_from_json(json_in: &str) -> PyResult<String> {
+    #[derive(Deserialize)]
+    struct AnalyzeRustIn {
+        watts: Vec<f64>,
+        pulses: Vec<f64>,
+        #[serde(default)]
+        device_watts: Option<bool>,
     }
 
-    // Bygg/oppdater profile-dict uten å kalle json.loads på dict
-    let json_mod = py.import("json")?;
-    let profile_dict = if let Ok(d) = profile_obj.as_ref(py).downcast::<PyDict>() {
-        d
-    } else if let Ok(s) = profile_obj.as_ref(py).extract::<&str>() {
-        // Kun hvis streng → loads
-        let loaded = json_mod
-            .call_method1("loads", (s,))
-            .map_err(|e| PyValueError::new_err(format!("json.loads(profile) failed: {e}")))?;
-        loaded.downcast::<PyDict>()?
-    } else {
-        PyDict::new(py)
-    };
+    let mut de = json::Deserializer::from_str(json_in);
+    let parsed: AnalyzeRustIn = spte::deserialize(&mut de).map_err(|e| {
+        let path = e.path().to_string();
+        PyValueError::new_err(format!("parse error (AnalyzeRustIn) at {}: {}", path, e))
+    })?;
 
-    profile_dict.set_item("cda", cda)?;
-    profile_dict.set_item("crr", crr)?;
-    profile_dict.set_item("calibrated", calibrated)?;
-    profile_dict.set_item("calibration_mae", mae)?;
-    profile_dict.set_item("estimat", !calibrated)?;
+    let out_val = crate::analyze_session_rust(parsed.watts, parsed.pulses, parsed.device_watts)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-    // Endelig resultat-dict
-    let out = PyDict::new(py);
-    out.set_item("cda", cda)?;
-    out.set_item("crr", crr)?;
-    out.set_item("mae", mae)?;
-    out.set_item("calibrated", calibrated)?;
-    out.set_item("profile", profile_dict)?;
-
-    Ok(out.into_py(py))
+    Ok(out_val.to_string())
 }
 
-// ---------- Module ----------
+// ---------- PyO3-modul ----------
 
 #[pymodule]
 fn cyclegraph_core(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(precision_analyze_rust, m)?)?;
-    m.add_function(wrap_pyfunction!(compute_power_with_wind_py, m)?)?;
+    // Eksporter *kun* overload-varianten under standardnavnet
     m.add_function(wrap_pyfunction!(compute_power_with_wind_json_py, m)?)?;
-    m.add_function(wrap_pyfunction!(rust_calibrate_session_py, m)?)?;
+
+    // V3 tilgjengelig for eksplisitt testing (annet navn)
+    m.add_function(wrap_pyfunction!(compute_power_with_wind_json_v3, m)?)?;
+
+    m.add_function(wrap_pyfunction!(call_analyze_session_rust_from_json, m)?)?;
     Ok(())
 }
