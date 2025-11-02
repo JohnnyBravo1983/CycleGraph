@@ -1238,7 +1238,8 @@ def write_history_copy(history_dir: str, report: Dict[str, Any]) -> None:
     if not pulses or len(watts) != len(pulses):
         example_keys = []
         if samples and isinstance(samples[0], dict):
-            example_keys = list(norm_keys(samples[0]).keys())
+            example_keys = list(norm_keys(
+                                          [0]).keys())
         print(
             "DEBUG: samples={} valid={} len(watts)={} len(hr)={} "
             "POWER_KEYS={} HR_KEYS={} example_first_keys={}".format(

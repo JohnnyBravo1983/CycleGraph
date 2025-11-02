@@ -4,11 +4,19 @@ from __future__ import annotations
 import json
 import sys
 import traceback
-import os
-from importlib import import_module
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
+
+# Primær import med trygg fallback (brukes i standardstien)
+try:
+    from cli.rust_bindings import rs_power_json  # ✅ primær
+except Exception:
+    try:
+        from cyclegraph.cli.rust_bindings import rs_power_json  # ✅ pakket namespace fallback
+    except Exception as e_imp:
+        rs_power_json = None  # type: ignore
+        _adapter_import_error = e_imp
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -67,6 +75,8 @@ def _nominal_metrics(profile: dict) -> dict:
     drag = 0.5 * RHO * cda * (v ** 3)
     roll = w * G_loc * crr * v
     return {"precision_watt": drag + roll, "drag_watt": drag, "rolling_watt": roll}
+
+
 # --------------------------------------------------------------------------
 
 
@@ -97,56 +107,11 @@ def _base_debug(force_recompute: bool, used_fallback: bool) -> Dict[str, Any]:
     """Minimal debug-blokk som ALLTID returneres (med default reason='ok')."""
     return {
         "force_recompute": bool(force_recompute),
-        "persist_ignored": bool(force_recompute),   # back-compat
-        "ignored_persist": bool(force_recompute),   # det testene krever
+        "persist_ignored": bool(force_recompute),  # back-compat
+        "ignored_persist": bool(force_recompute),  # det testene krever
         "used_fallback": bool(used_fallback),
-        "reason": "ok",                             # NY: kontrakten forventer denne
+        "reason": "ok",
     }
-
-
-def _normalize_response(
-    resp: dict,
-    *,
-    profile_in: dict,
-    force_recompute: bool,
-    used_fallback: bool,
-    sid: str,
-) -> dict:
-    """
-    Tving svaret til å oppfylle API-/test-kontrakt uansett code path.
-    - debug finnes alltid (base + ev. eksisterende)
-    - metrics har total_watt/drag_watt/rolling_watt/precision_watt_ci/weather_applied
-    - metrics.profile_used settes fra INN-profilen (ikke scrubbed)
-    - alltid med sid
-    - fjerner evt. toppnivå "profile" hvis den lekker
-    """
-    resp = dict(resp or {})
-    resp.setdefault("source", "fallback_py" if used_fallback else "rust")
-    resp.setdefault("sid", sid)
-    resp.setdefault("metrics", {})
-    resp.setdefault("debug", {})
-
-    # Metrics: alias + defaults
-    m = resp["metrics"] = dict(resp["metrics"] or {})
-    if "precision_watt" in m and "total_watt" not in m:
-        m["total_watt"] = m["precision_watt"]
-    m.setdefault("drag_watt", 0.0)
-    m.setdefault("rolling_watt", 0.0)
-    m.setdefault("precision_watt", m.get("drag_watt", 0.0) + m.get("rolling_watt", 0.0))
-    m.setdefault("precision_watt_ci", 0.0)
-    m.setdefault("weather_applied", False)
-    m.setdefault("profile_used", _profile_used_from(profile_in))
-
-    # Debug: base alltid med
-    dbg = dict(_base_debug(force_recompute, used_fallback))
-    dbg.update(resp.get("debug") or {})
-    resp["debug"] = dbg
-
-    # Ikke eksponer toppnivå "profile"
-    if "profile" in resp:
-        resp.pop("profile")
-
-    return resp
 
 
 def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None):
@@ -155,8 +120,8 @@ def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None
     og kan (valgfritt) inkludere profile_used slik den kom inn.
     """
     weight = float(profile.get("weight_kg") or profile.get("weightKg") or 78.0)
-    cda    = float(profile.get("CdA", profile.get("cda", 0.28)))
-    crr    = float(profile.get("Crr", profile.get("crr", 0.004)))
+    cda = float(profile.get("CdA", profile.get("cda", 0.28)))
+    crr = float(profile.get("Crr", profile.get("crr", 0.004)))
 
     V_NOM = 6.0
     RHO_DEF = 1.225
@@ -166,11 +131,11 @@ def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None
         total = drag + roll
         out = {
             "precision_watt": total,
-            "total_watt": total,                 # alias som testene bruker
+            "total_watt": total,
             "drag_watt": drag,
             "rolling_watt": roll,
             "weather_applied": bool(weather_applied),
-            "precision_watt_ci": 0.0,            # 0.0 i trinn 3 er OK
+            "precision_watt_ci": 0.0,
         }
         if profile_used is not None:
             out["profile_used"] = profile_used  # legges inne i metrics
@@ -198,369 +163,195 @@ def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None
     return pack(drag, roll)
 
 
+# ----------------- PROFIL-KANONISERING -----------------
+def _canon_profile(p: dict) -> dict:
+    """
+    Dropper alias-duplikater og felter vi ikke skal sende i Trinn 3.
+    Prioriterer snake_case (cda, crr, weight_kg), fjerner 'device',
+    og sikrer eksplisitt bool for calibrated.
+    """
+    p = dict(p or {})
+    # cda
+    if "cda" not in p and "CdA" in p:
+        p["cda"] = p.pop("CdA")
+    else:
+        p.pop("CdA", None)
+    # crr
+    if "crr" not in p and "Crr" in p:
+        p["crr"] = p.pop("Crr")
+    else:
+        p.pop("Crr", None)
+    # weight
+    if "weight_kg" not in p and "weightKg" in p:
+        p["weight_kg"] = p.pop("weightKg")
+    else:
+        p.pop("weightKg", None)
+
+    # Felter vi ikke skal sende nå
+    p.pop("device", None)
+
+    # Sørg for eksplisitt bool for calibrated
+    if "calibrated" not in p:
+        p["calibrated"] = False
+
+    return {
+        "cda": p.get("cda"),
+        "crr": p.get("crr"),
+        "weight_kg": p.get("weight_kg"),
+        "calibrated": bool(p.get("calibrated", False)),
+    }
+
+
+# ----------------- MIDlERTIDIG DEBUG-ENDepunkt (adapter passthrough) -----------------
+@router.post("/debug/rb")
+async def debug_rb(request: Request):
+    """
+    Minimal passthrough → kaller rs_power_json direkte med body som kommer inn.
+    Forventer OBJECT: {"samples":[...], "profile":{...}, "estimat":{...}}
+    Returnerer {"source":"rust"/"fallback"/"error", "out":<str>, "probe": <bool>, "err":<str|None>}
+    """
+    try:
+        data = await request.json()
+    except Exception as e:
+        return {"source": "error", "out": "", "probe": False, "err": f"json body: {e}"}
+
+    if rs_power_json is None:
+        err_msg = (
+            f"Rust adapter import error: {_adapter_import_error}"
+            if "_adapter_import_error" in globals()
+            else "Rust adapter not available"
+        )
+        return {"source": "error", "out": "", "probe": False, "err": err_msg}
+
+    samples = data.get("samples", [])
+    profile = data.get("profile", {})
+    third = data.get("estimat") or data.get("estimate")  # begge alias støttes
+
+    try:
+        out = rs_power_json(samples, profile, third)
+        out_str = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+
+        # En enkel probe: om brukeren sendte med "__probe"
+        probe = "__probe" in (data or {})
+
+        # Heuristikk for å gjette kilde
+        src = "rust"
+        try:
+            parsed = json.loads(out_str)
+            if isinstance(parsed, dict):
+                s = parsed.get("source")
+                if s and "fallback" in str(s):
+                    src = "fallback"
+        except Exception:
+            if out_str.strip().startswith('{"calibrated"'):
+                src = "rust"
+
+        return {"source": src, "out": out_str, "probe": probe, "err": None}
+    except Exception as e:
+        return {"source": "error", "out": "", "probe": False, "err": repr(e)}
+
+
+# ----------------- NY HJELPER FOR RUST-STIEN -----------------
+def _scrub_profile(profile_in: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliser alias/kapitalisering og dropp None/støy."""
+    p = dict(profile_in or {})
+    if "cda" not in p and "CdA" in p:
+        p["cda"] = p.pop("CdA")
+    if "crr" not in p and "Crr" in p:
+        p["crr"] = p.pop("Crr")
+    # ✅ tillegg A: normaliser weightKg → weight_kg og dropp original
+    if "weight_kg" not in p and "weightKg" in p:
+        p["weight_kg"] = p.pop("weightKg")
+    else:
+        p.pop("weightKg", None)
+    # fjern None-verdier
+    for k in list(p.keys()):
+        if p[k] is None:
+            del p[k]
+    return p
+
+
+# ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
 async def analyze_session(
     sid: str,
     request: Request,
-    no_weather: bool = Query(False),
+    no_weather: bool = Query(False),  # beholdt for signatur-compat (ikke brukt i trinn 3)
     force_recompute: bool = Query(False),
     debug: int = Query(0),
 ):
-    """
-    Analyze a session's time-series samples with physics + (optional) weather,
-    delegating heavy lifting to Rust via PyO3 bindings.
+    want_debug = bool(debug)
+    print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}")
 
-    Kallesekvens:
-      1) compute_power_with_wind_json(TRIPLE [samples, profile, estimat])  ← prioritet
-      2) compute_power_with_wind_json(OBJECT {"samples","profile","estimat"|"estimate"})  ← fallback
-      3) PY-fallback (midlertidig) for å sikre 200 OK + metrics.* nøkler
-    """
+    # Les body trygt
     try:
-        want_debug = bool(debug)
+        body = await request.json()
+    except Exception:
+        body = {}
 
-        print("DEBUG ENTER analyze_session", file=sys.stderr, flush=True)
-        print("DEBUG MARK: top of analyze handler", file=sys.stderr, flush=True)
-        print('DEBUG WHO: module=server.routes.sessions file=' + __file__, file=sys.stderr, flush=True)
+    # Valider shape
+    samples = list((body or {}).get("samples") or [])
+    profile_in = dict((body or {}).get("profile") or {})
+    if not isinstance(samples, list) or not isinstance(profile_in, dict):
+        raise HTTPException(status_code=400, detail="Missing 'samples' or 'profile'")
 
-        # ---------- Parse body ----------
-        body: Dict[str, Any] = {}
+    profile_scrubbed = _scrub_profile(profile_in)
+
+    # Estimat-konfig (3. argument) – IKKE vær
+    estimat_cfg: Dict[str, Any] = {}
+    if force_recompute:
+        estimat_cfg["force"] = True
+    if isinstance(body.get("estimat"), dict):
+        estimat_cfg.update(body["estimat"])
+    elif isinstance(body.get("estimate"), dict):
+        estimat_cfg.update(body["estimate"])
+
+    # ---------- HARD RUST SHORT-CIRCUIT ----------
+    if rs_power_json is not None:
         try:
-            body = await request.json()
-            if not isinstance(body, dict):
-                raise ValueError("Request body must be a JSON object")
+            print("[SVR] [RUST] calling rs_power_json(...)")
+            rust_out = rs_power_json(samples, profile_scrubbed, estimat_cfg)
+            # Adapter kan returnere str (JSON) eller dict
+            rust_resp = json.loads(rust_out) if isinstance(rust_out, str) else rust_out
+
+            if isinstance(rust_resp, dict):
+                # ✅ tillegg B: koercer flat → metrics dersom nødvendig
+                resp = dict(rust_resp)
+                if "metrics" not in resp:
+                    keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
+                    if any(k in resp for k in keys):
+                        m = {k: resp.pop(k) for k in keys if k in resp}
+                        if "profile_used" in resp and isinstance(resp["profile_used"], dict):
+                            m.setdefault("profile_used", resp["profile_used"])
+                        resp["metrics"] = m
+                resp.setdefault("source", "rust_1arg")
+                resp.setdefault("weather_applied", False)
+                final = _ensure_contract_shape(resp)
+                print("[SVR] [RUST] success (coerced) → returning early")
+                return final
+
+            print("[SVR] [RUST] no dict/metrics in response → will try fallback")
+
         except Exception:
-            body = {}
+            print("[SVR] [RUST] exception → will try fallback", file=sys.stderr, flush=True)
+            traceback.print_exc()
 
-        # ---------- Profile + defaults ----------
-        profile_in_request_raw: Dict[str, Any] = body.get("profile") or {}
-        if not isinstance(profile_in_request_raw, dict):
-            raise ValueError("profile must be an object/dict")
-
-        profile: Dict[str, Any] = dict(profile_in_request_raw)
-        profile.setdefault("CdA", 0.28)
-        profile.setdefault("Crr", 0.004)
-        profile.setdefault("weightKg", 78.0)
-        profile.setdefault("device", "strava")
-        profile.setdefault("calibrated", False)
-        print(f"DEBUG PROFILE (normalized): {profile}", file=sys.stderr, flush=True)
-
-        # ---------- Samples ----------
-        samples: Optional[List[Dict[str, Any]]] = body.get("samples")
-        if samples is not None and not isinstance(samples, list):
-            raise ValueError("samples must be a list")
-
-        if samples:
-            print(f"DEBUG SAMPLES LEN: {len(samples)} HEAD: {samples[0]}", file=sys.stderr, flush=True)
-        else:
-            print("DEBUG SAMPLES LEN: 0", file=sys.stderr, flush=True)
-
-        # ---------- Mapping + trygge defaults ----------
-        mapped: List[Dict[str, Any]] = []
-        for s in (samples or []):
-            d = dict(s)
-
-            # tid
-            if "t" in d:
-                try:
-                    d["t"] = float(d["t"])
-                except Exception:
-                    raise ValueError("sample.t må være numerisk")
-
-            # fart (v_ms kreves)
-            if "v_ms" not in d:
-                if "v_mps" in d:
-                    d["v_ms"] = float(d.pop("v_mps"))
-                elif "v" in d:
-                    d["v_ms"] = float(d["v"])
-                else:
-                    raise ValueError("sample mangler fart: forventet v_ms/v_mps/v")
-
-            # høyde
-            if "altitude_m" not in d:
-                if "alt" in d:
-                    d["altitude_m"] = float(d["alt"])
-                elif "elev" in d:
-                    d["altitude_m"] = float(d["elev"])
-                else:
-                    d["altitude_m"] = 0.0
-
-            # retning
-            if "heading_deg" not in d:
-                if "heading" in d:
-                    try:
-                        d["heading_deg"] = float(d["heading"])
-                    except Exception:
-                        d["heading_deg"] = 0.0
-                elif "bearing" in d:
-                    try:
-                        d["heading_deg"] = float(d["bearing"])
-                    except Exception:
-                        d["heading_deg"] = 0.0
-                else:
-                    d["heading_deg"] = 0.0
-
-            # moving
-            if "moving" not in d:
-                try:
-                    d["moving"] = bool(float(d.get("v_ms", 0.0)) > 0.0 or float(d.get("watts", 0.0)) > 0.0)
-                except Exception:
-                    d["moving"] = False
-
-            # miljøfelter (kan mangle)
-            d.setdefault("rho", None)
-            d.setdefault("wind_speed", None)   # legacy
-            d.setdefault("wind_dir_deg", None)
-            d.setdefault("air_temp_c", None)
-            d.setdefault("pressure_hpa", None)
-            d.setdefault("humidity", None)
-
-            mapped.append(d)
-
-        if mapped:
-            print(f"DEBUG SAMPLES MAPPED[0]: {mapped[0]}", file=sys.stderr, flush=True)
-
-        print(f"DEBUG force_recompute={force_recompute}", file=sys.stderr, flush=True)
-
-        # ---------- Estimat i body (kun logging) ----------
-        estimat_body: Dict[str, Any] = body.get("estimat") or {}
-        if not isinstance(estimat_body, dict):
-            raise ValueError("estimat must be an object/dict (if provided)")
-        print(f"DEBUG ESTIMAT (body): {estimat_body}", file=sys.stderr, flush=True)
-
-        # ---------- Sanitizer ----------
-        NUMERIC_SAMPLE_KEYS = [
-            "t", "watts", "v_ms", "altitude_m", "heading_deg",
-            "air_temp_c", "pressure_hpa", "wind_ms", "wind_speed",
-            "wind_dir_deg", "humidity", "humidity_pct", "rho",
-        ]
-
-        sanitized: List[Dict[str, Any]] = []
-        for i, s in enumerate(mapped):
-            d = dict(s)
-            for k in NUMERIC_SAMPLE_KEYS:
-                if k in d:
-                    v = d[k]
-                    try:
-                        d[k] = float(0.0 if v is None else v)
-                    except Exception:
-                        print(f"DEBUG SANITIZE: sample[{i}].{k}={v!r} -> 0.0", file=sys.stderr, flush=True)
-                        d[k] = 0.0
-            try:
-                d["moving"] = bool(d.get("moving", (float(d.get("v_ms", 0.0)) > 0.1)))
-            except Exception:
-                d["moving"] = bool(d.get("moving", False))
-            sanitized.append(d)
-
-        mapped = sanitized
-        print(f"DEBUG MAPPED len={len(mapped)}", file=sys.stderr, flush=True)
-        if mapped[:3]:
-            print(f"DEBUG FIRST SPEEDS: {[s.get('v_ms') for s in mapped[:3]]}", file=sys.stderr, flush=True)
-        print(f"DEBUG SANITIZED HEAD: {mapped[0] if mapped else None}", file=sys.stderr, flush=True)
-
-        # --- Ensure each sample has a monotonic 't' (seconds) ---
-        synth_count = 0
-        t_prev = -1.0
-        for i, s in enumerate(mapped):
-            t_val = s.get("t", None)
-            try:
-                if t_val is None:
-                    raise ValueError("no t")
-                t_num = float(t_val)
-            except Exception:
-                # Syntetiser 1.0 s intervaller hvis t mangler/ikke-numerisk
-                t_num = (t_prev + 1.0) if t_prev >= 0.0 else float(i)
-                s["t"] = t_num
-                synth_count += 1
-            else:
-                # Tving monotoni
-                if t_prev >= 0.0 and t_num <= t_prev:
-                    t_num = t_prev + 1.0
-                    s["t"] = t_num
-                    synth_count += 1
-            t_prev = t_num
-
-        if synth_count:
-            print(f"DEBUG T-SYNTH: synthesized/adjusted t for {synth_count} samples", file=sys.stderr, flush=True)
-
-        # Scrub profile (KUN til beregning, ikke til profile_used)
-        def _to_float(x, default=0.0):
-            try:
-                return float(0.0 if x is None else x)
-            except Exception:
-                return default
-
-        profile["CdA"] = _to_float(profile.get("CdA"), 0.28)
-        profile["Crr"] = _to_float(profile.get("Crr"), 0.004)
-        profile["weightKg"] = _to_float(profile.get("weightKg"), 78.0)
-        profile["calibrated"] = bool(profile.get("calibrated", False))
-        print(f"DEBUG PROFILE SCRUBBED: {profile}", file=sys.stderr, flush=True)
-        profile_scrubbed = dict(profile)  # brukes i fallback-beregning
-
-        # --- Ensure wind_ms / wind_speed aliases for Rust ---
-        for s in mapped:
-            wms = s.get("wind_ms", None)
-            wsp = s.get("wind_speed", None)
-            try:
-                if wms is None and wsp is not None:
-                    s["wind_ms"] = float(wsp)
-                if wsp is None and wms is not None:
-                    s["wind_speed"] = float(wms)
-            except Exception:
-                s["wind_ms"] = float(s.get("wind_ms") or 0.0)
-                s["wind_speed"] = float(s.get("wind_speed") or 0.0)
-
-        # --- (Valgfritt) Prune samples til sikre felter første gang (styrt av env) ---
-        PRUNE_FOR_RUST = os.environ.get("CG_PRUNE_FOR_RUST") == "1"
-        if PRUNE_FOR_RUST:
-            KEEP = {"t", "v_ms", "altitude_m", "heading_deg", "watts", "moving"}
-            mapped = [{k: d[k] for k in KEEP if k in d} for d in mapped]
-            print(f"DEBUG PRUNE: enabled (CG_PRUNE_FOR_RUST=1) → fields={sorted(KEEP)}", file=sys.stderr, flush=True)
-            if mapped:
-                print(f"DEBUG PRUNE HEAD: {mapped[0]}", file=sys.stderr, flush=True)
-
-        # ---------- Estimat + payloads ----------
-        est: Dict[str, Any] = {"mode": "inline", "version": 1, "force": bool(force_recompute), "notes": "shim"}
-
-        # TRIPLE først (wheel krever dette): [samples, profile, est]
-        payload_triple_str = json.dumps([mapped, profile, est])
-
-        # OBJECT fallback – send begge nøkler (estimat/estimate) for robusthet
-        payload_obj_str = json.dumps({
-            "estimat": est,   # eldre wheel
-            "estimate": est,  # nyere wheel
-            "profile": profile,
-            "samples": mapped,
-        })
-
-        # ---------- Rust binding ----------
-        try:
-            rust_mod = import_module("cyclegraph_core.cyclegraph_core")
-            rust_json = rust_mod.compute_power_with_wind_json
-        except Exception as e_imp:
-            raise HTTPException(status_code=500, detail=f"Rust binding import error: {e_imp}") from e_imp
-
-        # ---------- Kall Rust med forsøk ----------
-        used_fallback = False
-        result: Optional[dict] = None
-        attempts: List[Dict[str, str]] = []
-
-        # TRIPLE
-        try:
-            r = rust_json(payload_triple_str)
-            result = json.loads(r) if isinstance(r, str) else (r if isinstance(r, dict) else None)
-            branch = "triple"
-            variant = "array_triple"
-        except Exception as e_triple:
-            if want_debug:
-                attempts.append({"variant": "array_triple", "error": repr(e_triple)})
-            result = None
-
-        # OBJECT (hvis TRIPLE feilet)
-        if result is None:
-            branch = "object"
-            try:
-                r = rust_json(payload_obj_str)
-                result = json.loads(r) if isinstance(r, str) else (r if isinstance(r, dict) else None)
-                variant = "object_both_est_keys"
-            except Exception as e_obj:
-                if want_debug:
-                    attempts.append({"variant": "object_both_est_keys", "error": repr(e_obj)})
-                used_fallback = True
-                # bygg minimal respons; normalize fyller nøklene
-                result = {
-                    "source": "fallback_py",
-                    "metrics": {},
-                    "debug": {},
-                }
-                variant = "fallback_py"
-
-        # Normaliser + legg på ekstra debug når debug=1
-        normalized = _normalize_response(
-            result,
-            profile_in=profile_in_request_raw,  # NB: inn-profil for profile_used
-            force_recompute=bool(force_recompute),
-            used_fallback=used_fallback,
-            sid=sid,
-        )
-
-        if want_debug:
-            normalized["debug"].update({
-                "branch": branch,
-                "variant": variant,
-            })
-            if attempts:
-                normalized["debug"]["attempts"] = attempts
-
-        # ----------------- KONTRAKT-SIKRING FØR RETUR -----------------
-        resp = dict(normalized)
-
-        # --- NOMINELL METRICS VED TOMME SAMPLES ---
-        try:
-            use_nominal = False
-            if not mapped:  # mangler samples
-                use_nominal = True
-            else:
-                m_cur = resp.get("metrics") or {}
-                if float(m_cur.get("drag_watt", 0.0)) == 0.0 and float(m_cur.get("rolling_watt", 0.0)) == 0.0:
-                    use_nominal = True
-            if use_nominal:
-                nom = _nominal_metrics(profile_in_request_raw or {})
-                resp.setdefault("metrics", {}).update(nom)
-        except Exception as _e:
-            print("DEBUG NOMINAL METRICS ERROR:", repr(_e), file=sys.stderr, flush=True)
-
-        # Hvis metrics mangler/er tomt, fyll inn nominelle verdier (ekstra sikkerhet)
-        if not resp.get("metrics"):
-            resp["metrics"] = _nominal_metrics(resp.get("profile_used") or profile_scrubbed)
-
-        # Toppnivå weather_applied bør speile metrics.weather_applied
-        if "weather_applied" not in resp:
-            resp["weather_applied"] = bool(resp.get("metrics", {}).get("weather_applied", False))
-
-        # Toppnivå profile_used: speil fra metrics.profile_used eller fra inn-profilen
-        if "profile_used" not in resp or not resp["profile_used"]:
-            resp["profile_used"] = dict(
-                resp.get("metrics", {}).get("profile_used") or _profile_used_from(profile_in_request_raw)
-            )
-
-        # Map ev. gamle debug-nøkler → riktig kontraktfelt (ignored_persist på toppnivå)
-        debug_block = resp.get("debug", {}) if isinstance(resp.get("debug"), dict) else {}
-        resp["ignored_persist"] = bool(
-            resp.get("ignored_persist") or
-            debug_block.get("ignored_persist") or
-            debug_block.get("persist_ignored")
-        )
-
-        # --- KONTRAKT: metrics.profile_used = inn-profilen (IKKE scrubbed) ---
-        try:
-            resp.setdefault("metrics", {})
-            if "profile_used" not in resp["metrics"]:
-                resp["metrics"]["profile_used"] = dict(profile_in_request_raw or {})
-        except Exception:
-            pass
-
-        # Sett standardform på hele svaret (setdefault → ikke overstyr eksisterende)
-        resp = _ensure_contract_shape(resp)
-
-        # --- FAIL-SAFE: sørg for at debug.ignored_persist finnes ---
-        try:
-            resp.setdefault("debug", {})
-            if "ignored_persist" not in resp["debug"]:
-                resp["debug"]["ignored_persist"] = bool(
-                    resp["debug"].get("ignored_persist")
-                    or resp["debug"].get("persist_ignored")
-                    or False
-                )
-        except Exception:
-            pass
-        # ----------------------------------------------------------------------
-
-        return resp
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        tb = traceback.format_exc()
-        print("DEBUG ERROR in analyze_session:", file=sys.stderr, flush=True)
-        print(tb, file=sys.stderr, flush=True)
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
+    # ---------- PURE FALLBACK_PY (minimal) ----------
+    fb = {
+        "source": "fallback_py",
+        "weather_applied": False,
+        "profile_used": profile_scrubbed,
+        "metrics": {
+            "precision_watt": 0.0,
+            "drag_watt": 0.0,
+            "rolling_watt": 0.0,
+            "total_watt": 0.0,
+        },
+        "debug": {
+            "reason": "fallback-path",
+            "note": "Legacy Python path executed (no Rust result short-circuited).",
+        },
+        "sid": sid,
+    }
+    print("[SVR] [FB] returning fallback_py")
+    return _ensure_contract_shape(fb)

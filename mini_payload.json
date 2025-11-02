@@ -1,0 +1,13 @@
+{
+  "samples": [
+    {"t":0.0,"v_ms":6.0,"moving":true,"altitude_m":0.0,"heading_deg":0.0,"watts":200.0},
+    {"t":1.0,"v_ms":6.2,"moving":true,"altitude_m":0.1,"heading_deg":0.0,"watts":205.0}
+  ],
+  "profile": {
+    "cda": 0.28,
+    "crr": 0.004,
+    "weight_kg": 82.0,
+    "calibrated": false
+  },
+  "estimat": { "mode": "neutral" }
+}

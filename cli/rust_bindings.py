@@ -1,10 +1,26 @@
 # cli/rust_bindings.py
 import json
+import hashlib
+import tempfile
+import os
 from typing import Any, Dict, Sequence
-import cyclegraph_core as cg
+
+# Prøv pakke-root først (vanligst), fall tilbake til submodul
+try:
+    import cyclegraph_core as cg
+except Exception:
+    from cyclegraph_core import cyclegraph_core as cg  # fallback
+
+_RUST_1ARG = getattr(cg, "compute_power_with_wind_json", None)
+_RUST_V3   = getattr(cg, "compute_power_with_wind_json_v3", None)  # kun for introspeksjon/fallback
 
 
+# ---------------------------------------------------------------------------
+# JSON-hjelpere
+# ---------------------------------------------------------------------------
 def _coerce_jsonish(x: Any) -> Any:
+    if x is None:
+        return None
     if isinstance(x, (str, bytes, bytearray)):
         try:
             return json.loads(x)
@@ -13,6 +29,9 @@ def _coerce_jsonish(x: Any) -> Any:
     return x
 
 
+# ---------------------------------------------------------------------------
+# Kalibrering (Rust eller fallback)
+# ---------------------------------------------------------------------------
 def calibrate_session(
     watts: Sequence[float],
     speed_ms: Sequence[float],
@@ -22,17 +41,11 @@ def calibrate_session(
 ) -> Dict[str, Any]:
     """
     Kaller Rust-kalibrering og normaliserer retur for testene:
-
-    - out: dict
-    - out["profile"]: JSON-streng (ikke dict)
-    - cda/crr/mae: float
-    - calibrated: bool
-
-    I tillegg håndteres input-forskjeller på tvers av PyO3-signaturer:
-    - Hvis Rust-bindingen forventer str for profile/weather så serialiserer vi dict → JSON.
+      - out["profile"]: JSON-streng
+      - cda/crr/mae: float
+      - calibrated: bool
+    Myk fallback dersom rust_calibrate_session ikke finnes.
     """
-
-    # --- NY: myk fallback dersom rust_calibrate_session ikke finnes ---
     if cg is None or not hasattr(cg, "rust_calibrate_session"):
         prof_out = dict(profile or {})
         out: Dict[str, Any] = {
@@ -47,16 +60,12 @@ def calibrate_session(
         except Exception:
             pass
         return out
-    # -----------------------------------------------------------------
 
-    # 0) Gjør input robust mht. PyO3-signatur (str vs dict)
     prof_arg: Any = json.dumps(profile, ensure_ascii=False) if isinstance(profile, dict) else profile
     wthr_arg: Any = json.dumps(weather, ensure_ascii=False) if isinstance(weather, dict) else weather
 
-    # 1) Kjør Rust
     out: Any = cg.rust_calibrate_session(watts, speed_ms, altitude_m, prof_arg, wthr_arg)
 
-    # 2) Hvis Rust returnerer JSON-streng, dekod til dict
     if isinstance(out, str):
         try:
             out = json.loads(out)
@@ -64,8 +73,6 @@ def calibrate_session(
             out = {"raw": out}
 
     out = dict(out or {})
-
-    # 3) Normaliser typer/keys
     out.setdefault("calibrated", False)
     out["calibrated"] = bool(out["calibrated"])
 
@@ -76,7 +83,6 @@ def calibrate_session(
         except Exception:
             out[k] = 0.0
 
-    # 4) Profile: testene forventer JSON-streng
     prof = out.get("profile")
     if isinstance(prof, dict):
         try:
@@ -98,74 +104,70 @@ def calibrate_session_dict(
     profile: Dict[str, Any],
     weather: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Backend-variant: samme som over, men koercer out["profile"] til dict
-    slik at resten av systemet kan jobbe typetrygt uten json.loads.
-    """
+    """Som over, men koercer out['profile'] til dict for backend-bruk."""
     out = calibrate_session(watts, speed_ms, altitude_m, profile, weather)
     out["profile"] = _coerce_jsonish(out.get("profile"))
     return out
 
 
-# --- Compute adapter (v1/v3-tolerant, tåler str eller dict) ---
-
-def _hasattr(obj, name: str) -> bool:
-    try:
-        return hasattr(obj, name)
-    except Exception:
-        return False
-
-
-# Oppdag v3/v1 på runtime
-_USE_V3 = _hasattr(cg, "compute_power_with_wind_json_v3")
-
-
+# ---------------------------------------------------------------------------
+# Compute-adapter (ren OBJECT + fallback TRIPLE)
+# ---------------------------------------------------------------------------
 def _call_rust_compute(payload: Dict[str, Any]) -> str:
     """
-    Kaller v3 hvis tilgjengelig (med 'estimat': {}), ellers v1.
-    Fallback fra v3→v1 ved parse-feil.
-    Returnerer alltid str (JSON fra Rust).
+    Serialiserer payload, dumper den til en tempfil med SHA i navnet,
+    logger fingerprint, og kaller 1-arg-exporten.
     """
-    if _USE_V3:
-        payload.setdefault("estimat", {})  # v3 krever dette
-        try:
-            return cg.compute_power_with_wind_json_v3(json.dumps(payload, ensure_ascii=False))
-        except Exception:
-            # v3 feilet – prøv v1
-            payload.pop("estimat", None)
-            return cg.compute_power_with_wind_json(json.dumps(payload, ensure_ascii=False))
-    else:
-        payload.pop("estimat", None)
-        return cg.compute_power_with_wind_json(json.dumps(payload, ensure_ascii=False))
+    s = json.dumps(payload)
+    sha = hashlib.sha256(s.encode("utf-8")).hexdigest()
+    flag = "rb-1arg"
+    tmp = os.path.join(tempfile.gettempdir(), f"cg_payload_{flag}_{sha[:8]}.json")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(s)
+    except Exception:
+        pass
+    print(f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={list(payload.keys())} FILE={tmp}")
+
+    if _RUST_1ARG is not None:
+        return _RUST_1ARG(s)
+
+    raise RuntimeError("compute_power_with_wind_json (1-arg) mangler")
 
 
-def _looks_like_weather(x: Any) -> bool:
-    if not isinstance(x, dict):
-        return False
-    keys = x.keys()
-    return any(k in keys for k in (
-        "air_temp_c", "rho", "pressure_hpa", "humidity",
-        "wind_speed", "wind_ms", "wind_dir_deg"
-    ))
-
-
+# ---------------------------------------------------------------------------
+# ROBUST ADAPTER: OBJECT først (ren, alltid estimat), fallback til TRIPLE
+# ---------------------------------------------------------------------------
 def rs_power_json(samples, profile, third=None) -> str:
     """
-    Backcompat for gamle 3-args kall (samples, profile, weather|estimat).
-    Aksepterer både dict/list og JSON-strenger for alle tre.
-    Pakker alltid om til ett JSON-argument før Rust-kallet.
-    Returnerer str (Rust JSON).
+    Backcompat for gamle 3-args kall (samples, profile, estimat).
+    Denne ADAPTEREN sender alltid en ren OBJECT med 'estimat' (minst {}).
+    'weather' sendes aldri i denne stien.
+    Ved parse-feil i Rust (ValueError/parse error), faller vi tilbake til TRIPLE.
     """
-    # Koercer innkommende (kan være JSON-strenger)
     samples = _coerce_jsonish(samples)
     profile = _coerce_jsonish(profile)
-    third = _coerce_jsonish(third)
+    third   = _coerce_jsonish(third)
 
-    # Bygg payload
-    payload: Dict[str, Any] = {"samples": samples, "profile": profile}
+    # Alltid ha med estimat (minst {})
+    payload: Dict[str, Any] = {
+        "samples": samples,
+        "profile": profile,
+        "estimat": third if isinstance(third, dict) else {},
+    }
 
-    # Legg 'weather' hvis third ligner vær, ellers tom
-    payload["weather"] = third if _looks_like_weather(third) else {}
-
-    # Kjør Rust
-    return _call_rust_compute(payload)
+    try:
+        # Primær: 1-arg OBJECT
+        return _call_rust_compute(payload)
+    except Exception as e_obj:
+        # Fallback: TRIPLE (legacy)
+        try:
+            tri = [samples, profile, payload["estimat"]]
+            s = json.dumps(tri)
+            if _RUST_1ARG is not None:
+                return _RUST_1ARG(s)
+            if _RUST_V3 is not None:
+                return _RUST_V3(s)
+            raise RuntimeError("Ingen Rust-export tilgjengelig i fallback (TRIPLE).")
+        except Exception as e_tri:
+            raise ValueError(f"adapter OBJECT->TRIPLE failed: obj={e_obj!r}; tri={e_tri!r}")
