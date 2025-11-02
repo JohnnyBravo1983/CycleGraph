@@ -3,6 +3,7 @@ import json
 import hashlib
 import tempfile
 import os
+import sys
 from typing import Any, Dict, Sequence
 
 # Prøv pakke-root først (vanligst), fall tilbake til submodul
@@ -116,7 +117,7 @@ def calibrate_session_dict(
 def _call_rust_compute(payload: Dict[str, Any]) -> str:
     """
     Serialiserer payload, dumper den til en tempfil med SHA i navnet,
-    logger fingerprint, og kaller 1-arg-exporten.
+    logger fingerprint (til stderr), og kaller 1-arg-exporten.
     """
     s = json.dumps(payload)
     sha = hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -127,7 +128,10 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
             fh.write(s)
     except Exception:
         pass
-    print(f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={list(payload.keys())} FILE={tmp}")
+    print(
+        f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={list(payload.keys())} FILE={tmp}",
+        file=sys.stderr,
+    )
 
     if _RUST_1ARG is not None:
         return _RUST_1ARG(s)
