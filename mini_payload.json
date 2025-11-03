@@ -1,4 +1,4 @@
-﻿{
+{
   "samples": [
     { "t": 0, "v_ms": 8.5, "altitude_m": 10, "watts": 230, "moving": true },
     { "t": 1, "v_ms": 8.6, "altitude_m": 10, "watts": 235, "moving": true },
