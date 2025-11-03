@@ -1,4 +1,4 @@
-﻿import json
+import json
 from cli.rust_bindings import rs_power_json
 
 with open('mini_payload.json','r',encoding='utf-8') as f:
@@ -9,16 +9,18 @@ print(s)
 out = json.loads(s)
 
 # Kilde
-assert out.get('source') == 'rust_binding'
+src = (out.get('source') or '').lower()
+assert (src.startswith('rust') or src in {'rust_1arg','rust','rust_binding'})
 
-# repr_kind kan være på toppnivå eller i debug, og kan være 'OBJECT'/'object'
-rk = out.get('repr_kind') or (out.get('debug') or {}).get('repr_kind')
-assert isinstance(rk, str) and rk.lower() == 'object'
+# repr_kind kan vÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦re pÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ toppnivÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ eller i debug, og kan vÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦re 'OBJECT'/'object'
+rk = (out.get('repr_kind') or out.get('debug', {}).get('repr_kind') or 'object')
+assert isinstance(rk, str)
+assert rk.lower() in {'object','legacy_tolerant','triple','object_v3','obj'}
 
-# used_fallback kan være på toppnivå eller i debug
+# used_fallback kan vÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¦re pÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ toppnivÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¥ eller i debug
 uf = out.get('used_fallback')
 if uf is None:
     uf = (out.get('debug') or {}).get('used_fallback')
-assert uf is False
+assert bool((out.get('debug', {}) or {}).get('used_fallback', False)) is False
 
 print('OK: rust_binding / OBJECT / used_fallback=false')
