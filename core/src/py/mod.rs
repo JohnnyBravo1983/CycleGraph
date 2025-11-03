@@ -1,3 +1,17 @@
+// In release builds we deny(warnings) at crate level. This module contains
+// tolerant parsers and helpers that may be intentionally unused during
+// incremental integration. Allow them in release to avoid breaking the build.
+#![cfg_attr(
+    not(debug_assertions),
+    allow(
+        dead_code,
+        unused_imports,
+        unused_variables,
+        unused_mut,
+        unused_macros
+    )
+)]
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -43,6 +57,7 @@ struct ProfileInTol {
 
     // Viktig – aksepter valgfritt estimat i profile-inngangen
     #[serde(default)]
+    #[allow(dead_code)] // feltet aksepteres fra JSON men brukes ikke direkte her
     estimat: Option<Value>,
 }
 
