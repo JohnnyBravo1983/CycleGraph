@@ -27,40 +27,32 @@ RHO_DEFAULT = 1.225  # enkel fallback-rho
 # ----------------- HELPERE (kontrakt + nominelle metrics) -----------------
 def _ensure_contract_shape(resp: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Sett sikre defaults og garanter kontrakt:
-      - resp.source, resp.weather_applied, resp.profile_used
-      - resp.metrics.precision_watt/drag_watt/rolling_watt/total_watt
-      - debug.reason = "ok" + force/persist alias (uten å overstyre eksisterende)
+    Sett sikre defaults og garanter kontrakt — kun setdefault,
+    ikke endre eksisterende tallverdier.
     """
     resp = dict(resp or {})
 
-    # toppnivå defaults
+    # toppnivå defaults (ikke overskriv hvis Rust har satt disse)
     resp.setdefault("source", resp.get("source") or "fallback_py")
     resp.setdefault("weather_applied", False)
-    resp.setdefault("profile_used", {})  # speil av metrics.profile_used om satt
+    resp.setdefault("profile_used", {})  # speiles ofte fra metrics.profile_used
 
-    # metrics: alias + defaults
+    # metrics: bare default-nøkler, ingen beregning
     m = resp.setdefault("metrics", {})
-    # speil weather_applied inn i metrics
-    m.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
     m.setdefault("precision_watt", 0.0)
     m.setdefault("drag_watt", 0.0)
     m.setdefault("rolling_watt", 0.0)
+    # total_watt defaulter til precision_watt dersom mangler
+    m.setdefault("total_watt", m.get("precision_watt", 0.0))
+    m.setdefault("profile_used", {})
+    # speil weather_applied inn i metrics kun hvis mangler
+    m.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
 
-    # total_watt = precision_watt (alias) hvis satt; ellers drag+rolling
-    if "total_watt" not in m:
-        total = m.get("precision_watt")
-        if (total is None or float(total) == 0.0) and (
-            float(m.get("drag_watt", 0.0)) != 0.0 or float(m.get("rolling_watt", 0.0)) != 0.0
-        ):
-            total = float(m.get("drag_watt", 0.0)) + float(m.get("rolling_watt", 0.0))
-        m["total_watt"] = float(total or 0.0)
-
-    # speil metrics.profile_used til toppnivå profile_used om tilstede
-    if "profile_used" in m and isinstance(m["profile_used"], dict):
+    # speil metrics.profile_used til toppnivå om det finnes (ikke tvang)
+    if "profile_used" in m and isinstance(m["profile_used"], dict) and not resp.get("profile_used"):
         resp["profile_used"] = m["profile_used"]
 
-    # debug-defaults (inkl. reason + force/persist alias)
+    # debug-defaults (uten å overskrive eksisterende)
     dbg = resp.setdefault("debug", {})
     dbg.setdefault("reason", "ok")
     dbg.setdefault("force_recompute", False)
@@ -71,6 +63,7 @@ def _ensure_contract_shape(resp: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _nominal_metrics(profile: dict) -> dict:
+    # (ikke brukt til beregning i kontrakt; beholdt for ev. tester)
     G_loc = 9.80665
     RHO = 1.225
     v = 6.0
@@ -166,42 +159,23 @@ def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None
 
 
 # ----------------- PROFIL-KANONISERING -----------------
-def _canon_profile(p: dict) -> dict:
-    """
-    Dropper alias-duplikater og felter vi ikke skal sende i Trinn 3.
-    Prioriterer snake_case (cda, crr, weight_kg), fjerner 'device',
-    og sikrer eksplisitt bool for calibrated.
-    """
-    p = dict(p or {})
-    # cda
+def _scrub_profile(profile_in: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliser alias/kapitalisering og dropp None/støy."""
+    p = dict(profile_in or {})
     if "cda" not in p and "CdA" in p:
         p["cda"] = p.pop("CdA")
-    else:
-        p.pop("CdA", None)
-    # crr
     if "crr" not in p and "Crr" in p:
         p["crr"] = p.pop("Crr")
-    else:
-        p.pop("Crr", None)
-    # weight
+    # normaliser weightKg → weight_kg og dropp original
     if "weight_kg" not in p and "weightKg" in p:
         p["weight_kg"] = p.pop("weightKg")
     else:
         p.pop("weightKg", None)
-
-    # Felter vi ikke skal sende nå
-    p.pop("device", None)
-
-    # Sørg for eksplisitt bool for calibrated
-    if "calibrated" not in p:
-        p["calibrated"] = False
-
-    return {
-        "cda": p.get("cda"),
-        "crr": p.get("crr"),
-        "weight_kg": p.get("weight_kg"),
-        "calibrated": bool(p.get("calibrated", False)),
-    }
+    # fjern None-verdier
+    for k in list(p.keys()):
+        if p[k] is None:
+            del p[k]
+    return p
 
 
 # ----------------- MIDlERTIDIG DEBUG-ENDepunkt (adapter passthrough) -----------------
@@ -227,16 +201,18 @@ async def debug_rb(request: Request):
 
     samples = data.get("samples", [])
     profile = data.get("profile", {})
-    third = data.get("estimat") or data.get("estimate")  # begge alias støttes
+    # estimat i body (kan brukes til echo i debug)
+    body_estimat = data.get("estimat") or data.get("estimate")
+    third = body_estimat  # begge alias støttes
 
     try:
         out = rs_power_json(samples, profile, third)
         out_str = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
 
-        # En enkel probe: om brukeren sendte med "__probe"
-        probe = "__probe" in (data or {})
+        # En enkel probe: om brukeren sendte med "__probe" / "probe"
+        probe = data.get("__probe") or data.get("probe")
 
-        # Heuristikk for å gjette kilde
+        # Heuristikk for å gjette kilde + form svar med setdefault-prinsipp
         src = "rust"
         try:
             parsed = json.loads(out_str)
@@ -244,85 +220,45 @@ async def debug_rb(request: Request):
                 s = parsed.get("source")
                 if s and "fallback" in str(s):
                     src = "fallback"
-        except Exception:
-            if out_str.strip().startswith('{"calibrated"'):
-                src = "rust"
 
-        return {"source": src, "out": out_str, "probe": probe, "err": None}
+                resp = dict(parsed)
+
+                # --- debug (setdefault, ikke overskrive) ---
+                dbg = resp.setdefault("debug", {})
+                dbg.setdefault("reason", "ok")
+                if "used_fallback" not in dbg:
+                    dbg["used_fallback"] = (src == "fallback")
+                if probe:
+                    dbg.setdefault("probe", probe)
+
+                # Echo estimat_cfg_used (whitelist nøkler) — kun for debug
+                # 1) Hvis vi faktisk sendte estimat i denne stien (fra body)
+                if isinstance(body_estimat, dict) and body_estimat:
+                    echo = {}
+                    for k in ("force",):
+                        if k in body_estimat:
+                            echo[k] = body_estimat[k]
+                    if echo:
+                        dbg.setdefault("estimat_cfg_used", echo)
+
+                # --- toppnivå og metrics med setdefault ---
+                resp.setdefault("weather_applied", False)
+
+                m = resp.setdefault("metrics", {})
+                m.setdefault("precision_watt", 0.0)
+                m.setdefault("drag_watt", 0.0)
+                m.setdefault("rolling_watt", 0.0)
+                m.setdefault("total_watt", m.get("precision_watt", 0.0))
+                m.setdefault("profile_used", {})
+
+                out_str = json.dumps(resp, ensure_ascii=False)
+        except Exception:
+            # Hvis ikke JSON, la out_str være som den er
+            pass
+
+        return {"source": src, "out": out_str, "probe": bool(probe), "err": None}
     except Exception as e:
         return {"source": "error", "out": "", "probe": False, "err": repr(e)}
-
-
-# ----------------- NY HJELPER FOR RUST-STIEN -----------------
-def _scrub_profile(profile_in: Dict[str, Any]) -> Dict[str, Any]:
-    """Normaliser alias/kapitalisering og dropp None/støy."""
-    p = dict(profile_in or {})
-    if "cda" not in p and "CdA" in p:
-        p["cda"] = p.pop("CdA")
-    if "crr" not in p and "Crr" in p:
-        p["crr"] = p.pop("Crr")
-    # normaliser weightKg → weight_kg og dropp original
-    if "weight_kg" not in p and "weightKg" in p:
-        p["weight_kg"] = p.pop("weightKg")
-    else:
-        p.pop("weightKg", None)
-    # fjern None-verdier
-    for k in list(p.keys()):
-        if p[k] is None:
-            del p[k]
-    return p
-
-
-# ----------------- Fyll skalar-metrics fra arrays/nominelt -----------------
-def _fill_metrics_from_arrays(resp: Dict[str, Any], profile_in: Dict[str, Any]) -> None:
-    """
-    Hvis metrics mangler/er nuller men vi har arrays (watts/v_rel/samples),
-    beregn nominelle skalarer slik at tester kan verifisere CdA/Crr/weight-effekt.
-    """
-    try:
-        m = resp.setdefault("metrics", {})
-        # Hvis allerede fylt med nonzero, gjør ingenting
-        if any(float(m.get(k, 0.0)) > 0.0 for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")):
-            return
-
-        watts = resp.get("watts") or []
-        v_rel = resp.get("v_rel") or []
-
-        # Fallback: hent hastighet fra samples[*].v_ms
-        if not v_rel and isinstance(resp.get("samples"), list):
-            v_rel = [float(s.get("v_ms", 0.0)) for s in resp["samples"] if isinstance(s, dict)]
-
-        # Profilparametre (tolerant)
-        cda = float(profile_in.get("cda") or profile_in.get("CdA") or 0.30)
-        crr = float(profile_in.get("crr") or profile_in.get("Crr") or 0.004)
-        wkg = float(profile_in.get("weight_kg") or profile_in.get("weightKg") or 78.0)
-        rho = 1.225
-        g = 9.80665
-
-        # total_watt: snitt av watts hvis finnes
-        total_watt = 0.0
-        if isinstance(watts, list) and watts:
-            try:
-                total_watt = sum(float(x) for x in watts) / len(watts)
-            except Exception:
-                total_watt = 0.0
-
-        # drag/rolling: fra v_rel om mulig, ellers nominell v=6.0
-        vv = [float(v) for v in v_rel if float(v) > 0.0]
-        if not vv:
-            vv = [6.0]  # nominell
-
-        drag = sum(0.5 * rho * cda * (v ** 3) for v in vv) / len(vv)
-        roll = sum(crr * wkg * g * v for v in vv) / len(vv)
-        precision = drag + roll
-
-        m.setdefault("drag_watt", float(drag))
-        m.setdefault("rolling_watt", float(roll))
-        m.setdefault("precision_watt", float(precision))
-        m.setdefault("total_watt", float(total_watt if total_watt > 0 else precision))
-    except Exception:
-        # La _ensure_contract_shape ta seg av “0.0”-defaults ved feil
-        pass
 
 
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
@@ -364,6 +300,7 @@ async def analyze_session(
     if rs_power_json is not None:
         try:
             print("[SVR] [RUST] calling rs_power_json(...)")
+            # tredje argument = ESTIMAT, aldri weather
             rust_out = rs_power_json(samples, profile_scrubbed, estimat_cfg)
             # Adapter kan returnere str (JSON) eller dict
             rust_resp = json.loads(rust_out) if isinstance(rust_out, str) else rust_out
@@ -371,7 +308,7 @@ async def analyze_session(
             if isinstance(rust_resp, dict):
                 resp = dict(rust_resp)
 
-                # Pakk flat → metrics (belte & bukseseler)
+                # Pakk flat → metrics (belte & bukseseler), men ikke overskriv tall
                 if "metrics" not in resp:
                     keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
                     if any(k in resp for k in keys):
@@ -380,29 +317,28 @@ async def analyze_session(
                             m.setdefault("profile_used", resp["profile_used"])
                         resp["metrics"] = m
 
-                # Kilde + weather
+                # Kilde + weather (setdefault så vi ikke overstyrer)
                 resp.setdefault("source", "rust_1arg")
                 resp.setdefault("weather_applied", False)
 
                 # TEST-KRAV: metrics.profile_used == innsendt profil (rå inn-profil)
                 mm = resp.setdefault("metrics", {})
                 mm.setdefault("profile_used", dict(profile_in))
-                # TEST-KRAV: m["weather_applied"] finnes og er False i Trinn 3
+                # TEST-KRAV: m["weather_applied"] finnes (False i Trinn 3)
                 mm.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
 
-                # Fyll skalarer fra arrays/nominelt hvis 0.0
-                _fill_metrics_from_arrays(resp, profile_in)
-
-                # 🔹 debug-flagg (force + alias)
+                # 🔹 debug-flagg (force + aliaser) + echo av estimat_cfg
                 dbg = resp.setdefault("debug", {})
                 dbg.setdefault("reason", "ok")
                 dbg["force_recompute"] = bool(force_recompute)
-                dbg["persist_ignored"] = bool(force_recompute)   # back-compat key
-                dbg["ignored_persist"] = bool(force_recompute)   # test key
+                dbg["persist_ignored"] = bool(force_recompute)  # back-compat
+                dbg["ignored_persist"] = bool(force_recompute)  # test key
+                if force_recompute:
+                    # Echo estimat_cfg for traceability (kun når force=True)
+                    dbg["estimat_cfg_used"] = dict(estimat_cfg)
 
                 final = _ensure_contract_shape(resp)
-                print("[SVR] [RUST] success (coerced) → returning early")
-                return final
+                return final  # ← tidlig retur ved Rust-suksess
 
             print("[SVR] [RUST] no dict/metrics in response → will try fallback")
 
