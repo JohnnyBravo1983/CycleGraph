@@ -1,229 +1,668 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyString, PyTuple};
 use pyo3::wrap_pyfunction;
+
 use serde::Deserialize;
-use serde_json::{self, Value};
+use serde::de::IntoDeserializer; // for Value::into_deserializer()
+use serde_json::{self as json, Map as JsonMap, Value};
+use serde_path_to_error as spte;
 
-// ---------- JSON adapters for compute/analyze ----------
+use crate::Weather as CoreWeather;
 
-#[derive(Deserialize)]
-struct AnalyzeRustIn {
-    watts: Vec<f64>,
-    pulses: Vec<f64>,
+// ──────────────────────────────────────────────────────────────────────────────
+// Konstanter for fysikk
+// ──────────────────────────────────────────────────────────────────────────────
+const G: f64 = 9.80665;
+const RHO_DEFAULT: f64 = 1.225;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// INPUT-REPR (untagged): PRØV OBJECT FØRST, SÅ LEGACY (TRIPLE)
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TRIPLE/legacy form: [samples, profile, estimat?]
+#[derive(Debug, Deserialize)]
+struct ComputePowerLegacy(
+    Vec<crate::Sample>,
+    crate::Profile,
+    #[serde(default)] Value, // estimat (optional)
+);
+
+// Tolerant profil-inngang
+#[derive(Debug, Deserialize, Clone)]
+struct ProfileInTol {
+    #[serde(default, alias = "CdA", alias = "cda")]
+    cda: Option<f64>,
+    #[serde(default, alias = "Crr", alias = "crr")]
+    crr: Option<f64>,
+    #[serde(default, alias = "weightKg", alias = "weight_kg")]
+    weight_kg: Option<f64>,
     #[serde(default)]
-    device_watts: Option<bool>,
+    device: String,
+    #[serde(default)]
+    calibrated: bool,
+
+    // Viktig – aksepter valgfritt estimat i profile-inngangen
+    #[serde(default)]
+    estimat: Option<Value>,
 }
 
-#[derive(Deserialize)]
-struct ComputePowerIn {
-    samples: Vec<crate::Sample>,
-    profile: crate::Profile,
-    weather: crate::Weather,
+// OBJECT v3: { samples (tolerant), profile (tolerant), weather?, estimat? }
+#[derive(Debug, Deserialize, Clone)]
+struct ComputePowerObjectV3 {
+    // Viktig: tolerant samples → konverteres til kjerne før kall
+    samples: Vec<SampleInTol>,
+    profile: ProfileInTol,
+
+    #[serde(default)]
+    weather: Option<crate::Weather>,
+
+    #[serde(default)]
+    #[serde(alias = "estimate")]
+    estimat: serde_json::Value,
 }
 
-fn call_analyze_session_rust_from_json(json_in: &str) -> Result<String, String> {
-    let parsed: AnalyzeRustIn =
-        serde_json::from_str(json_in).map_err(|e| format!("parse error (AnalyzeRustIn): {e}"))?;
-
-    let v_out: Value = crate::analyze_session_rust(parsed.watts, parsed.pulses, parsed.device_watts)
-        .map_err(|e| format!("analyze_session_rust error: {e}"))?;
-
-    serde_json::to_string(&v_out)
-        .map_err(|e| format!("serialize error (analyze_session_rust result): {e}"))
+// Prøv OBJECT først, deretter Legacy
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ComputePowerIn {
+    Object(ComputePowerObjectV3),
+    Legacy(ComputePowerLegacy),
 }
 
-fn call_compute_power_with_wind_from_json(json_in: &str) -> Result<String, String> {
-    let parsed: ComputePowerIn =
-        serde_json::from_str(json_in).map_err(|e| format!("parse error (ComputePowerIn): {e}"))?;
+// ──────────────────────────────────────────────────────────────────────────────
+// TOLERANT FALLBACK-PARSER (for eldre/avvikende feltnavn)
+// ──────────────────────────────────────────────────────────────────────────────
 
-    let out = crate::compute_power_with_wind_json(&parsed.samples, &parsed.profile, &parsed.weather);
+#[derive(Debug, Deserialize, Clone)]
+struct SampleInTol {
+    t: f64,
+    #[serde(alias = "v_mps", alias = "v")]
+    v_ms: f64,
+    #[serde(alias = "alt", alias = "elev")]
+    altitude_m: f64,
+    #[serde(default)]
+    heading_deg: f64,
+    #[serde(default)]
+    moving: bool,
+    #[serde(default)]
+    rho: f64,
+    // Normaliser vind: aksepter wind_ms / wind_speed
+    #[serde(default, alias = "wind_ms", alias = "wind_speed")]
+    wind_speed: f64,
+    #[serde(default)]
+    wind_dir_deg: f64,
+    #[serde(default)]
+    air_temp_c: f64,
+    // aksepter air_pressure_hpa alias som pressure_hpa
+    #[serde(default, alias = "air_pressure_hpa")]
+    pressure_hpa: f64,
+    #[serde(default)]
+    humidity: f64,
+
+    // Målt effekt — aliaser for legacy klienter
+    #[serde(default)]
+    #[serde(alias = "watts")]
+    #[serde(alias = "power")]
+    #[serde(alias = "power_w")]
+    device_watts: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ObjectTol {
+    #[serde(default)]
+    samples: Vec<SampleInTol>,
+    profile: ProfileInTol,
+
+    // tillat at klient har brukt estimat/estimate på toppnivå (vi ignorerer her)
+    #[serde(default, alias = "estimat", alias = "estimate")]
+    _ignore_estimat: Option<Value>,
+
+    #[serde(flatten)]
+    _extra: Option<Value>,
+}
+
+// Hjelper for triple-varianten i tolerant parser
+#[derive(Debug, Deserialize)]
+struct TripleTol(
+    Vec<SampleInTol>,
+    ProfileInTol,
+    #[serde(default)] Value,
+);
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum InReprTol {
+    Triple(TripleTol),
+    Object(ObjectTol),
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// KONVERTERINGER (tolerant → kjerne-typer)
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn to_core_profile_tol(p: ProfileInTol, estimat_present: bool) -> Result<crate::Profile, String> {
+    let mut m = JsonMap::new();
+
+    // Sett verdier eller Null hvis None
+    m.insert("cda".into(), match p.cda { Some(x) => Value::from(x), None => Value::Null });
+    m.insert("crr".into(), match p.crr { Some(x) => Value::from(x), None => Value::Null });
+    m.insert("weight_kg".into(), match p.weight_kg { Some(x) => Value::from(x), None => Value::Null });
+
+    m.insert("device".into(), Value::from(p.device));
+    m.insert("calibrated".into(), Value::from(p.calibrated));
+
+    // Repeter til kjerneprofilen: et boolsk hint om estimat-tilstedeværelse
+    m.insert("estimat".into(), Value::from(estimat_present));
+
+    // valgfrie mulige kjernefelt
+    if !m.contains_key("total_weight") { m.insert("total_weight".into(), Value::Null); }
+    if !m.contains_key("bike_type") { m.insert("bike_type".into(), Value::Null); }
+    if !m.contains_key("calibration_mae") { m.insert("calibration_mae".into(), Value::Null); }
+
+    let txt = Value::Object(m).to_string();
+    let mut de = json::Deserializer::from_str(&txt);
+    spte::deserialize(&mut de).map_err(|e| format!("profile parse at {}: {}", e.path(), e))
+}
+
+fn to_core_sample_tol(s: SampleInTol) -> Result<crate::Sample, String> {
+    let mut m = JsonMap::new();
+    m.insert("t".into(), Value::from(s.t));
+    m.insert("v_ms".into(), Value::from(s.v_ms));
+    m.insert("altitude_m".into(), Value::from(s.altitude_m));
+    m.insert("heading_deg".into(), Value::from(s.heading_deg));
+    m.insert("moving".into(), Value::from(s.moving));
+    m.insert("rho".into(), Value::from(s.rho));
+    m.insert("wind_ms".into(), Value::from(s.wind_speed));
+    m.insert("wind_dir_deg".into(), Value::from(s.wind_dir_deg));
+    m.insert("air_temp_c".into(), Value::from(s.air_temp_c));
+    m.insert("air_pressure_hpa".into(), Value::from(s.pressure_hpa));
+    m.insert("humidity".into(), Value::from(s.humidity));
+
+    // Viderefør målt effekt til kjernefeltet device_watts (Null hvis None)
+    match s.device_watts {
+        Some(w) => { m.insert("device_watts".into(), Value::from(w)); }
+        None => { m.insert("device_watts".into(), Value::Null); }
+    }
+
+    let txt = Value::Object(m).to_string();
+    let mut de = json::Deserializer::from_str(&txt);
+    spte::deserialize(&mut de).map_err(|e| format!("sample parse at {}: {}", e.path(), e))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HJELPERE
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn neutral_weather() -> CoreWeather {
+    CoreWeather {
+        wind_ms: 0.0,
+        wind_dir_deg: 0.0,
+        air_temp_c: 0.0,
+        air_pressure_hpa: 0.0,
+    }
+}
+
+fn with_debug(mut out_json: String, extra: &JsonMap<String, Value>) -> String {
+    if let Ok(mut v) = serde_json::from_str::<Value>(&out_json) {
+        if let Value::Object(ref mut obj) = v {
+            obj.entry("source").or_insert_with(|| Value::from("rust_binding"));
+            let dbg = obj.entry("debug").or_insert_with(|| Value::Object(JsonMap::new()));
+            if let Value::Object(ref mut dbg_map) = dbg {
+                for (k, val) in extra.iter() {
+                    dbg_map.insert(k.clone(), val.clone());
+                }
+            } else {
+                obj.insert("debug".into(), Value::Object(extra.clone()));
+            }
+            if let Ok(s) = serde_json::to_string(&v) {
+                out_json = s;
+            }
+        }
+    }
+    out_json
+}
+
+// Sørger for metrics-blokk + toppnivåfelt dersom kjerne svarer "flatt"
+fn ensure_metrics_shape(mut out_json: String) -> String {
+    if let Ok(mut v) = serde_json::from_str::<Value>(&out_json) {
+        if let Value::Object(ref mut obj) = v {
+            if !obj.contains_key("metrics") {
+                let mut m = JsonMap::new();
+                for k in ["precision_watt","drag_watt","rolling_watt","total_watt"].iter() {
+                    if let Some(val) = obj.remove(*k) { m.insert((*k).into(), val); }
+                }
+                if !m.is_empty() { obj.insert("metrics".into(), Value::Object(m)); }
+            }
+            obj.entry("source").or_insert(Value::from("rust_1arg"));
+            obj.entry("weather_applied").or_insert(Value::from(false));
+            if let Ok(s) = serde_json::to_string(&v) { out_json = s; }
+        }
+    }
+    out_json
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STEG 1 (A): Skalar-metrics og diagnostikk-arrays (vind av)
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn mean(xs: &[f64]) -> f64 {
+    if xs.is_empty() { 0.0 } else { xs.iter().copied().sum::<f64>() / (xs.len() as f64) }
+}
+
+fn compute_scalar_metrics(
+    samples: &[crate::Sample],
+    profile: &ProfileInTol,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>, f64, f64, f64, f64) {
+    let cda = profile.cda.unwrap_or(0.25);
+    let crr = profile.crr.unwrap_or(0.004);
+    let weight = profile.weight_kg.unwrap_or(85.0);
+    let rho = RHO_DEFAULT;
+
+    let mut w_drag = Vec::with_capacity(samples.len());
+    let mut w_roll = Vec::with_capacity(samples.len());
+    let mut w_model = Vec::with_capacity(samples.len());
+    let mut device_watts = Vec::new();
+
+    for s in samples {
+        let v = s.v_ms.max(0.0);
+        let w_d = 0.5 * rho * cda * v * v * v;
+        let w_r = crr * weight * G * v;
+        let w_m = w_d + w_r;
+
+        w_drag.push(w_d);
+        w_roll.push(w_r);
+        w_model.push(w_m);
+
+        // Bruk målt effekt om tilgjengelig
+        if let Some(w) = s.device_watts {
+            if w.is_finite() {
+                device_watts.push(w);
+            }
+        }
+    }
+
+    let drag_watt = mean(&w_drag);
+    let rolling_watt = mean(&w_roll);
+    let precision_watt = drag_watt + rolling_watt;
+    let total_watt = if !device_watts.is_empty() { mean(&device_watts) } else { precision_watt };
+
+    (w_drag, w_roll, w_model, drag_watt, rolling_watt, precision_watt, total_watt)
+}
+
+fn enrich_metrics_on_object(
+    mut resp: serde_json::Value,
+    samples: &[crate::Sample],
+    profile: &ProfileInTol,
+) -> serde_json::Value {
+    use serde_json::{json, Value};
+
+    let (w_drag, w_roll, w_model, drag_watt, rolling_watt, precision_watt, total_watt)
+        = compute_scalar_metrics(samples, profile);
+
+    if let Some(obj) = resp.as_object_mut() {
+        // metrics
+        match obj.get_mut("metrics") {
+            Some(mv) if mv.is_object() => {
+                let m = mv.as_object_mut().unwrap();
+                m.entry("drag_watt").or_insert(json!(drag_watt));
+                m.entry("rolling_watt").or_insert(json!(rolling_watt));
+                m.entry("precision_watt").or_insert(json!(precision_watt));
+                m.entry("total_watt").or_insert(json!(total_watt));
+
+                // profile_used
+                let mut prof = serde_json::Map::new();
+                if let Some(v) = profile.cda { prof.insert("cda".into(), json!(v)); }
+                if let Some(v) = profile.crr { prof.insert("crr".into(), json!(v)); }
+                if let Some(v) = profile.weight_kg { prof.insert("weight_kg".into(), json!(v)); }
+                prof.insert("calibrated".into(), json!(profile.calibrated));
+                m.entry("profile_used").or_insert(Value::Object(prof));
+            }
+            _ => {
+                let mut prof = serde_json::Map::new();
+                if let Some(v) = profile.cda { prof.insert("cda".into(), json!(v)); }
+                if let Some(v) = profile.crr { prof.insert("crr".into(), json!(v)); }
+                if let Some(v) = profile.weight_kg { prof.insert("weight_kg".into(), json!(v)); }
+                prof.insert("calibrated".into(), json!(profile.calibrated));
+
+                obj.insert("metrics".into(), json!({
+                    "drag_watt": drag_watt,
+                    "rolling_watt": rolling_watt,
+                    "precision_watt": precision_watt,
+                    "total_watt": total_watt,
+                    "profile_used": prof
+                }));
+            }
+        }
+
+        // arrays
+        match obj.get_mut("arrays") {
+            Some(av) if av.is_object() => {
+                let a = av.as_object_mut().unwrap();
+                if !a.contains_key("w_drag") { a.insert("w_drag".into(), json!(w_drag)); }
+                if !a.contains_key("w_roll") { a.insert("w_roll".into(), json!(w_roll)); }
+                if !a.contains_key("w_model") { a.insert("w_model".into(), json!(w_model)); }
+            }
+            _ => {
+                obj.insert("arrays".into(), json!({
+                    "w_drag": w_drag,
+                    "w_roll": w_roll,
+                    "w_model": w_model
+                }));
+            }
+        }
+
+        // toppnivå standardfelt
+        obj.entry("source").or_insert(json!("rust_1arg"));
+        obj.entry("weather_applied").or_insert(json!(false));
+
+        // debug.reason = "ok" hvis ikke satt
+        let dbg = obj.entry("debug").or_insert(json!({}));
+        if let Some(d) = dbg.as_object() {
+            if !d.contains_key("reason") {
+                if let Some(d_mut) = obj.get_mut("debug").and_then(|v| v.as_object_mut()) {
+                    d_mut.insert("reason".into(), json!("ok"));
+                }
+            }
+        }
+    }
+
+    resp
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TOLERANT PARSER
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn parse_tolerant(json_str: &str) -> Result<(Vec<crate::Sample>, crate::Profile, CoreWeather, bool, &'static str, bool), String> {
+    let mut de = json::Deserializer::from_str(json_str);
+    let repr: InReprTol = spte::deserialize(&mut de)
+        .map_err(|e| format!("parse error (ComputePowerIn tolerant) at {}: {}", e.path(), e))?;
+
+    match repr {
+        InReprTol::Object(o) => {
+            let estimat_present = o._ignore_estimat.as_ref().map(|v| !v.is_null()).unwrap_or(false);
+
+            let core_samples = o.samples
+                .into_iter()
+                .map(to_core_sample_tol)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let core_profile = to_core_profile_tol(o.profile, estimat_present)?;
+            let w = neutral_weather();
+
+            Ok((core_samples, core_profile, w, estimat_present, "legacy_tolerant", true))
+        }
+        InReprTol::Triple(TripleTol(samples, p, third)) => {
+            let estimat_present = !third.is_null();
+
+            let core_samples = samples
+                .into_iter()
+                .map(to_core_sample_tol)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let core_profile = to_core_profile_tol(p, estimat_present)?;
+            let w = neutral_weather();
+
+            Ok((core_samples, core_profile, w, estimat_present, "legacy_tolerant", true))
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PRIMÆR PARSING (OBJECT → LEGACY) MED OBJ-DEBUG
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn call_compute_from_json(json_in: &str) -> Result<String, String> {
+    // 0) OBJ-DEBUG: prøv ren OBJECT først
+    let val: Value = json::from_str(json_in).unwrap_or(Value::Null);
+    {
+        let mut track = spte::Track::new();
+        let de = spte::Deserializer::new(val.clone().into_deserializer(), &mut track);
+        let try_obj: Result<ComputePowerObjectV3, _> = Deserialize::deserialize(de);
+        match try_obj {
+            Ok(obj) => {
+                let estimat_present = !obj.estimat.is_null();
+                let core_profile = to_core_profile_tol(obj.profile.clone(), estimat_present)
+                    .map_err(|e| format!("profile convert error: {}", e))?;
+                let w = obj.weather.unwrap_or_else(neutral_weather);
+
+                // KONVERTER tolerant samples → kjerne
+                let core_samples = obj.samples
+                    .into_iter()
+                    .map(to_core_sample_tol)
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let mut out = crate::compute_power_with_wind_json(&core_samples, &core_profile, &w);
+
+                let mut dbg = JsonMap::new();
+                dbg.insert("repr_kind".into(), Value::from("object"));
+                dbg.insert("used_fallback".into(), Value::from(false));
+                dbg.insert("estimat_present".into(), Value::from(estimat_present));
+                dbg.insert(
+                    "weather_source".into(),
+                    Value::from(if w.air_temp_c != 0.0 || w.wind_ms != 0.0 || w.air_pressure_hpa != 0.0 || w.wind_dir_deg != 0.0 { "object_weather" } else { "neutral" }),
+                );
+                dbg.insert("binding".into(), Value::from("py_mod"));
+
+                out = with_debug(out, &dbg);
+                out = ensure_metrics_shape(out);
+
+                // berik OBJECT-svar
+                if let Ok(resp_val) = serde_json::from_str::<serde_json::Value>(&out) {
+                    let enriched = enrich_metrics_on_object(resp_val, &core_samples, &obj.profile);
+                    if let Ok(s) = serde_json::to_string(&enriched) { out = s; }
+                }
+
+                return Ok(out);
+            }
+            Err(e) => {
+                eprintln!("[OBJ-DEBUG] failed at path {}: {}", track.path().to_string(), e);
+            }
+        }
+    }
+
+    // 1) Prøv untagged enum (OBJECT → Legacy)
+    let parsed_primary: Result<(Vec<crate::Sample>, crate::Profile, CoreWeather, bool, &'static str, bool, Option<(Vec<crate::Sample>, ProfileInTol)>) , String> = {
+        let mut de = json::Deserializer::from_str(json_in);
+        let repr_res: Result<ComputePowerIn, _> = spte::deserialize(&mut de)
+            .map_err(|e| format!("parse error (ComputePowerIn primary) at {}: {}", e.path(), e));
+
+        match repr_res? {
+            ComputePowerIn::Object(obj) => {
+                let estimat_present = !obj.estimat.is_null();
+                let core_profile = to_core_profile_tol(obj.profile.clone(), estimat_present)
+                    .map_err(|e| format!("profile convert error: {}", e))?;
+                let w = obj.weather.unwrap_or_else(neutral_weather);
+
+                // konverter tolerant samples
+                let core_samples = obj.samples
+                    .clone()
+                    .into_iter()
+                    .map(to_core_sample_tol)
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok((core_samples.clone(), core_profile, w, estimat_present, "object", false, Some((core_samples, obj.profile.clone()))))
+            }
+            ComputePowerIn::Legacy(ComputePowerLegacy(samples, profile, third)) => {
+                let estimat_present = !third.is_null();
+                let w = neutral_weather();
+                Ok((samples, profile, w, estimat_present, "triple", true, None))
+            }
+        }
+    };
+
+    // 2) Tolerant fallback ved full feil
+    let (samples, profile, weather, estimat_present, repr_kind, used_fallback, obj_opt) = match parsed_primary {
+        Ok(ok) => ok,
+        Err(e_primary) => {
+            eprintln!("[PRIMARY] parse failed → trying tolerant: {}", e_primary);
+            let (s, p, w, est, kind, used) = parse_tolerant(json_in)?;
+            (s, p, w, est, kind, used, None)
+        }
+    };
+
+    let mut out = crate::compute_power_with_wind_json(&samples, &profile, &weather);
+
+    let mut dbg = JsonMap::new();
+    dbg.insert("repr_kind".into(), Value::from(repr_kind));
+    dbg.insert("used_fallback".into(), Value::from(used_fallback));
+    dbg.insert("estimat_present".into(), Value::from(estimat_present));
+    dbg.insert(
+        "weather_source".into(),
+        Value::from(match repr_kind {
+            "object" => if weather.air_temp_c != 0.0 || weather.wind_ms != 0.0 || weather.air_pressure_hpa != 0.0 || weather.wind_dir_deg != 0.0 { "object_weather" } else { "neutral" },
+            "triple" | "legacy_tolerant" => "neutral",
+            _ => "neutral",
+        }),
+    );
+    dbg.insert("binding".into(), Value::from("py_mod"));
+
+    out = with_debug(out, &dbg);
+    out = ensure_metrics_shape(out);
+
+    if repr_kind == "object" {
+        if let Some((core_samples_obj, profile_tol)) = obj_opt {
+            if let Ok(resp_val) = serde_json::from_str::<serde_json::Value>(&out) {
+                let enriched = enrich_metrics_on_object(resp_val, &core_samples_obj, &profile_tol);
+                if let Ok(s) = serde_json::to_string(&enriched) { out = s; }
+            }
+        }
+    }
+
     Ok(out)
 }
 
-// ---------- helpers ----------
+// ──────────────────────────────────────────────────────────────────────────────
+// STRICT V3 (med weather) – beholdt for eksplisitt testing
+// ──────────────────────────────────────────────────────────────────────────────
 
-fn normalize_jsonish<'py>(py: Python<'py>, obj: &PyAny) -> PyResult<PyObject> {
-    // KUN hvis streng → json.loads; ellers bare pass-through
-    if obj.is_instance_of::<PyString>() {
-        let s: &str = obj.extract()?;
-        let json_mod = py.import("json")?;
-        let loaded = json_mod.call_method1("loads", (s,))?;
-        Ok(loaded.into_py(py))
-    } else {
-        Ok(obj.to_object(py))
-    }
+#[derive(Debug, Deserialize)]
+struct ComputePowerInV3StrictRaw {
+    samples: Vec<crate::Sample>,
+    profile: Value, // les som Value for ev. injeksjon
+    weather: crate::Weather,
+    #[serde(default)]
+    estimat: Value, // topp-nivå; kan være Null
 }
 
-fn to_list_len(obj: &PyAny) -> usize {
-    if let Ok(list) = obj.downcast::<PyList>() {
-        list.len()
-    } else {
-        0
-    }
-}
+fn call_compute_power_with_wind_from_json_v3(json_in: &str) -> Result<String, String> {
+    let mut de = serde_json::Deserializer::from_str(json_in);
+    let parsed: ComputePowerInV3StrictRaw = spte::deserialize(&mut de)
+        .map_err(|e| format!("parse error (ComputePowerIn v3 strict raw) at {}: {}", e.path(), e))?;
 
-// ---------- Python-callable functions ----------
-
-/// Python: precision_analyze_rust(json_str: str) -> str
-#[pyfunction]
-fn precision_analyze_rust(_py: Python<'_>, json_str: &str) -> PyResult<String> {
-    call_analyze_session_rust_from_json(json_str).map_err(PyValueError::new_err)
-}
-
-/// Felles dispatcher for compute_power_with_wind*:
-/// Godtar ENTEN:
-///   - 1 pos arg: JSON-streng
-///   - 3 pos args: (samples, profile, weather) — hver kan være Python-objekt ELLER JSON-streng
-fn compute_power_dispatch(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
-    match args.len() {
-        1 => {
-            let any0 = args.get_item(0)?;
-            let json_str: &str = any0.extract().map_err(|e| {
-                PyValueError::new_err(format!(
-                    "compute_power_with_wind*: expected JSON string as single argument: {e}"
-                ))
-            })?;
-            call_compute_power_with_wind_from_json(json_str).map_err(PyValueError::new_err)
+    // Sørg for at profile har en "estimat"-nøkkel (null hvis ikke satt),
+    // eller speil toppnivå `estimat` for maksimal kompatibilitet.
+    let mut profile_val = parsed.profile.clone();
+    if let Value::Object(ref mut pm) = profile_val {
+        if !pm.contains_key("estimat") {
+            pm.insert("estimat".into(), parsed.estimat.clone());
         }
-        3 => {
-            let json_mod = py.import("json").map_err(|e| PyValueError::new_err(format!("import json failed: {e}")))?;
-
-            let samples_obj = normalize_jsonish(py, args.get_item(0)?)?;
-            let profile_obj = normalize_jsonish(py, args.get_item(1)?)?;
-            let weather_obj = normalize_jsonish(py, args.get_item(2)?)?;
-
-            let d = PyDict::new(py);
-            d.set_item("samples", samples_obj)?;
-            d.set_item("profile", profile_obj)?;
-            d.set_item("weather", weather_obj)?;
-
-            let json_str: String = json_mod
-                .call_method1("dumps", (d,))?
-                .extract()
-                .map_err(|e| PyValueError::new_err(format!("json.dumps failed: {e}")))?;
-            call_compute_power_with_wind_from_json(&json_str).map_err(PyValueError::new_err)
-        }
-        n => Err(PyValueError::new_err(format!(
-            "compute_power_with_wind* expected 1 (json_str) or 3 (samples, profile, weather) args, got {n}"
-        ))),
-    }
-}
-
-/// Python-navn: compute_power_with_wind(json_or_triple) -> str
-#[pyfunction(name = "compute_power_with_wind", signature = (*args, **_kwargs))]
-fn compute_power_with_wind_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
-    compute_power_dispatch(py, args, _kwargs)
-}
-
-/// Python-navn: compute_power_with_wind_json(json_or_triple) -> str
-#[pyfunction(name = "compute_power_with_wind_json", signature = (*args, **_kwargs))]
-fn compute_power_with_wind_json_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<String> {
-    compute_power_dispatch(py, args, _kwargs)
-}
-
-// ---------- Calibration (Python API -> Rust bridge fallback) ----------
-//
-// Støtter:
-//   - 5 args: (watts, speed_ms, altitude_m, profile, weather)
-//   - 1 arg : JSON med feltene over
-//
-// Returnerer dict med numeriske cda/crr/mae + calibrated + profile.
-// Ingen Python json.loads på dict – i 1-arg path bruker vi serde_json i Rust.
-
-#[pyfunction(name = "rust_calibrate_session", signature = (*args, **_kwargs))]
-fn rust_calibrate_session_py(py: Python<'_>, args: &PyTuple, _kwargs: Option<&PyDict>) -> PyResult<PyObject> {
-    // Hent (watts, speed, alti, profile, weather) som Python-objekter
-    let (watts_obj, speed_obj, alti_obj, profile_obj, _weather_obj): (PyObject, PyObject, PyObject, PyObject, PyObject) =
-        match args.len() {
-            5 => {
-                let w = normalize_jsonish(py, args.get_item(0)?)?;
-                let s = normalize_jsonish(py, args.get_item(1)?)?;
-                let a = normalize_jsonish(py, args.get_item(2)?)?;
-                let p = normalize_jsonish(py, args.get_item(3)?)?;
-                let wth = normalize_jsonish(py, args.get_item(4)?)?;
-                (w, s, a, p, wth)
-            }
-            1 => {
-                // Parse med serde_json i Rust (ikke Python json)
-                let s: &str = args.get_item(0)?.extract()?;
-                let v: Value = serde_json::from_str(s)
-                    .map_err(|e| PyValueError::new_err(format!("invalid JSON for calibration: {e}")))?;
-                let watts_v = v.get("watts").cloned().unwrap_or(Value::Null);
-                let speed_v = v.get("speed_ms").cloned().unwrap_or(Value::Null);
-                let alti_v  = v.get("altitude_m").cloned().unwrap_or(Value::Null);
-                let prof_v  = v.get("profile").cloned().unwrap_or(Value::Null);
-                let wth_v   = v.get("weather").cloned().unwrap_or(Value::Null);
-                (
-                    Python::with_gil(|py| serde_json::to_string(&watts_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&speed_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&alti_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&prof_v).unwrap().into_py(py)),
-                    Python::with_gil(|py| serde_json::to_string(&wth_v).unwrap().into_py(py)),
-                )
-            }
-            n => {
-                return Err(PyValueError::new_err(format!(
-                    "rust_calibrate_session expected 1 (json) or 5 (watts, speed_ms, altitude_m, profile, weather) args, got {n}"
-                )))
-            }
-        };
-
-    // Enkle sanity checks (lengder > 0). Fungerer for både list-objekter og JSON-strenger (vi json-loader strengene litt senere).
-    let w_len = to_list_len(watts_obj.as_ref(py));
-    let v_len = to_list_len(speed_obj.as_ref(py));
-    let a_len = to_list_len(alti_obj.as_ref(py));
-
-    // Default-verdier som er numeriske (for å tilfredsstille testen)
-    let cda = 0.30_f64;
-    let crr = 0.005_f64;
-    let mut mae = 12.0_f64;
-    let mut calibrated = true;
-
-    if w_len == 0 || v_len == 0 || a_len == 0 {
-        // Mangelfulle data → sett "calibrated" false, men behold numeriske defaults.
-        calibrated = false;
-        mae = 25.0;
     }
 
-    // Bygg/oppdater profile-dict uten å kalle json.loads på dict
-    let json_mod = py.import("json")?;
-    let profile_dict = if let Ok(d) = profile_obj.as_ref(py).downcast::<PyDict>() {
-        d
-    } else if let Ok(s) = profile_obj.as_ref(py).extract::<&str>() {
-        // Kun hvis streng → loads
-        let loaded = json_mod
-            .call_method1("loads", (s,))
-            .map_err(|e| PyValueError::new_err(format!("json.loads(profile) failed: {e}")))?;
-        loaded.downcast::<PyDict>()?
-    } else {
-        PyDict::new(py)
+    // Deserialiser så til kjerne-typene
+    let profile: crate::Profile = {
+        let txt = profile_val.to_string();
+        let mut de = json::Deserializer::from_str(&txt);
+        spte::deserialize(&mut de)
+            .map_err(|e| format!("parse error (Profile in v3 strict) at {}: {}", e.path(), e))?
     };
 
-    profile_dict.set_item("cda", cda)?;
-    profile_dict.set_item("crr", crr)?;
-    profile_dict.set_item("calibrated", calibrated)?;
-    profile_dict.set_item("calibration_mae", mae)?;
-    profile_dict.set_item("estimat", !calibrated)?;
-
-    // Endelig resultat-dict
-    let out = PyDict::new(py);
-    out.set_item("cda", cda)?;
-    out.set_item("crr", crr)?;
-    out.set_item("mae", mae)?;
-    out.set_item("calibrated", calibrated)?;
-    out.set_item("profile", profile_dict)?;
-
-    Ok(out.into_py(py))
+    let out = crate::compute_power_with_wind_json(&parsed.samples, &profile, &parsed.weather);
+    Ok(out)
 }
 
-// ---------- Module ----------
+// ──────────────────────────────────────────────────────────────────────────────
+// PyO3-FUNKSJONER — 1-ARG EXPORT (OBJECT → core → enrich → JSON)
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[pyfunction]
+fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult<String> {
+    use serde_json::Value as J;
+
+    // 1) Parse rå JSON
+    let raw_val: J = serde_json::from_str(payload_json)
+        .map_err(|e| PyValueError::new_err(format!("parse error (raw json): {e}")))?;
+
+    // 2) Deserialiser tolerant OBJECT med path-sporing
+    let obj: ComputePowerObjectV3 = {
+        let mut track = spte::Track::new();
+        let de = spte::Deserializer::new(raw_val.clone().into_deserializer(), &mut track);
+        match Deserialize::deserialize(de) {
+            Ok(v) => v,
+            Err(e) => {
+                let path = track.path().to_string();
+                return Err(PyValueError::new_err(
+                    format!("parse error (OBJECT tolerant) at {path}: {e}")
+                ));
+            }
+        }
+    };
+
+    // 3) Kall kjernen (via eksisterende 3-arg-funksjon)
+    let estimat_present = !obj.estimat.is_null();
+    let core_profile = to_core_profile_tol(obj.profile.clone(), estimat_present)
+        .map_err(|e| PyValueError::new_err(format!("profile convert error: {e}")))?;
+    let weather = obj.weather.unwrap_or_else(neutral_weather);
+
+    // KONVERTER tolerant samples → kjerne
+    let core_samples = obj.samples
+        .into_iter()
+        .map(to_core_sample_tol)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| PyValueError::new_err(e))?;
+
+    let core_out_str = crate::compute_power_with_wind_json(&core_samples, &core_profile, &weather);
+    let core_resp_val: serde_json::Value = serde_json::from_str(&core_out_str)
+        .unwrap_or_else(|_| serde_json::json!({ "debug": { "reason": "decode_error" } }));
+
+    // 4) Berik svaret med skalarer, arrays, source/weather_applied
+    let enriched = enrich_metrics_on_object(core_resp_val, &core_samples, &obj.profile);
+
+    // 5) Returnér som JSON-streng
+    serde_json::to_string(&enriched)
+        .map_err(|e| PyValueError::new_err(format!("json encode error: {e}")))
+}
+
+#[pyfunction]
+pub fn compute_power_with_wind_json_v3(_py: Python<'_>, json_str: &str) -> PyResult<String> {
+    call_compute_power_with_wind_from_json_v3(json_str).map_err(PyValueError::new_err)
+}
+
+#[pyfunction]
+fn call_analyze_session_rust_from_json(json_in: &str) -> PyResult<String> {
+    #[derive(Deserialize)]
+    struct AnalyzeRustIn {
+        watts: Vec<f64>,
+        pulses: Vec<f64>,
+        #[serde(default)]
+        device_watts: Option<bool>,
+    }
+
+    let mut de = json::Deserializer::from_str(json_in);
+    let parsed: AnalyzeRustIn = spte::deserialize(&mut de).map_err(|e| {
+        let path = e.path().to_string();
+        PyValueError::new_err(format!("parse error (AnalyzeRustIn) at {}: {}", path, e))
+    })?;
+
+    let out_val = crate::analyze_session_rust(parsed.watts, parsed.pulses, parsed.device_watts)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+    Ok(out_val.to_string())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PyO3-MODUL
+// ──────────────────────────────────────────────────────────────────────────────
 
 #[pymodule]
 fn cyclegraph_core(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(precision_analyze_rust, m)?)?;
-    m.add_function(wrap_pyfunction!(compute_power_with_wind_py, m)?)?;
-    m.add_function(wrap_pyfunction!(compute_power_with_wind_json_py, m)?)?;
-    m.add_function(wrap_pyfunction!(rust_calibrate_session_py, m)?)?;
+    // 1-arg: OBJECT → core → enrich → JSON
+    m.add_function(wrap_pyfunction!(compute_power_with_wind_json, m)?)?;
+
+    // Eksplicit V3 (strict) for testing
+    m.add_function(wrap_pyfunction!(compute_power_with_wind_json_v3, m)?)?;
+
+    // Analyze helper
+    m.add_function(wrap_pyfunction!(call_analyze_session_rust_from_json, m)?)?;
     Ok(())
 }

@@ -1,0 +1,115 @@
+# ===== CycleGraph Trinn 3 — E2E for valgte Strava-økter + avviksanalyse (CdA=0.30, W=111 kg) =====
+$Base = "http://127.0.0.1:5183"
+$Ids  = @(16311219004, 16279854313, 16262232459)
+$out  = Join-Path (Resolve-Path ".") "out"; New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+# --- 0) Last .env til miljø (kun for Strava tokens; påvirker ikke CdA/W her) ---
+$envPath = Join-Path (Resolve-Path ".") ".env"
+if (Test-Path $envPath) {
+  Get-Content $envPath | ForEach-Object {
+    $l=$_.Trim(); if($l -and -not $l.StartsWith("#")){
+      $i=$l.IndexOf("="); if($i -gt 0){
+        $k=$l.Substring(0,$i).Trim(); $v=$l.Substring($i+1).Trim().Trim('"').Trim("'")
+        set-item -Path env:$k -Value $v -ErrorAction SilentlyContinue
+      }
+    }
+  }
+}
+
+# --- 1) Refresh Strava access token (om mulig) ---
+if ($env:STRAVA_REFRESH_TOKEN) {
+  try {
+    $tok = Invoke-RestMethod -Method POST -Uri "https://www.strava.com/oauth/token" -Body @{
+      client_id     = $env:STRAVA_CLIENT_ID
+      client_secret = $env:STRAVA_CLIENT_SECRET
+      grant_type    = "refresh_token"
+      refresh_token = $env:STRAVA_REFRESH_TOKEN
+    }
+    $env:STRAVA_ACCESS_TOKEN     = $tok.access_token
+    $env:STRAVA_REFRESH_TOKEN    = $tok.refresh_token
+    $env:STRAVA_TOKEN_EXPIRES_AT = [string]$tok.expires_at
+    "Ny access_token mottatt. Utløper @ $($tok.expires_at) (epoch)."
+  } catch {
+    "ADVARSEL: Klarte ikke å refreshe token → $($_.Exception.Message)"
+  }
+}
+if (-not $env:STRAVA_ACCESS_TOKEN) { throw "Mangler STRAVA_ACCESS_TOKEN i miljøet." }
+
+# --- 2) Hjelpere ---
+function Get-StravaStreams([long]$Id){
+  $h=@{Authorization="Bearer $($env:STRAVA_ACCESS_TOKEN)"}
+  $keys="time,velocity_smooth,altitude,grade_smooth"
+  $u="https://www.strava.com/api/v3/activities/$Id/streams?keys=$keys&key_by_type=true"
+  Invoke-RestMethod -Method GET -Headers $h -Uri $u
+}
+function Get-StravaActivity([long]$Id){
+  $h=@{Authorization="Bearer $($env:STRAVA_ACCESS_TOKEN)"}
+  Invoke-RestMethod -Method GET -Headers $h -Uri "https://www.strava.com/api/v3/activities/$Id"
+}
+
+# --- 3) Profil (HARDKODET for test) ---
+$Cda = 0.30     # ← fast allround CdA
+$Crr = 0.004    # ← baseline
+$Wkg = 111.0    # ← systemvekt (rytter+sykkel)
+
+function Build-SessionPayload($S,[double]$CdaLocal,[double]$CrrLocal,[double]$WLocal){
+  $t=@($S.time.data); $v=@($S.velocity_smooth.data); $a=@($S.altitude.data); $g=@($S.grade_smooth.data)
+  $tc = if ($t) { $t.Count } else { 0 }
+  $vc = if ($v) { $v.Count } else { 0 }
+  $ac = if ($a) { $a.Count } else { 0 }
+  $n = [Math]::Min([Math]::Min($tc,$vc),$ac)
+  if ($n -le 0) { throw "Streams mangler data (time/velocity/altitude)" }
+
+  $samples = New-Object 'System.Collections.Generic.List[object]'
+  for($i=0;$i -lt $n;$i++){
+    $obj=@{ t=[double]$t[$i]; v_ms=[double]$v[$i]; altitude_m=[double]$a[$i]; moving=$true }
+    if($g.Count -gt $i -and $null -ne $g[$i]){ try{ $obj.grade=[double]$g[$i] }catch{} }
+    $samples.Add($obj)
+  }
+  return @{ samples=$samples; profile=@{ cda=$CdaLocal; crr=$CrrLocal; weight_kg=$WLocal; calibrated=$false } }
+}
+
+function Analyze-Session($Payload){
+  $json=($Payload | ConvertTo-Json -Depth 12 -Compress)
+  Invoke-RestMethod -Method POST `
+    -Uri "$Base/api/sessions/local-mini/analyze?force_recompute=false&debug=1" `
+    -ContentType "application/json" -Body $json
+}
+
+# --- 4) Kjør for hver aktivitet ---
+foreach($id in $Ids){
+  try {
+    $act     = Get-StravaActivity $id
+    $streams = Get-StravaStreams  $id
+    $payload = Build-SessionPayload $streams $Cda $Crr $Wkg
+
+    # lagre payload for revisjon
+    ($payload | ConvertTo-Json -Depth 12) | Set-Content (Join-Path $out "session_$id.json") -Encoding utf8
+
+    $res = Analyze-Session $payload
+    $m = $res.metrics
+
+    # Tolkningsdata
+    $P  = [double]$m.precision_watt
+    $D  = [double]$m.drag_watt
+    $R  = [double]$m.rolling_watt
+    $avg = $act.average_watts
+    $dev = $act.device_watts   # $true hvis fra wattmåler (ellers Stravas estimate)
+
+    $diff = $null; $pct = $null
+    if ($avg -ne $null -and $avg -gt 0) { $diff = $P - [double]$avg; $pct = 100.0 * $diff / [double]$avg }
+
+    $dragPct = ($(if($P){100*$D/$P}else{0}))
+    $rollPct = ($(if($P){100*$R/$P}else{0}))
+    $ratioTxt = if ($pct -ne $null) { ("Δ={0:+0.0} W ({1:+0.0}%) vs Strava{2}" -f $diff,$pct,($(if($dev){"(device)"}else{"(est)"}))) } else { "Strava avg_watts=n/a" }
+
+    "{0} | src={1} uf={2} wa={3} | P={4:N1} D={5:N1} ({6,5:N1}%) R={7:N1} ({8,5:N1}%) | {9} | Profile: CdA={10}, Crr={11}, W={12}" -f `
+      $id, $res.source, $res.debug.used_fallback, $res.weather_applied, `
+      $P, $D, $dragPct, $R, $rollPct, $ratioTxt, $Cda, $Crr, $Wkg
+
+  } catch {
+    "FAIL $id → $($_.Exception.Message)"
+  }
+}
+
+"=== Kjøring ferdig ==="

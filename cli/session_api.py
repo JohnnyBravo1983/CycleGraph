@@ -15,13 +15,17 @@ MIN_ALT_SPAN_M = 3.0
 # ── S7: Schema-versjon (semver for output-kontrakten) ────────────────────────
 SCHEMA_VERSION = "0.7.0"
 
-
 # ── Trygge imports av kjernebindinger ─────────────────────────────────────────
+# --- Rust compute: Tving bruk av adapteren (IKKE direktekall til core) ---
 try:
-    from cyclegraph_core import compute_power_with_wind_json as rs_power_json
+    from cli.rust_bindings import rs_power_json
 except Exception:
-    rs_power_json = None
+    try:
+        from cyclegraph.cli.rust_bindings import rs_power_json  # fallback hvis pakket namespace
+    except Exception:
+        from .rust_bindings import rs_power_json                 # fallback relativ import
 
+# --- Rust calibrate (fortsatt direkte fra core) ---
 try:
     # Eksponert i core/src/lib.rs som #[pyfunction] rust_calibrate_session
     from cyclegraph_core import rust_calibrate_session as rs_calibrate
@@ -293,6 +297,7 @@ def _ensure_schema_and_avg_hr(report: dict) -> dict:
                     report["avg_hr"] = 0.0
     return report
 
+
 # ── Offentlig API ─────────────────────────────────────────────────────────────
 def analyze_session(input_path: str, weather_path: str | None = None, calibrate: bool = True) -> dict:
     """
@@ -306,6 +311,7 @@ def analyze_session(input_path: str, weather_path: str | None = None, calibrate:
       "mode": "outdoor" | "indoor",
       "schema_version": "0.7.0",
       "avg_hr": <float>   # 0.0 hvis ikke kan utledes her
+      "source": "rust"    # marker at adapteren er brukt
     }
     """
     if rs_power_json is None:
@@ -348,13 +354,22 @@ def analyze_session(input_path: str, weather_path: str | None = None, calibrate:
         else:
             status = "LIMITED"
 
-    # 3) Beregn kraft/vind/v_rel via kjerne
-    power_json = rs_power_json(
-        json.dumps(core_samples, ensure_ascii=False),
-        json.dumps(profile, ensure_ascii=False),
-        json.dumps(weather, ensure_ascii=False),
-    )
-    power_obj = json.loads(power_json) if isinstance(power_json, str) else power_json
+    # 3) Beregn kraft/vind/v_rel via kjerne – TVING adapterbruk med PY-OBJEKTER
+    #    Adapteren håndterer JSON-serialisering og variant-detektering internt.
+    power_out = rs_power_json(core_samples, profile, weather)
+
+    # Adapteren kan returnere dict eller JSON-streng – håndter begge
+    if isinstance(power_out, str):
+        try:
+            power_obj = json.loads(power_out)
+        except Exception:
+            # Hvis noe uventet, fall tilbake på tom struktur
+            power_obj = {}
+    elif isinstance(power_out, dict):
+        power_obj = power_out
+    else:
+        power_obj = {}
+
     watts = power_obj.get("watts") or []
     wind_rel = power_obj.get("wind_rel") or []
     v_rel = power_obj.get("v_rel") or []
@@ -367,6 +382,7 @@ def analyze_session(input_path: str, weather_path: str | None = None, calibrate:
         "calibrated": "Ja" if profile.get("calibrated") else "Nei",
         "status": status or "OK",
         "mode": mode,
+        "source": "rust",  # marker at resultatet kommer fra adapter→Rust
     }
 
     # S7: Normaliser før retur (schema_version + ev. avg_hr hvis tilgjengelig)

@@ -1,0 +1,32 @@
+=== RUST PROBE START 2025-10-30T01:08:25.076675 UTC ===
+EXPORTS: ['compute_power_with_wind', 'compute_power_with_wind_json', 'precision_analyze_rust', 'rust_calibrate_session']
+CANDIDATES:
+ - compute_power_with_wind sig=(*args, **_kwargs) doc=Python-navn: compute_power_with_wind(json_or_triple) -> str
+ - compute_power_with_wind_json sig=(*args, **_kwargs) doc=Python-navn: compute_power_with_wind_json(json_or_triple) -> str
+ - precision_analyze_rust sig=(json_str) doc=Python: precision_analyze_rust(json_str: str) -> str
+ - rust_calibrate_session sig=(*args, **_kwargs) doc=
+\n== PROBE compute_power_with_wind :: OBJECT ==
+ok1= False res1_type= str
+res1= ValueError: parse error (ComputePowerIn): missing field `calibrated` at line 1 column 123...
+== PROBE compute_power_with_wind :: TRIPLE ==
+ok2= False res2_type= str
+res2= ValueError: parse error (ComputePowerIn): missing field `calibrated` at line 1 column 63...
+\n== PROBE compute_power_with_wind_json :: OBJECT ==
+ok1= False res1_type= str
+res1= ValueError: parse error (ComputePowerIn): missing field `calibrated` at line 1 column 123...
+== PROBE compute_power_with_wind_json :: TRIPLE ==
+ok2= False res2_type= str
+res2= ValueError: parse error (ComputePowerIn): missing field `calibrated` at line 1 column 63...
+\n== PROBE precision_analyze_rust :: OBJECT ==
+ok1= False res1_type= str
+res1= ValueError: parse error (AnalyzeRustIn): missing field `watts` at line 1 column 137...
+== PROBE precision_analyze_rust :: TRIPLE ==
+ok2= False res2_type= str
+res2= ValueError: parse error (AnalyzeRustIn): invalid type: map, expected a sequence at line 1 column 4...
+\n== PROBE rust_calibrate_session :: OBJECT ==
+ok1= True res1_type= str
+res1= {'cda': 0.3, 'crr': 0.005, 'mae': 25.0, 'calibrated': False, 'profile': {'CdA': 0.32, 'Crr': 0.006, 'device': 'strava', 'weight_kg': 90.0, 'cda': 0.3, 'crr': 0.005, 'calibrated': False, 'calibration_m...
+== PROBE rust_calibrate_session :: TRIPLE ==
+ok2= False res2_type= str
+res2= TypeError: 'NoneType' object cannot be converted to 'PyDict'...
+=== RUST PROBE END ===
