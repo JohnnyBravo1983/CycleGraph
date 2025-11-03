@@ -160,21 +160,54 @@ def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None
 
 # ----------------- PROFIL-KANONISERING -----------------
 def _scrub_profile(profile_in: Dict[str, Any]) -> Dict[str, Any]:
-    """Normaliser alias/kapitalisering og dropp None/støy."""
+    """Normaliser alias/kapitalisering og fjern dubletter/None."""
     p = dict(profile_in or {})
-    if "cda" not in p and "CdA" in p:
-        p["cda"] = p.pop("CdA")
-    if "crr" not in p and "Crr" in p:
-        p["crr"] = p.pop("Crr")
-    # normaliser weightKg → weight_kg og dropp original
-    if "weight_kg" not in p and "weightKg" in p:
-        p["weight_kg"] = p.pop("weightKg")
-    else:
+
+    # 1) Alias → kanonisk (alltid), og fjern original—også hvis begge finnes
+    if "CdA" in p:
+        if "cda" not in p or p.get("cda") is None:
+            p["cda"] = p["CdA"]
+        p.pop("CdA", None)
+    if "Crr" in p:
+        if "crr" not in p or p.get("crr") is None:
+            p["crr"] = p["Crr"]
+        p.pop("Crr", None)
+    if "weightKg" in p:
+        if "weight_kg" not in p or p.get("weight_kg") is None:
+            p["weight_kg"] = p["weightKg"]
         p.pop("weightKg", None)
-    # fjern None-verdier
+
+    # 2) Dropp None
     for k in list(p.keys()):
         if p[k] is None:
             del p[k]
+
+    # 3) Koersjon til tall der relevant (tåler str/float/int)
+    def _f(x):
+        try:
+            return float(x)
+        except Exception:
+            return None
+
+    if "cda" in p:
+        v = _f(p["cda"])
+        if v is not None:
+            p["cda"] = v
+        else:
+            p.pop("cda", None)
+    if "crr" in p:
+        v = _f(p["crr"])
+        if v is not None:
+            p["crr"] = v
+        else:
+            p.pop("crr", None)
+    if "weight_kg" in p:
+        v = _f(p["weight_kg"])
+        if v is not None:
+            p["weight_kg"] = v
+        else:
+            p.pop("weight_kg", None)
+
     return p
 
 
@@ -184,7 +217,7 @@ async def debug_rb(request: Request):
     """
     Minimal passthrough → kaller rs_power_json direkte med body som kommer inn.
     Forventer OBJECT: {"samples":[...], "profile":{...}, "estimat":{...}}
-    Returnerer {"source":"rust"/"fallback"/"error", "out":<str>, "probe": <bool>, "err":<str|None>}
+    Returnerer {"source":"rust"/"error", "out":<str>, "probe": <bool>, "err":<str|None>}
     """
     try:
         data = await request.json()
@@ -199,64 +232,14 @@ async def debug_rb(request: Request):
         )
         return {"source": "error", "out": "", "probe": False, "err": err_msg}
 
-    samples = data.get("samples", [])
-    profile = data.get("profile", {})
-    # estimat i body (kan brukes til echo i debug)
-    body_estimat = data.get("estimat") or data.get("estimate")
-    third = body_estimat  # begge alias støttes
+    # Scrub profile for å unngå dubletter/alias i passthrough
+    prof = _scrub_profile(data.get("profile") or {})
+    sam = data.get("samples") or []
+    est = data.get("estimat") or data.get("estimate") or {}
 
     try:
-        out = rs_power_json(samples, profile, third)
-        out_str = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
-
-        # En enkel probe: om brukeren sendte med "__probe" / "probe"
-        probe = data.get("__probe") or data.get("probe")
-
-        # Heuristikk for å gjette kilde + form svar med setdefault-prinsipp
-        src = "rust"
-        try:
-            parsed = json.loads(out_str)
-            if isinstance(parsed, dict):
-                s = parsed.get("source")
-                if s and "fallback" in str(s):
-                    src = "fallback"
-
-                resp = dict(parsed)
-
-                # --- debug (setdefault, ikke overskrive) ---
-                dbg = resp.setdefault("debug", {})
-                dbg.setdefault("reason", "ok")
-                if "used_fallback" not in dbg:
-                    dbg["used_fallback"] = (src == "fallback")
-                if probe:
-                    dbg.setdefault("probe", probe)
-
-                # Echo estimat_cfg_used (whitelist nøkler) — kun for debug
-                # 1) Hvis vi faktisk sendte estimat i denne stien (fra body)
-                if isinstance(body_estimat, dict) and body_estimat:
-                    echo = {}
-                    for k in ("force",):
-                        if k in body_estimat:
-                            echo[k] = body_estimat[k]
-                    if echo:
-                        dbg.setdefault("estimat_cfg_used", echo)
-
-                # --- toppnivå og metrics med setdefault ---
-                resp.setdefault("weather_applied", False)
-
-                m = resp.setdefault("metrics", {})
-                m.setdefault("precision_watt", 0.0)
-                m.setdefault("drag_watt", 0.0)
-                m.setdefault("rolling_watt", 0.0)
-                m.setdefault("total_watt", m.get("precision_watt", 0.0))
-                m.setdefault("profile_used", {})
-
-                out_str = json.dumps(resp, ensure_ascii=False)
-        except Exception:
-            # Hvis ikke JSON, la out_str være som den er
-            pass
-
-        return {"source": src, "out": out_str, "probe": bool(probe), "err": None}
+        out = rs_power_json(sam, prof, est)
+        return {"source": "rust", "out": out, "probe": False, "err": None}
     except Exception as e:
         return {"source": "error", "out": "", "probe": False, "err": repr(e)}
 
@@ -296,75 +279,186 @@ async def analyze_session(
     elif isinstance(body.get("estimate"), dict):
         estimat_cfg.update(body["estimate"])
 
+    # --- (VALGFRITT MEN ANBEFALT) MINIMAL NORMALISERING AV SAMPLES ---
+    def _coerce_f(x):
+        try:
+            return float(x)
+        except Exception:
+            return 0.0
+
+    mapped = []
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+        t = _coerce_f(s.get("t", 0.0))
+        v_ms = s.get("v_ms")
+        if v_ms is None:
+            v_ms = s.get("v_mps", s.get("v"))
+        v_ms = _coerce_f(v_ms)
+        alt = _coerce_f(s.get("altitude_m", s.get("alt")))
+        g = s.get("grade", s.get("slope"))
+        try:
+            g = float(g)
+            has_g = True
+        except Exception:
+            has_g = False
+        out_s = {"t": t, "v_ms": v_ms, "altitude_m": alt}
+        if has_g:
+            out_s["grade"] = g
+        mv = s.get("moving")
+        if isinstance(mv, bool):
+            out_s["moving"] = mv
+        hd = s.get("heading_deg", s.get("heading"))
+        try:
+            if hd is not None:
+                out_s["heading_deg"] = float(hd)
+        except Exception:
+            pass
+        mapped.append(out_s)
+    # --- SLUTT NORMALISERING ---
+
     # ---------- HARD RUST SHORT-CIRCUIT ----------
     if rs_power_json is not None:
+        # Kall adapter – NO-FALLBACK ved feil i debugfasen
         try:
-            print("[SVR] [RUST] calling rs_power_json(...)")
-            # tredje argument = ESTIMAT, aldri weather
-            rust_out = rs_power_json(samples, profile_scrubbed, estimat_cfg)
-            # Adapter kan returnere str (JSON) eller dict
-            rust_resp = json.loads(rust_out) if isinstance(rust_out, str) else rust_out
+            # NB: IKKE send weather som 3. arg i Trinn 3
+            r = rs_power_json(mapped, profile_scrubbed, estimat_cfg or {})
+        except Exception as e:
+            # 🚫 Trinn 3 debug: IKKE gå til fallback; returnér rust_error
+            print(f"[SVR] [RUST] exception (no-fallback mode): {e!r}", file=sys.stderr, flush=True)
+            return {
+                "source": "rust_error",
+                "weather_applied": False,
+                "metrics": {},
+                "debug": {
+                    "reason": "rust-exception",
+                    "used_fallback": False,
+                    "weather_source": "neutral",
+                    "exception": repr(e),
+                },
+            }
 
-            if isinstance(rust_resp, dict):
-                resp = dict(rust_resp)
+        # Parse adapter-output til dict, ellers returner rust_error
+        resp: Dict[str, Any] = {}
+        if isinstance(r, dict):
+            resp = r  # type: ignore[assignment]
+        else:
+            try:
+                resp = json.loads(r) if isinstance(r, (str, bytes, bytearray)) else {}
+            except Exception as e:
+                # 🚫 Trinn 3 debug: IKKE falle til fallback ved JSON-feil – returnér årsak
+                print(f"[SVR] [RUST] json.loads failed (no-fallback): {e!r}", file=sys.stderr, flush=True)
+                return {
+                    "source": "rust_error",
+                    "weather_applied": False,
+                    "metrics": {},
+                    "debug": {
+                        "reason": "adapter-nonjson",
+                        "used_fallback": False,
+                        "weather_source": "neutral",
+                        "adapter_raw": (r.decode() if isinstance(r, (bytes, bytearray)) else str(r)),
+                        "exception": repr(e),
+                    },
+                }
 
-                # Pakk flat → metrics (belte & bukseseler), men ikke overskriv tall
-                if "metrics" not in resp:
-                    keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
-                    if any(k in resp for k in keys):
-                        m = {k: resp.pop(k) for k in keys if k in resp}
-                        if "profile_used" in resp and isinstance(resp["profile_used"], dict):
-                            m.setdefault("profile_used", resp["profile_used"])
-                        resp["metrics"] = m
+        if isinstance(resp, dict):
+            # Pakk flat → metrics (belte & bukseseler), men ikke overskriv tall
+            if "metrics" not in resp:
+                keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
+                if any(k in resp for k in keys):
+                    mtmp = {k: resp.pop(k) for k in keys if k in resp}
+                    if "profile_used" in resp and isinstance(resp["profile_used"], dict):
+                        mtmp.setdefault("profile_used", resp["profile_used"])
+                    resp["metrics"] = mtmp
 
-                # Kilde + weather (setdefault så vi ikke overstyrer)
-                resp.setdefault("source", "rust_1arg")
-                resp.setdefault("weather_applied", False)
+            # Sett defaults uten å overstyre verdier fra Rust
+            resp.setdefault("source", "rust_1arg")
+            resp.setdefault("weather_applied", False)
 
-                # TEST-KRAV: metrics.profile_used == innsendt profil (rå inn-profil)
-                mm = resp.setdefault("metrics", {})
-                mm.setdefault("profile_used", dict(profile_in))
-                # TEST-KRAV: m["weather_applied"] finnes (False i Trinn 3)
-                mm.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
+            # TEST-KRAV: metrics.profile_used == innsendt profil (rå inn-profil)
+            m = resp.setdefault("metrics", {})
+            m.setdefault("profile_used", dict(profile_in))
+            m.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
+            # Sanity for Trinn 3: total_watt = precision_watt hvis ikke satt
+            m.setdefault("total_watt", m.get("precision_watt", 0.0))
 
-                # 🔹 debug-flagg (force + aliaser) + echo av estimat_cfg
+            # Debug-oppdateringer
+            dbg = resp.setdefault("debug", {})
+            dbg.setdefault("reason", "ok")
+            dbg["force_recompute"] = bool(force_recompute)
+            dbg["persist_ignored"] = bool(force_recompute)
+            dbg["ignored_persist"] = bool(force_recompute)
+            # Patch: eksplisitt no-fallback og weather_source
+            dbg["used_fallback"] = False
+            if not dbg.get("weather_source"):
+                dbg["weather_source"] = "neutral"
+            if force_recompute:
+                dbg["estimat_cfg_used"] = dict(estimat_cfg)
+
+            # Vurder om vi faktisk har metrics
+            rust_has_metrics = isinstance(m, dict) and any(
+                k in m for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
+            )
+
+            if rust_has_metrics:
+                # (5) Sett kilde og flagg eksplisitt per gren
+                resp["source"] = "rust_1arg"
+                resp["weather_applied"] = False
+                # Debug: sett eksplisitt og rydd opp ev. blanke verdier
                 dbg = resp.setdefault("debug", {})
+                dbg["used_fallback"] = False
+                if not dbg.get("weather_source"):
+                    dbg["weather_source"] = "neutral"
                 dbg.setdefault("reason", "ok")
-                dbg["force_recompute"] = bool(force_recompute)
-                dbg["persist_ignored"] = bool(force_recompute)  # back-compat
-                dbg["ignored_persist"] = bool(force_recompute)  # test key
-                if force_recompute:
-                    # Echo estimat_cfg for traceability (kun når force=True)
-                    dbg["estimat_cfg_used"] = dict(estimat_cfg)
-
+                # Sanity for Trinn 3: total_watt = precision_watt
+                m.setdefault("total_watt", m.get("precision_watt", 0.0))
                 final = _ensure_contract_shape(resp)
-                return final  # ← tidlig retur ved Rust-suksess
-
-            print("[SVR] [RUST] no dict/metrics in response → will try fallback")
-
-        except Exception:
-            print("[SVR] [RUST] exception → will try fallback", file=sys.stderr, flush=True)
-            traceback.print_exc()
+                return final
+            else:
+                # 🚫 Trinn 3 debug: IKKE falle videre; returnér årsak
+                print("[SVR] [RUST] missing/invalid metrics (no-fallback)", file=sys.stderr, flush=True)
+                return {
+                    "source": "rust_error",
+                    "weather_applied": False,
+                    "metrics": {},
+                    "debug": {
+                        "reason": "no-metrics-from-rust",
+                        "used_fallback": False,
+                        "weather_source": "neutral",
+                        "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
+                        "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
+                    },
+                }
 
     # ---------- PURE FALLBACK_PY (minimal) ----------
-    fb = {
+    # Bruk rå innsendt profil i metrics.profile_used gjennom helperen
+    profile_used = dict((body or {}).get("profile") or {})
+    weather_applied = False
+
+    # Kun benyttes ved faktisk Rust-feil/ugyldig output – justert signatur
+    fallback_metrics = _fallback_metrics(
+        mapped,
+        profile_used,
+        weather_applied=weather_applied,
+        profile_used=profile_used,
+    )
+
+    resp = {
         "source": "fallback_py",
         "weather_applied": False,
-        "profile_used": profile_scrubbed,
-        "metrics": {
-            "precision_watt": 0.0,
-            "drag_watt": 0.0,
-            "rolling_watt": 0.0,
-            "total_watt": 0.0,
-        },
+        "metrics": fallback_metrics,
         "debug": {
             "reason": "fallback-path",
             "note": "Legacy Python path executed (no Rust result short-circuited).",
             "force_recompute": bool(force_recompute),
             "persist_ignored": bool(force_recompute),
             "ignored_persist": bool(force_recompute),
+            "used_fallback": True,
+            "weather_source": "neutral",
         },
+        # speil innsendt profil eksplisitt (i tillegg til speil via ensure)
+        "profile_used": profile_used,
         "sid": sid,
     }
     print("[SVR] [FB] returning fallback_py")
-    return _ensure_contract_shape(fb)
+    return _ensure_contract_shape(resp)

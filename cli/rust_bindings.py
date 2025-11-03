@@ -127,16 +127,25 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(s)
     except Exception:
+        tmp = "<mem>"
+
+    # Fingerprint til STDERR → behold ren JSON på STDOUT
+    try:
+        keys = list(payload.keys())
+        print(f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={keys} FILE={tmp}", file=sys.stderr)
+    except Exception:
         pass
-    print(
-        f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={list(payload.keys())} FILE={tmp}",
-        file=sys.stderr,
-    )
 
     if _RUST_1ARG is not None:
         return _RUST_1ARG(s)
 
-    raise RuntimeError("compute_power_with_wind_json (1-arg) mangler")
+    if _RUST_V3 is not None:
+        return _RUST_V3(s)
+
+    raise RuntimeError(
+        "Ingen Rust-export tilgjengelig (forventer compute_power_with_wind_json "
+        "eller compute_power_with_wind_json_v3 i cyclegraph_core)."
+    )
 
 
 # ---------------------------------------------------------------------------
