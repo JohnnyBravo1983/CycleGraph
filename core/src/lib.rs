@@ -18,7 +18,11 @@ pub mod weather;
 pub mod weather_api;
 
 // Interne moduler
-mod defaults;
+pub(crate) mod defaults;
+
+// ───────── Feature-gated Python-bindinger ─────────
+#[cfg(feature = "python")]
+pub mod py;
 
 // ───────── Imports (pure Rust) ─────────
 use serde_json::json;
@@ -42,6 +46,7 @@ pub fn compute_power_with_wind_json(
 ) -> String {
     let out = physics::compute_power_with_wind(samples, profile, weather);
     serde_json::json!({
+        "src": "rust_1arg",
         "watts": out.power,
         "wind_rel": out.wind_rel,
         "v_rel": out.v_rel,
@@ -49,7 +54,6 @@ pub fn compute_power_with_wind_json(
     })
     .to_string()
 }
-
 // ───────── analyze_session_core ─────────
 fn analyze_session_core(
     watts: Vec<f64>,
@@ -143,10 +147,7 @@ pub fn analyze_session_rust(
 }
 pub use self::analyze_session_rust as analyze_session;
 
-// ───────── Feature-gated Python-modul (innhold lages senere) ─────────
-// Merk: `core/src/py/mod.rs` implementeres i en egen oppgave/chat.
-#[cfg(feature = "python")]
-pub mod py;
+
 
 // ================== Tests (Rust-only) ==================
 #[cfg(test)]

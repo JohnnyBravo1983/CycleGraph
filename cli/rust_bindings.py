@@ -154,15 +154,13 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
 def rs_power_json(samples, profile, third=None) -> str:
     """
     Backcompat for gamle 3-args kall (samples, profile, estimat).
-    Denne ADAPTEREN sender alltid en ren OBJECT med 'estimat' (minst {}).
-    'weather' sendes aldri i denne stien.
-    Ved parse-feil i Rust (ValueError/parse error), faller vi tilbake til TRIPLE.
+    Sender alltid en ren OBJECT med 'estimat' (minst {}).
+    'weather' sendes ikke i denne stien (Trinn 3).
     """
     samples = _coerce_jsonish(samples)
     profile = _coerce_jsonish(profile)
     third   = _coerce_jsonish(third)
 
-    # Alltid ha med estimat (minst {})
     payload: Dict[str, Any] = {
         "samples": samples,
         "profile": profile,
@@ -170,17 +168,77 @@ def rs_power_json(samples, profile, third=None) -> str:
     }
 
     try:
-        # Primær: 1-arg OBJECT
-        return _call_rust_compute(payload)
+        # Primær: 1-arg OBJECT → Rust
+        result_str = _call_rust_compute(payload)
+        val = json.loads(result_str)
+
+        # Kildefelt for tester/diagnostikk
+        val["src"] = val.get("src", "rust_1arg")
+
+        # === Kritisk berikelse: fyll aggregater som summary forventer ===
+        watts = val.get("watts") or []
+        if isinstance(watts, list) and watts:
+            try:
+                avg = float(sum(float(x) for x in watts) / len(watts))
+            except Exception:
+                avg = 0.0
+        else:
+            avg = 0.0
+
+        # Sett standardiserte felt dersom de mangler
+        val.setdefault("precision_watt", avg)   # brukes som P i din visning
+        val.setdefault("total_watt",    avg)    # alias for samme i Trinn 3
+        val.setdefault("weather_applied", False)
+        val.setdefault("repr_kind", "object_v3")
+        # Valgfritt: behold debug-fanen konsistent
+        dbg = val.get("debug") or {}
+        if not isinstance(dbg, dict):
+            dbg = {}
+        dbg.setdefault("used_fallback", False)
+        dbg.setdefault("repr_kind", "object_v3")
+        val["debug"] = dbg
+
+        return json.dumps(val)
+
     except Exception as e_obj:
+        print(f"[RB] Exception in rs_power_json primary: {e_obj!r}", file=sys.stderr, flush=True)
         # Fallback: TRIPLE (legacy)
         try:
             tri = [samples, profile, payload["estimat"]]
             s = json.dumps(tri)
             if _RUST_1ARG is not None:
-                return _RUST_1ARG(s)
-            if _RUST_V3 is not None:
-                return _RUST_V3(s)
-            raise RuntimeError("Ingen Rust-export tilgjengelig i fallback (TRIPLE).")
+                out = _RUST_1ARG(s)
+            elif _RUST_V3 is not None:
+                out = _RUST_V3(s)
+            else:
+                raise RuntimeError("Ingen Rust-export tilgjengelig i fallback (TRIPLE).")
+
+            val = json.loads(out)
+
+            # Samme berikelse i fallback
+            val["src"] = val.get("src", "rust_binding_fallback")
+            watts = val.get("watts") or []
+            if isinstance(watts, list) and watts:
+                try:
+                    avg = float(sum(float(x) for x in watts) / len(watts))
+                except Exception:
+                    avg = 0.0
+            else:
+                avg = 0.0
+            val.setdefault("precision_watt", avg)
+            val.setdefault("total_watt",    avg)
+            val.setdefault("weather_applied", False)
+            val.setdefault("repr_kind", "object_v3")
+            dbg = val.get("debug") or {}
+            if not isinstance(dbg, dict):
+                dbg = {}
+            dbg.setdefault("used_fallback", True)
+            dbg.setdefault("repr_kind", "legacy_tolerant")
+            val["debug"] = dbg
+
+            return json.dumps(val)
+
         except Exception as e_tri:
-            raise ValueError(f"adapter OBJECT->TRIPLE failed: obj={e_obj!r}; tri={e_tri!r}")
+            raise ValueError(
+                f"adapter OBJECT->TRIPLE failed: obj={e_obj!r}; tri={e_tri!r}"
+            )

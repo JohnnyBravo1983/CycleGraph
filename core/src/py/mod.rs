@@ -589,16 +589,15 @@ fn call_compute_power_with_wind_from_json_v3(json_in: &str) -> Result<String, St
 // ──────────────────────────────────────────────────────────────────────────────
 // PyO3-FUNKSJONER — 1-ARG EXPORT (OBJECT → core → enrich → JSON)
 // ──────────────────────────────────────────────────────────────────────────────
-
 #[pyfunction]
 fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult<String> {
     use serde_json::Value as J;
 
-    // 1) Parse rå JSON
+    // --- 1) Parse rå JSON ---
     let raw_val: J = serde_json::from_str(payload_json)
         .map_err(|e| PyValueError::new_err(format!("parse error (raw json): {e}")))?;
 
-    // 2) Deserialiser tolerant OBJECT med path-sporing
+    // --- 2) Deserialiser tolerant OBJECT med path-sporing ---
     let obj: ComputePowerObjectV3 = {
         let mut track = spte::Track::new();
         let de = spte::Deserializer::new(raw_val.clone().into_deserializer(), &mut track);
@@ -613,34 +612,40 @@ fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult
         }
     };
 
-    // 3) Kall kjernen (via eksisterende 3-arg-funksjon)
+    // --- 3) Konverter felt til kjerneformater ---
     let estimat_present = !obj.estimat.is_null();
     let core_profile = to_core_profile_tol(obj.profile.clone(), estimat_present)
         .map_err(|e| PyValueError::new_err(format!("profile convert error: {e}")))?;
     let weather = obj.weather.unwrap_or_else(neutral_weather);
 
-    // KONVERTER tolerant samples → kjerne
     let core_samples = obj.samples
         .into_iter()
         .map(to_core_sample_tol)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| PyValueError::new_err(e))?;
+        .map_err(PyValueError::new_err)?;
 
+    // --- 4) Kall Rust-kjernen (lib.rs) ---
     let core_out_str = crate::compute_power_with_wind_json(&core_samples, &core_profile, &weather);
-    let core_resp_val: serde_json::Value = serde_json::from_str(&core_out_str)
-        .unwrap_or_else(|_| serde_json::json!({ "debug": { "reason": "decode_error" } }));
 
-    // 4) Berik svaret med skalarer, arrays, source/weather_applied
-    let enriched = enrich_metrics_on_object(core_resp_val, &core_samples, &obj.profile);
+    // --- 5) Legg til src før retur ---
+    let mut val: J = serde_json::from_str(&core_out_str)
+        .map_err(|e| PyValueError::new_err(format!("reparse error: {e}")))?;
+    val["src"] = J::String("rust_1arg".to_string());
 
-    // 5) Returnér som JSON-streng
-    serde_json::to_string(&enriched)
-        .map_err(|e| PyValueError::new_err(format!("json encode error: {e}")))
+    // --- 6) Returner gyldig JSON-streng ---
+    Ok(val.to_string())
 }
 
 #[pyfunction]
 pub fn compute_power_with_wind_json_v3(_py: Python<'_>, json_str: &str) -> PyResult<String> {
-    call_compute_power_with_wind_from_json_v3(json_str).map_err(PyValueError::new_err)
+    let mut val: serde_json::Value = call_compute_power_with_wind_from_json_v3(json_str)
+        .map_err(PyValueError::new_err)
+        .and_then(|s| {
+            serde_json::from_str(&s)
+                .map_err(|e| PyValueError::new_err(format!("reparse error: {e}")))
+        })?;
+    val["src"] = serde_json::json!("rust_1arg");
+    Ok(val.to_string())
 }
 
 #[pyfunction]
