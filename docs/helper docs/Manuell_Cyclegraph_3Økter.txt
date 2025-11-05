@@ -1,5 +1,5 @@
 # ===== CycleGraph Trinn 3 — E2E for valgte Strava-økter + avviksanalyse (CdA=0.30, W=111 kg) =====
-$Base = "http://127.0.0.1:5183"
+$Base = "http://127.0.0.1:5175"
 $Ids  = @(16311219004, 16279854313, 16262232459)
 $out  = Join-Path (Resolve-Path ".") "out"; New-Item -ItemType Directory -Force -Path $out | Out-Null
 
