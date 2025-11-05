@@ -45,12 +45,61 @@ pub fn compute_power_with_wind_json(
     weather: &Weather,
 ) -> String {
     let out = physics::compute_power_with_wind(samples, profile, weather);
+
+    // --- Tidsvektet gjennomsnitt P ---
+    // antagelse: out.power har samme lengde som samples
+    let mut num = 0.0_f64;
+    let mut den = 0.0_f64;
+
+    // Litt mildere "moving"-grense enn kjernen, for å speile Strava est. bedre
+    let v_thresh = 0.3_f64; // ~1.08 km/t
+
+    // dt_i: bruk forskjell i t (sek). For i=0 antar vi lik dt som i=1 (eller 1.0 som fallback)
+    let n = samples.len();
+    let mut last_dt = 1.0_f64;
+    for i in 0..n {
+        let v = samples[i].v_ms;
+        let p = *out.power.get(i).unwrap_or(&0.0);
+
+        let dt = if i > 0 {
+            let d = (samples[i].t - samples[i - 1].t).max(0.0);
+            // Beskytt mot urealistiske hopp
+            let d = if d.is_finite() && d > 0.0 && d < 10_000.0 { d } else { last_dt };
+            last_dt = d;
+            d
+        } else {
+            last_dt // første sample
+        };
+
+        if v > v_thresh {
+            num += p * dt;
+            den += dt;
+        }
+    }
+
+    let avg_watt = if den > 0.0 { num / den } else { 0.0 };
+
     serde_json::json!({
         "src": "rust_1arg",
-        "watts": out.power,
-        "wind_rel": out.wind_rel,
-        "v_rel": out.v_rel,
         "calibrated": profile.calibrated,
+
+        // Serier
+        "watts": out.power,
+        "v_rel": out.v_rel,
+        "wind_rel": out.wind_rel,
+
+        // Aggregater som Trinn 3 forventer
+        "precision_watt": avg_watt,
+        "total_watt":    avg_watt,
+        "weather_applied": false,
+        "repr_kind": "object_v3",
+
+        "debug": {
+            "n": n,
+            "used_fallback": false,
+            "repr_kind": "object_v3",
+            "avg_method": "time_weighted(v>0.3m/s)"
+        }
     })
     .to_string()
 }
