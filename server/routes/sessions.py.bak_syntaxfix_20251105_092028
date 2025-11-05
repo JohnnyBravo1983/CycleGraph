@@ -258,55 +258,34 @@ async def analyze_session(
 
     # Les body trygt
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    # --- NORMALISER TRIPLE V3 TIL OBJECT V3 ---
-        # --- NORMALISER TRIPLE V3 TIL OBJECT V3 ---
+        \1    # --- NORMALISER TRIPLE V3 TIL OBJECT V3 ---
     try:
         from urllib.parse import parse_qs
         q = request.url.query
         qs = parse_qs(q)
-        adapter = (qs.get("adapter", [None])[0] or "").lower()
+        adapter = (qs.get('adapter',[None])[0] or '').lower()
     except Exception:
-        adapter = ""
+        adapter = ''
 
     # Hvis body kom som liste (TRIPLE), pakk om til OBJECT
-    if isinstance(body, list) or adapter == "triple_v3":
+    if isinstance(body, list) or adapter == 'triple_v3':
         # Tolerant mapping: [samples, profile, weather, schema_version?]
         samples = None
         profile = None
         weather = None
         schema_version = None
-
         try:
             if isinstance(body, list):
-                if len(body) >= 1:
-                    samples = body[0]
-                    if isinstance(samples, str):
-                        import json
-                        try:
-                            samples = json.loads(samples)
-                            print("[SVR] INFO decoded stringified samples OK")
-                        except Exception as e:
-                            print("[SVR] WARN could not decode samples JSON string:", e)
-
-                if len(body) >= 2:
-                    profile = body[1]
-                if len(body) >= 3:
-                    weather = body[2]
-                if len(body) >= 4 and isinstance(body[3], str):
-                    schema_version = body[3]
+                if len(body) >= 1: samples = body[0]
+                if len(body) >= 2: profile = body[1]
+                if len(body) >= 3: weather = body[2]
+                if len(body) >= 4 and isinstance(body[3], str): schema_version = body[3]
         except Exception:
             pass
 
-        if not isinstance(samples, (list, tuple)):
-            samples = []
-        if not isinstance(profile, dict):
-            profile = {}
-        if not isinstance(weather, dict):
-            weather = {}
+        if not isinstance(samples, (list, tuple)): samples = []
+        if not isinstance(profile, dict): profile = {}
+        if not isinstance(weather, dict): weather = {}
 
         if schema_version is None:
             schema_version = "0.7.3"
@@ -317,22 +296,10 @@ async def analyze_session(
             "profile": profile,
             "weather": weather,
         }
-    # --- END triple->object ---
+# --- END triple->object ---    except Exception:
+        body = {}
 
-# --- END triple->object ---
-    # === DEBUG LOGGING (TEMP) ===
-    try:
-        print("[SVR] DEBUG body keys:", list(body.keys()))
-        s = body.get("samples", [])
-        print("[SVR] DEBUG samples type:", type(s))
-        if isinstance(s, (list, tuple)):
-            print("[SVR] DEBUG samples len:", len(s))
-            if len(s) > 0:
-                print("[SVR] DEBUG first sample:", s[0])
-        else:
-            print("[SVR] DEBUG samples raw:", s)
-    except Exception as e_dbg:
-        print("[SVR] DEBUG ERROR:", e_dbg)    # Valider shape
+    # Valider shape
     samples = list((body or {}).get("samples") or [])
     profile_in = dict((body or {}).get("profile") or {})
     if not isinstance(samples, list) or not isinstance(profile_in, dict):
@@ -532,8 +499,4 @@ async def analyze_session(
     }
     print("[SVR] [FB] returning fallback_py")
     return _ensure_contract_shape(resp)
-
-
-
-
 

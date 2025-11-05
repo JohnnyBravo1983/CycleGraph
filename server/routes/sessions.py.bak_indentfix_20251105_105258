@@ -263,7 +263,6 @@ async def analyze_session(
         body = {}
 
     # --- NORMALISER TRIPLE V3 TIL OBJECT V3 ---
-        # --- NORMALISER TRIPLE V3 TIL OBJECT V3 ---
     try:
         from urllib.parse import parse_qs
         q = request.url.query
@@ -279,34 +278,18 @@ async def analyze_session(
         profile = None
         weather = None
         schema_version = None
-
         try:
             if isinstance(body, list):
-                if len(body) >= 1:
-                    samples = body[0]
-                    if isinstance(samples, str):
-                        import json
-                        try:
-                            samples = json.loads(samples)
-                            print("[SVR] INFO decoded stringified samples OK")
-                        except Exception as e:
-                            print("[SVR] WARN could not decode samples JSON string:", e)
-
-                if len(body) >= 2:
-                    profile = body[1]
-                if len(body) >= 3:
-                    weather = body[2]
-                if len(body) >= 4 and isinstance(body[3], str):
-                    schema_version = body[3]
+                if len(body) >= 1: samples = body[0]
+                if len(body) >= 2: profile = body[1]
+                if len(body) >= 3: weather = body[2]
+                if len(body) >= 4 and isinstance(body[3], str): schema_version = body[3]
         except Exception:
             pass
 
-        if not isinstance(samples, (list, tuple)):
-            samples = []
-        if not isinstance(profile, dict):
-            profile = {}
-        if not isinstance(weather, dict):
-            weather = {}
+        if not isinstance(samples, (list, tuple)): samples = []
+        if not isinstance(profile, dict): profile = {}
+        if not isinstance(weather, dict): weather = {}
 
         if schema_version is None:
             schema_version = "0.7.3"
@@ -317,8 +300,6 @@ async def analyze_session(
             "profile": profile,
             "weather": weather,
         }
-    # --- END triple->object ---
-
 # --- END triple->object ---
     # === DEBUG LOGGING (TEMP) ===
     try:

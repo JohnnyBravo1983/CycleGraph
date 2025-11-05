@@ -1,6 +1,6 @@
 # ===== CycleGraph Trinn 3 — E2E for valgte Strava-økter + avviksanalyse (CdA=0.30, W=111 kg) =====
 $Base = "http://127.0.0.1:5183"
-$Ids  = @(16311219004, 16279854313, 16262232459)
+$Ids  = @(16311219004, 16279854313, 16262232459, 16127771071, 15908409437)
 $out  = Join-Path (Resolve-Path ".") "out"; New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 # --- 0) Last .env til miljø (kun for Strava tokens; påvirker ikke CdA/W her) ---

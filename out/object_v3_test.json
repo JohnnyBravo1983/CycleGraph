@@ -1,0 +1,1 @@
+﻿{"schema_version":"0.7.3","weather":{"air_temp_c":15,"air_pressure_hpa":1013.25,"wind_ms":0,"wind_dir_deg":0},"samples":[{"altitude_m":10,"v_ms":5,"t":0,"heading_deg":0,"moving":true,"grade":0},{"altitude_m":10.1,"v_ms":5.2,"t":1,"heading_deg":0,"moving":true,"grade":0.01}],"profile":{"weight_kg":111,"cda":0.3,"calibrated":false,"estimat":false,"crr":0.004}}

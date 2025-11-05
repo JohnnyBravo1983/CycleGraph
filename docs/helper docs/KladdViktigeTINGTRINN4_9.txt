@@ -1,0 +1,44 @@
+
+NBNB VIKTIG FOR PROFILE TRINN 9
+
+Anbefalt opplegg (så vi ikke låser oss)
+
+Ikke hardkod i dybden
+Hold defaults samlet ett sted (f.eks. defaults.rs), og bruk dem kun via unwrap_or(defaults::CDA_DEFAULT) osv. i physics.rs. Da kan profil-trinnet senere overstyre uten å rydde i fysikk-koden.
+
+Precedens (kilde → effektive verdier)
+Bruk denne rekkefølgen når du “resolver” profilen:
+
+User-profil (konkrete felter satt av brukeren)
+
+Avledet fra sykkeltype/dekk (f.eks. MTB → høyere Crr)
+
+Globale defaults (siste utvei)
+
+Separér “Profile” fra “EffectiveProfile”
+La Profile beholde Option<f64> for cda/crr/eta. Lag en liten “resolver” som gir konkrete tall:
+
+// defaults.rs
+pub const CDA_DEFAULT: f64 = 0.30;
+pub const CRR_DEFAULT: f64 = 0.0040;
+pub const ETA_DEFAULT: f64 = 0.955;
+
+// models.rs (eller physics.rs om du vil holde det privat)
+#[derive(Debug, Clone, Copy)]
+pub struct EffectiveProfile {
+    pub mass_kg: f64,
+    pub cda: f64,
+    pub crr: f64,
+    pub eta: f64,
+}
+
+impl EffectiveProfile {
+    pub fn from_profile(p: &Profile) -> Self {
+        Self {
+            mass_kg: p.total_weight,
+            cda: p.cda.unwrap_or(CDA_DEFAULT),
+            crr: p.crr.unwrap_or(CRR_DEFAULT),
+            eta: ETA_DEFAULT, // senere: p.drivetrain_eta.unwrap_or(ETA_DEFAULT)
+        }
+    }
+}

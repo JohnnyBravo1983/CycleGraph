@@ -1,0 +1,9 @@
+﻿[
+  [
+    { "t": 0, "v_ms": 5.0, "altitude_m": 10.0, "moving": true, "heading_deg": 0.0, "grade": 0.00 },
+    { "t": 1, "v_ms": 5.2, "altitude_m": 10.1, "moving": true, "heading_deg": 0.0, "grade": 0.01 }
+  ],
+  { "cda": 0.3, "crr": 0.004, "weight_kg": 111.0, "calibrated": false, "estimat": false },
+  { "air_temp_c": 15.0, "air_pressure_hpa": 1013.25, "wind_ms": 0.0, "wind_dir_deg": 0.0 },
+  "0.7.3"
+]

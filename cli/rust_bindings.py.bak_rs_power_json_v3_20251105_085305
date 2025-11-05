@@ -155,41 +155,31 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
 # ROBUST ADAPTER: OBJECT først (ren, alltid estimat), fallback til TRIPLE,
 # deretter DIRECT-OBJECT med weather/schema_version hvis TRIPLE feiler.
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# V3-FIRST ADAPTER: bygg V3 OBJECT (samples, profile, weather, schema_version)
-# Ingen "estimat" i V3. Nød-fallback: TRIPLE uten estimat-objekt.
-# ---------------------------------------------------------------------------
 def rs_power_json(samples, profile, third=None) -> str:
     """
-    Backcompat signatur, men V3-OBJECT er sannheten:
-      - samples:  list/dict (coerces via _coerce_jsonish)
-      - profile:  dict (cda, crr, weight_kg, calibrated)
-      - weather:  alltid med (defaults), schema_version=0.7.3
+    Backcompat for gamle 3-args kall (samples, profile, estimat).
+    Denne ADAPTEREN sender primært en ren OBJECT (kun estimat; uten weather).
+    Ved feil: prøv TRIPLE. Hvis TRIPLE også feiler, prøv OBJECT igjen
+    med herdede defaults for weather + schema_version.
     """
     samples_co = _coerce_jsonish(samples)
     profile_co = _coerce_jsonish(profile)
+    third_co   = _coerce_jsonish(third)
 
-    # Bygg V3 payload (UTEN 'estimat')
-    payload_v3: Dict[str, Any] = {
-        "schema_version": "0.7.3",
+    # Alltid ha med estimat (minst {})
+    payload: Dict[str, Any] = {
         "samples": samples_co,
         "profile": profile_co,
-        "weather": {
-            "air_temp_c": 15.0,
-            "air_pressure_hpa": 1013.25,
-            "wind_ms": 0.0,
-            "wind_dir_deg": 0.0,
-        },
+        "estimat": third_co if isinstance(third_co, dict) else {},
     }
 
-    # Primær: 1-arg OBJECT (V3)
+    # 1) Primær: 1-arg OBJECT uten weather (ren estimat)
     try:
-        return _call_rust_compute(payload_v3)
-    except Exception as e_v3:
-        # Nød-fallback: TRIPLE (legacy). Vi sender kun samples og profile,
-        # og lar Rust/py-side ignorere 'estimat'. (Ikke send map som 'estimat'.)
+        return _call_rust_compute(payload)
+    except Exception as e_obj:
+        # 2) Fallback: TRIPLE (legacy)
         try:
-            tri = [samples_co, profile_co]
+            tri = [samples_co, profile_co, payload["estimat"]]
             s = json.dumps(tri)
             if _RUST_1ARG is not None:
                 return _RUST_1ARG(s)
@@ -197,7 +187,19 @@ def rs_power_json(samples, profile, third=None) -> str:
                 return _RUST_V3(s)
             raise RuntimeError("Ingen Rust-export tilgjengelig i fallback (TRIPLE).")
         except Exception as e_tri:
-            raise ValueError(
-                f"V3 OBJECT failed and TRIPLE fallback also failed: v3={e_v3!r}; tri={e_tri!r}"
-            )
+            # 3) Siste utvei: Direct OBJECT med herdet weather + schema_version
+            try:
+                payload.setdefault("weather", {
+                    "air_temp_c": 15.0,
+                    "air_pressure_hpa": 1013.25,
+                    "wind_ms": 0.0,
+                    "wind_dir_deg": 0.0,
+                })
+                payload.setdefault("schema_version", "0.7.3")
+                return _call_rust_compute(payload)
+            except Exception as e_direct:
+                raise ValueError(
+                    f"adapter OBJECT->TRIPLE failed and direct OBJECT call also failed: "
+                    f"obj={e_obj!r}; tri={e_tri!r}; direct={e_direct!r}"
+                )
 

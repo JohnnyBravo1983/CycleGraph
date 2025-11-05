@@ -1,18 +1,62 @@
 // core/src/models.rs
+
 use serde::{Deserialize, Serialize};
+
+/// Aggregert effekt (W) fra delkomponenter.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+pub struct Metrics {
+    /// Aerodynamisk drag-effekt (W)
+    #[serde(default)]
+    pub drag_watt: f64,
+
+    /// Rullemotstand (W)
+    #[serde(default)]
+    pub rolling_watt: f64,
+
+    /// Gravitasjonskomponent (W) = m * g * dh/dt
+    #[serde(default)]
+    pub gravity_watt: f64,
+
+    /// Total/“precision” (skal fylles i kjernen som drag + rolling + gravity)
+    #[serde(default)]
+    pub precision_watt: f64,
+}
+
+/// Default-verdien for felt som skal være true som standard.
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Sample {
-    pub t: f64,          // sek
-    pub v_ms: f64,       // m/s
-    pub altitude_m: f64, // meter
+    // Absolutt tid i sek (kan være 0 for første)
+    pub t: f64,
+
+    // Hastighet i m/s. Default 0.0 om mangler.
+    #[serde(default)]
+    pub v_ms: f64,
+
+    // Høyde i meter. Default 0.0 om mangler.
+    #[serde(default)]
+    pub altitude_m: f64,
+
+    // Valgfri stigning som brøk (0.05 = 5%). Vi tillater at denne mangler.
+    #[serde(default)]
+    pub grade: Option<f64>,
+
+    // Valgfri tilbakelagt distanse i meter. Hvis mangler, kan vi estimere fra v*dt.
+    #[serde(default)]
+    pub distance_m: Option<f64>,
 
     /// Statisk heading (grader). Brukes som fallback hvis GPS mangler.
-    pub heading_deg: f64, // grader
+    /// Beholdes som obligatorisk felttype for Trinn 4.
+    pub heading_deg: f64,
+
+    // Bevegelsesflagg. Default true (tolerant for gamle payloads).
+    #[serde(default = "default_true")]
     pub moving: bool,
 
-    // --- S5: Indoor/GPS utvidelser ---
-    /// Effekt fra rulle/powermeter (hvis tilgjengelig)
+    // Valgfri effekt fra device om den eksisterer i stream (ikke påkrevd i Trinn 3)
     #[serde(default)]
     pub device_watts: Option<f64>,
 
@@ -33,12 +77,25 @@ pub struct Weather {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
+    /// Total systemvekt (rytter + sykkel), kg (beholder ditt navn)
     pub total_weight: Option<f64>,
+
+    /// F.eks. "road", "tt", "gravel"
     pub bike_type: Option<String>,
+
+    /// Rullemotstandskoeffisient
     pub crr: Option<f64>,
+
+    /// Frontalareal-koeffisient (CdA)
     pub cda: Option<f64>,
+
+    /// Indikerer om profilen er kalibrert
     pub calibrated: bool,
+
+    /// Kalibreringsfeil (MAE), om tilgjengelig
     pub calibration_mae: Option<f64>,
+
+    /// Om estimat-/heuristikkbanen er aktivert
     pub estimat: bool,
 }
 
