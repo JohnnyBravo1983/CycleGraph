@@ -1,7 +1,7 @@
 ﻿{
     "profile":  {
-                    "weight_kg":  85,
-                    "cda":  0.25,
+                    "weight_kg":  111,
+                    "cda":  0.3,
                     "calibrated":  false,
                     "crr":  0.004
                 },
