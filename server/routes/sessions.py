@@ -1,5 +1,6 @@
 ﻿# server/routes/sessions.py
 from __future__ import annotations
+from cli.profile_binding import load_user_profile, compute_profile_version, binding_for
 
 import json
 import sys
@@ -25,6 +26,61 @@ RHO_DEFAULT = 1.225  # enkel fallback-rho
 
 
 # ----------------- HELPERE (kontrakt + nominelle metrics) -----------------
+
+# --- Trinn 5: device lock + profile normalization ---
+
+def _apply_device_heuristics(samples: list, device: str) -> list:
+    if not isinstance(samples, list): return samples
+    if (device or "").lower() != "strava": return samples
+    out, prev = [], None
+    for s in samples:
+        s = dict(s or {})
+        v = float(s.get("v_ms") or s.get("velocity_smooth") or 0.0)
+        s["moving"] = bool(s.get("moving")) or (v > 0.3)  # moving-filter
+        if s.get("grade") is None and s.get("altitude_m") is not None and prev is not None:
+            dt = float(s.get("t",0.0)) - float(prev.get("t",0.0))
+            if dt > 0:
+                dh = float(s["altitude_m"]) - float(prev.get("altitude_m", s["altitude_m"]))
+                vv = v if v > 0 else 10.0
+                s["grade"] = (dh / (vv * dt)) * 100.0
+        out.append(s); prev = s
+    return out
+
+
+DEFAULT_DEVICE = "strava"
+
+def _ensure_profile_device(p: dict) -> dict:
+    """Normaliser profil og lås device til 'strava' hvis mangler (ikke overstyr eksplisitt input)."""
+    p = dict(p or {})
+    # alias-normalisering
+    if "weight" in p and "weight_kg" not in p:
+        p["weight_kg"] = p.pop("weight")
+    if "crank_eff" in p and "crank_eff_pct" not in p:
+        p["crank_eff_pct"] = p.pop("crank_eff")
+    # device-lock (kun hvis ikke satt)
+    if not p.get("device"):
+        p["device"] = DEFAULT_DEVICE
+    return p
+
+def _inject_profile_used(resp: dict, prof: dict) -> dict:
+    """Sørg for at metrics.profile_used alltid er komplett og konsistent."""
+    resp = dict(resp or {})
+    metrics = dict(resp.get("metrics") or {})
+    profile_used = {
+        "cda": float(prof.get("cda")) if prof.get("cda") is not None else 0.30,
+        "crr": float(prof.get("crr")) if prof.get("crr") is not None else 0.004,
+        "weight_kg": float(prof.get("weight_kg")) if prof.get("weight_kg") is not None else 78.0,
+        "crank_eff_pct": float(prof.get("crank_eff_pct")) if prof.get("crank_eff_pct") is not None else 95.5,
+        "device": (prof.get("device") or DEFAULT_DEVICE),
+    }
+    metrics.setdefault("profile_used", {})
+    metrics["profile_used"].update(profile_used)
+    resp["metrics"] = metrics
+    resp.setdefault("repr_kind", "object_v3")
+    resp.setdefault("source", resp.get("source") or "rust_1arg")
+    return resp
+
+
 def _ensure_contract_shape(resp: Dict[str, Any]) -> Dict[str, Any]:
     """
     Sett sikre defaults og garanter kontrakt — kun setdefault,
@@ -40,6 +96,12 @@ def _ensure_contract_shape(resp: Dict[str, Any]) -> Dict[str, Any]:
     # metrics: bare default-nøkler, ingen beregning
     m = resp.setdefault("metrics", {})
     m.setdefault("precision_watt", 0.0)
+
+    # --- PATCH A: alltid-felt i metrics (kalibrering) ---
+    m.setdefault("calibration_mae", None)
+    m.setdefault("calibrated", False)
+    m.setdefault("calibration_status", "not_available")
+
     m.setdefault("drag_watt", 0.0)
     m.setdefault("rolling_watt", 0.0)
     # total_watt defaulter til precision_watt dersom mangler
@@ -60,6 +122,50 @@ def _ensure_contract_shape(resp: Dict[str, Any]) -> Dict[str, Any]:
     dbg.setdefault("ignored_persist", False)
 
     return resp
+
+# --- Trinn 6 helpers ---
+def _t6_extract_device_watts(samples):
+    out = []
+    for s in samples or []:
+        if isinstance(s, dict):
+            v = s.get("device_watts", s.get("device_watt"))
+            try:
+                out.append(None if v is None else float(v))
+            except Exception:
+                out.append(None)
+    return out
+
+def _t6_series_mae(pred, dev):
+    n = min(len(pred), len(dev))
+    if n == 0: return None
+    s = 0.0; c = 0
+    for i in range(n):
+        a = pred[i]; b = dev[i]
+        if isinstance(a, (int,float)) and isinstance(b, (int,float)):
+            s += abs(float(a) - float(b)); c += 1
+    return (s/c) if c else None
+
+def _t6_pick_predicted_series(result_dict):
+    for k in ("watts", "total_watt_series", "power"):
+        v = result_dict.get(k)
+        if isinstance(v, list) and v and isinstance(v[0], (int, float)):
+            return [float(x) for x in v]
+    return []
+
+def _t6_calib_csv_append(sid, n, calibrated, status, mae, mean_pred, mean_dev):
+    import os
+    if os.getenv("CG_CALIBRATE","") != "1":
+        return
+    try:
+        os.makedirs("logs", exist_ok=True)
+        p = "logs/trinn6-manual_sanity.csv"
+        write_header = not os.path.exists(p)
+        with open(p, "a", encoding="utf-8") as f:
+            if write_header:
+                f.write("sid,n,calibrated,status,mae,mean_pred,mean_dev\n")
+            f.write(f"{sid},{n},{calibrated},{status},{'' if mae is None else mae},{'' if mean_pred is None else mean_pred},{'' if mean_dev is None else mean_dev}\n")
+    except Exception:
+        pass
 
 
 def _nominal_metrics(profile: dict) -> dict:
@@ -244,6 +350,8 @@ async def debug_rb(request: Request):
         return {"source": "error", "out": "", "probe": False, "err": repr(e)}
 
 
+
+
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
 async def analyze_session(
@@ -262,16 +370,31 @@ async def analyze_session(
     except Exception:
         body = {}
 
-    # Valider shape
+    # Valider shape (lagre original info om klienten faktisk sendte profil)
     samples = list((body or {}).get("samples") or [])
     profile_in = dict((body or {}).get("profile") or {})
+    client_sent_profile = bool(profile_in)
+
     if not isinstance(samples, list) or not isinstance(profile_in, dict):
         raise HTTPException(status_code=400, detail="Missing 'samples' or 'profile'")
 
-    profile_scrubbed = _scrub_profile(profile_in)
+    # --- Profil-normalisering (Patch A) ---
+    profile = _ensure_profile_device((body.get("profile") or {}))
+    body["profile"] = profile
+
+    # Hvis klient ikke sendte profil, bruk lagret brukerprofil
+    if not client_sent_profile:
+        up = load_user_profile()
+        profile = _ensure_profile_device(up)
+        body["profile"] = profile
+
+    # Finn profile_version (binding for sid hvis finnes, ellers hash av aktiv profil)
+    sid_key = sid or ""
+    profile_version = binding_for(sid_key) or compute_profile_version(profile)
+
+    profile_scrubbed = _scrub_profile(profile)
 
     # --- Estimat + Weather (tredje-argument) ---
-    # 1) bygg estimat_cfg
     estimat_cfg: Dict[str, Any] = {}
     if force_recompute:
         estimat_cfg["force"] = True
@@ -280,7 +403,6 @@ async def analyze_session(
     elif isinstance(body.get("estimate"), dict):
         estimat_cfg.update(body["estimate"])
 
-    # 2) trekk ut weather fra body, filtrer til kjernenixler
     weather_in = {}
     if not no_weather and isinstance(body.get("weather"), dict):
         w = body["weather"]
@@ -288,11 +410,16 @@ async def analyze_session(
             if k in w and w[k] is not None:
                 weather_in[k] = w[k]
 
-    # 3) third = estimat + weather (rs_power_json vil splitte selv)
+    # third = estimat + weather (rs_power_json vil splitte selv)
     third = dict(estimat_cfg)
     third.update(weather_in)
 
-    # --- (VALGFRITT) NORMALISERING AV SAMPLES ---
+    # --- Enhetsheuristikk på samples (før mapping/Rust) ---
+    samples = body.get("samples") or []
+    samples = _apply_device_heuristics(samples, profile.get("device"))
+    body["samples"] = samples  # hold body i sync
+
+    # --- (VALGFRITT) NORMALISERING AV SAMPLES -> mapped ---
     def _coerce_f(x):
         try:
             return float(x)
@@ -329,7 +456,7 @@ async def analyze_session(
     # ---------- HARD RUST SHORT-CIRCUIT ----------
     if rs_power_json is not None:
         try:
-            # ✅ nå sender vi BOTH estimat og weather i tredje-argumentet
+            # ✅ sender BOTH estimat og weather i tredje-argumentet
             r = rs_power_json(mapped, profile_scrubbed, third)
         except Exception as e:
             print(f"[SVR] [RUST] exception (no-fallback mode): {e!r}", file=sys.stderr, flush=True)
@@ -348,9 +475,166 @@ async def analyze_session(
         resp: Dict[str, Any] = {}
         if isinstance(r, dict):
             resp = r
+            # Injiser profile_used, deretter skaler (DEL / eff) og legg på profile_version
+            try:
+                resp = _inject_profile_used(resp, profile)
+
+                # --- Trinn 5: anvend crank_eff_pct korrekt (rider power = wheel power / eta) ---
+                metrics = resp.get("metrics") or {}
+                try:
+                    eff = float(profile.get("crank_eff_pct") or 95.5) / 100.0
+                except Exception:
+                    eff = 0.955
+                base_pw = metrics.get("precision_watt")
+                if base_pw is None:
+                    base_pw = metrics.get("total_watt")
+                if isinstance(base_pw, (int, float)) and eff > 0:
+                    scaled = float(base_pw) / eff  # <-- viktig: DEL, ikke gang
+                    metrics["precision_watt"] = scaled
+                    if metrics.get("total_watt") is None:
+                        metrics["total_watt"] = scaled
+
+                pu = metrics.get("profile_used") or {}
+                pu["profile_version"] = profile_version
+                metrics["profile_used"] = pu
+
+                # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
+                try:
+                    import os  # lokal import
+                    _pred_series = _t6_pick_predicted_series(resp)
+                    _dev_series = _t6_extract_device_watts(samples)
+
+                    mae = None
+                    status = "not_available"
+                    calibrated = False
+
+                    if _pred_series and any(isinstance(x, (int, float)) for x in _dev_series):
+                        n = min(len(_pred_series), len(_dev_series))
+                        if n >= 3:
+                            pred = []
+                            dev = []
+                            for i in range(n):
+                                di = _dev_series[i]
+                                if isinstance(di, (int, float)):
+                                    pred.append(float(_pred_series[i]))
+                                    dev.append(float(di))
+                            mae = _t6_series_mae(pred, dev)
+                            if mae is not None:
+                                calibrated = True
+                                status = "ok"
+                            else:
+                                status = "not_enough_overlap"
+                        else:
+                            status = "not_enough_samples"
+                    else:
+                        status = "not_available"
+
+                    metrics["calibration_mae"] = mae
+                    metrics["calibrated"] = calibrated
+                    metrics["calibration_status"] = status
+
+                    if os.getenv("CG_CALIBRATE", "") == "1":
+                        def _mean(xs):
+                            xs2 = [float(x) for x in xs if isinstance(x, (int, float))]
+                            return (sum(xs2) / len(xs2)) if xs2 else None
+
+                        _t6_calib_csv_append(
+                            sid=sid,
+                            n=min(len(_pred_series), len(_dev_series)),
+                            calibrated=calibrated,
+                            status=status,
+                            mae=mae,
+                            mean_pred=_mean(_pred_series),
+                            mean_dev=_mean(_dev_series),
+                        )
+                except Exception:
+                    metrics.setdefault("calibration_mae", None)
+                    metrics.setdefault("calibrated", False)
+                    metrics.setdefault("calibration_status", "fallback")
+
+                resp["metrics"] = metrics
+            except Exception:
+                pass
         else:
             try:
                 resp = json.loads(r) if isinstance(r, (str, bytes, bytearray)) else {}
+                # Injiser profile_used, deretter skaler (DEL / eff) og legg på profile_version
+                resp = _inject_profile_used(resp, profile)
+
+                # --- Trinn 5: anvend crank_eff_pct korrekt (rider power = wheel power / eta) ---
+                metrics = resp.get("metrics") or {}
+                try:
+                    eff = float(profile.get("crank_eff_pct") or 95.5) / 100.0
+                except Exception:
+                    eff = 0.955
+                base_pw = metrics.get("precision_watt")
+                if base_pw is None:
+                    base_pw = metrics.get("total_watt")
+                if isinstance(base_pw, (int, float)) and eff > 0:
+                    scaled = float(base_pw) / eff  # <-- viktig: DEL, ikke gang
+                    metrics["precision_watt"] = scaled
+                    if metrics.get("total_watt") is None:
+                        metrics["total_watt"] = scaled
+
+                pu = metrics.get("profile_used") or {}
+                pu["profile_version"] = profile_version
+                metrics["profile_used"] = pu
+
+                # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
+                try:
+                    import os  # lokal import
+                    _pred_series = _t6_pick_predicted_series(resp)
+                    _dev_series = _t6_extract_device_watts(samples)
+
+                    mae = None
+                    status = "not_available"
+                    calibrated = False
+
+                    if _pred_series and any(isinstance(x, (int, float)) for x in _dev_series):
+                        n = min(len(_pred_series), len(_dev_series))
+                        if n >= 3:
+                            pred = []
+                            dev = []
+                            for i in range(n):
+                                di = _dev_series[i]
+                                if isinstance(di, (int, float)):
+                                    pred.append(float(_pred_series[i]))
+                                    dev.append(float(di))
+                            mae = _t6_series_mae(pred, dev)
+                            if mae is not None:
+                                calibrated = True
+                                status = "ok"
+                            else:
+                                status = "not_enough_overlap"
+                        else:
+                            status = "not_enough_samples"
+                    else:
+                        status = "not_available"
+
+                    metrics["calibration_mae"] = mae
+                    metrics["calibrated"] = calibrated
+                    metrics["calibration_status"] = status
+
+                    if os.getenv("CG_CALIBRATE", "") == "1":
+                        def _mean(xs):
+                            xs2 = [float(x) for x in xs if isinstance(x, (int, float))]
+                            return (sum(xs2) / len(xs2)) if xs2 else None
+
+                        _t6_calib_csv_append(
+                            sid=sid,
+                            n=min(len(_pred_series), len(_dev_series)),
+                            calibrated=calibrated,
+                            status=status,
+                            mae=mae,
+                            mean_pred=_mean(_pred_series),
+                            mean_dev=_mean(_dev_series),
+                        )
+                except Exception:
+                    metrics.setdefault("calibration_mae", None)
+                    metrics.setdefault("calibrated", False)
+                    metrics.setdefault("calibration_status", "fallback")
+
+                resp["metrics"] = metrics
             except Exception as e:
                 print(f"[SVR] [RUST] json.loads failed (no-fallback): {e!r}", file=sys.stderr, flush=True)
                 return {
@@ -377,12 +661,14 @@ async def analyze_session(
                     resp["metrics"] = mtmp
 
             resp.setdefault("source", "rust_1arg")
-            # 🔁 Ikke hardkod weather_applied=False – sett ut fra om weather ble sendt inn
             if "weather_applied" not in resp:
                 resp["weather_applied"] = bool(weather_in)
 
             m = resp.setdefault("metrics", {})
-            m.setdefault("profile_used", dict(profile_in))
+            pu = m.setdefault("profile_used", dict(profile))
+            if isinstance(pu, dict):
+                pu.setdefault("profile_version", profile_version)
+                m["profile_used"] = pu
             m.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
             m.setdefault("total_watt", m.get("precision_watt", 0.0))
 
@@ -418,7 +704,8 @@ async def analyze_session(
             }
 
     # ---------- PURE FALLBACK_PY ----------
-    profile_used = dict((body or {}).get("profile") or {})
+    profile_used = dict(profile)
+    profile_used["profile_version"] = profile_version
     weather_applied = False
 
     fallback_metrics = _fallback_metrics(
@@ -446,3 +733,4 @@ async def analyze_session(
     }
     print("[SVR] [FB] returning fallback_py")
     return _ensure_contract_shape(resp)
+

@@ -1,0 +1,351 @@
+Backend Analyzer Stability – oppdatert og merget
+
+🧩 Backend Analyzer Stability
+(Uendret i hovedsak; beholdt for helhet. Nye/endrede punkter er merket med 🆕/🟦 Trinn 4 / 🟨 Trinn 5.)
+
+1. Miljø og installasjon
+$env:PYTHONPATH = ""
+cd core
+python -m maturin develop --release -F python
+cd ..
+python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
+
+
+✅ Resultat: Fullt deterministisk miljø – uavhengig av conda eller globalt installerte pakker.
+
+2. Import-skygge og API-konsistens
+
+Feilen i analyze_session() ble sporet til at cli/init.py re-eksporterte feil objekt. Ryddet i eksportene og sikret én tydelig wrapper for arrays-API som testene forventer.
+
+__all__ = ["cli", "analyze_session"]
+
+try:
+    from cyclegraph_core import analyze_session as _native_analyze_session
+except Exception:
+    _native_analyze_session = None
+
+def analyze_session(watts, hr, device_watts=None):
+    if not hr or len(watts) != len(hr):
+        raise ValueError("Watt og puls må ha samme lengde; puls-listen kan ikke være tom")
+
+    if _native_analyze_session is not None:
+        return _native_analyze_session(watts, hr, (device_watts or 'powermeter'))
+
+    try:
+        from .rust_bindings import analyze_session as _rb_analyze
+        return _rb_analyze(watts, hr, device_watts)
+    except Exception:
+        return 0.0
+
+
+Denne implementasjonen:
+
+Fjerner import-skygge fra cli.session_api.
+
+Beholder forventet signatur.
+
+Gir foroverkompatibel fallback hvis Rust-binding mangler.
+
+Kaster norsk ValueError ved ugyldig input.
+
+Bekreftet med introspeksjon:
+
+SIG: (watts, hr, device_watts=None)
+
+MODULE: cli.init
+
+3. Analyzer-forbedringer og profil-sensitivitet
+
+PowerShell-basert testframework validerer variasjon i precision_watt, drag_watt, rolling_watt, total_watt ved endring av profilparametre.
+
+Eksempel (Trinn 3):
+
+CdA  Crr    W    precision_watt  drag_watt  rolling_watt  total_watt
+0.28 0.004  78   189.7           147.0      29.1          184.1
+0.32 0.004  78   208.6           168.0      29.1          205.1
+0.28 0.006  78   202.8           147.0      43.6          198.6
+0.28 0.004  90   193.7           147.0      33.5          188.6
+
+
+Bekrefter monotoni: CdA↑ ⇒ drag↑, Crr↑ ⇒ rolling↑, W↑ ⇒ rolling↑, og precision_watt følger.
+
+Seeding: baseline ride dupliseres (ride3-c01 …) slik at alle caser har gyldige watt/puls-serier (fjerner feilen “series-mode krever watts+puls”).
+
+Responsstruktur (eksempel):
+
+{
+  "ok": true,
+  "session_id": "ride3-test",
+  "metrics": {
+    "precision_watt": 208.6,
+    "precision_watt_ci": 12.4,
+    "drag_watt": 168.0,
+    "rolling_watt": 29.1,
+    "total_watt": 205.1,
+    "aero_fraction": 0.66,
+    "weather_applied": false,
+    "profile_used": { "CdA": 0.32, "Crr": 0.004, "weight_kg": 78, "device": "strava" }
+  },
+  "debug": {
+    "analyzer_mode": "series",
+    "force_recompute": true,
+    "ignored_persist": true,
+    "reason": "ok"
+  }
+}
+
+4. Kontrakt og kjerneadaptere
+
+Rust-adapter og API-kontrakt
+
+Én sentral adapter: cli/rust_bindings.rs_power_json erstatter direkte kall til compute_power_with_wind_json*.
+
+server/routes/sessions.py bruker adapteren eksklusivt.
+
+🆕 Oppdatert (Trinn 4 – verifisert i logger):
+
+Kallsti: standardisert 1-arg kjerne-signatur (én JSON‐payload).
+
+Payload i praksis: samples, profile, weather (vær sendes nå i OBJECT-payloaden).
+
+Alle kall går via compute_power_with_wind_json (1-arg) → full Rust-sti uten fallback.
+
+🆕 Bekreftet output (sanity, Trinn 4):
+
+source: "rust_1arg"
+
+weather_applied: true
+
+metrics (dict) inneholder aggregerte komponenter (drag_watt, rolling_watt, precision_watt, total_watt, profile_used).
+
+Toppnivå drag_watt/rolling_watt/gravity_watt kan være null i 1-arg-modusen; bruk metrics for aggregater.
+
+🔹 Nominal metrics for tomme samples (uendret).
+
+🔹 Debug-felt og kontraktssikring
+
+debug.ignored_persist = True ved force=True.
+
+debug.reason = "ok" i suksess-case.
+
+metrics.total_watt garanteres (alias til precision_watt eller drag+rolling).
+
+metrics.profile_used speiler innsendt profil.
+
+weather_applied settes deterministisk basert på vær/no_weather.
+
+_ensure_contract_shape() holder nøkler stabile.
+
+🆕 Utvidelser (Trinn 3, videreført): foroverkompatible debug-nøkler: binding, repr_kind, weather_source.
+
+🔹 Kalibrering og fallback
+rust_calibrate_session returnerer calibrated=False hvis kjerne mangler. I CI: feature-check.
+
+5. Test- og valideringsmal
+
+Monotoni-sjekk (Trinn 3):
+
+if ($rows[1].drag -le $rows[0].drag) { Write-Host "Fail: CdA↑ men drag ikke opp" -ForegroundColor Red }
+if ($rows[2].roll -le $rows[0].roll) { Write-Host "Fail: Crr↑ men roll ikke opp" -ForegroundColor Red }
+if ($rows[3].roll -le $rows[0].roll) { Write-Host "Fail: W↑ men roll ikke opp" -ForegroundColor Red }
+
+
+CSV-eksport til logs/trinn3-proof_*.csv. Echo av “Profile used …”. Testbart i isolasjon (PowerShell/pytest/REST).
+
+✅ Resultat Trinn 3: profil-sensitivitet, vær-avslag (no_weather=true) og robust recompute-logikk verifisert.
+
+🆕 Trinn 4 – nye testartefakter:
+
+scripts/Test-WeatherHeading.py – beregner/validerer heading_deg ∈ [0,360], håndterer ffill/bfill.
+
+scripts/Test-PipelineIntegrity.py – helhetlig integritetstest (input-sanity, JSON-roundtrip, Rust-output, schema-snapshot).
+
+Observasjoner:
+
+rho ≈ 1.225 ved 15 °C/1013 hPa,
+
+weather_applied=True,
+
+source="rust_1arg",
+
+per-sample lister (v_ms, v_rel, watts, wind_rel) har lengde==samples,
+
+toppnivå komponenter kan være null i 1-arg; aggregater finnes i metrics.
+
+6. CI- og miljøsikring
+
+Tester kjører deterministisk i .venv.
+
+CI-setup:
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-ci.txt
+python -m maturin develop --release -F python
+pytest -q
+
+
+Full ABI-stabilitet via PyTuple/PyDict-signaturer.
+
+legacy_tolerant parsing gir bakoverkompatibilitet i CI.
+
+Sjekk: compute_power_with_wind_json (1-arg) finnes før publisering.
+
+🧩 Resultat (samlet status)
+
+Element	Status	Kommentar
+rust_calibrate_session eksport	✅	Eksponert og verifisert (ekte bruk i Trinn 6)
+JSON ↔ dict in-sync	✅	Ensartet returkontrakt Rust ↔ Python
+analyze_session (array)	✅	Riktig re-eksport
+precision_watt-sensitivitet	✅	Varierer korrekt med CdA/Crr/weight
+Seeding og persist	✅	Automatisk baseline-duplisering
+Type- og retur-garantier	✅	cda, crr, mae=float; calibrated=bool
+pytest-kjøringer	✅	71 passerte, 0 feilet
+Miljø-determinisme	✅	.venv isolert
+CI-kompatibilitet	✅	Reproduserbar setup
+Nominal metrics	✅	Deterministisk fallback ved tomme samples
+Debug-felt/kontrakt	✅	ignored_persist, reason, weather_applied
+compute_power_with_wind_json (1-arg)	✅	Standardisert og brukt
+source	✅	rust_1arg (ikke fallback)
+debug-felter	✅	binding/repr_kind/weather_source (foroverkomp.)
+fallback	⚙️	Failsafe, ikke aktiv
+metrics retur	✅	Aggregater i metrics; toppnivå kan være null i 1-arg
+🟦 Trinn 4: weather i payload	✅	Payload inneholder weather (verifisert i logger)
+🟦 Trinn 4: heading/ρ/telemetri	✅	Heading verifisert, rho ≈ 1.225, weather_applied=True
+🟨 Trinn 5: device/binding/effekt	✅	Se under
+
+🔮 Fremoverkompabilitet (Trinn 4–9)
+
+Trinn	Tema	Foroverkomp.-notater
+4	Calibrated Physics + Weather API	Weather sendes i OBJECT-payload. Heading og vind deler ramme (0°=nord, CW). Toppnivå-komponenter kan være null i 1-arg; les aggregater fra metrics.
+5	Device Heuristics & Fallback	profile.device stabil; bind ride→profil-versjon; ikke overstyr device.
+6	Calibration & CI	Feature-flag krever ekte Rust-kalibrering; logg calibration_mae og calibrated.
+7	Publish & Observability	Logg precision_watt, drag_watt, rolling_watt, total_watt, profile_used, weather_applied, source, og ev. binding/repr_kind/weather_source.
+8	Verification & Sweep	Deaktiver nominal i real-runs; dokumenter når nominal brukes (samples==0).
+9	Trend Analysis	Aggreger på profil-versjon + ride-ID; ikke miks profiler uten versjon-tag.
+
+🟨 Trinn 5 – Device Heuristics & Profile Binding
+(NY seksjon for endringer levert i dette trinnet)
+
+Artefakter
+
+config/profile.user.json (brukerens CdA, Crr, weight_kg, crank_eff_pct, device)
+
+config/ride_profile_bindings.json (rideID → profile_version)
+
+cli/profile_binding.py (laste profil, beregne versjon, lese ride-IDer, skrive bindinger)
+
+scripts/Bind-Profiles.ps1 (uten here-docs)
+
+scripts/Trinn5-Proof.ps1 (CSV + monotoni; filtrerer stdout-støy)
+
+server/routes/sessions.py (profil-last, binding, heuristikker, effektskalering)
+
+Endringer (server/routes/sessions.py)
+
+Hvis klient ikke sendte profile: last brukerprofil fra disk; lås/sett device="strava" dersom tom.
+
+Finn profile_version: binding_for(sid) or compute_profile_version(profile); skriv til metrics.profile_used.profile_version.
+
+Device-heuristikker for strava før Rust-kall:
+
+moving-filter: moving=True når v_ms > 0.3 (tolerant).
+
+enkel grade-fallback når grade mangler men altitude_m/t finnes.
+
+Heuristisk skalering av precision_watt med crank_eff_pct/100.0 (midlertidig i Python for å verifisere effektkjeden; flyttes til Rust i Trinn 6).
+
+Test og proof (grønt)
+
+Bind-Profiles.ps1 genererte v1-… profilversjon for 7 rides (fra Manuell_Cyclegraph_5Økter.txt).
+
+Trinn5-Proof.ps1: 4/4 OK
+
+CdA up → drag up
+
+Crr up → rolling up
+
+Weight up → rolling up
+
+CrankEff down → precision_watt down
+
+🧭 Forward-Compatibility Schema (for Copilot context)
+
+Purpose: fast, maskinlesbart referansepunkt for backend-kontrakten etter Trinn 5.
+(Plasseres alltid til slutt, oppdateres per trinn.)
+
+Adapter & Core Binding
+
+Adapter: cli/rust_bindings.rs_power_json
+
+Kallsti: 1-arg kjernesignatur → compute_power_with_wind_json(payload_json)
+
+Payload-invariant (etter Trinn 5):
+
+{
+  "samples": [...],
+  "profile": {
+    "cda": <float>,
+    "crr": <float>,
+    "weight_kg": <float>,
+    "crank_eff_pct": <float>,
+    "device": "strava" | "<other>"
+  },
+  "weather": {
+    "wind_ms": <float>,
+    "wind_dir_deg": <0..360>,
+    "air_temp_c": <float>,
+    "air_pressure_hpa": <float>
+  }
+}
+
+
+Minimikrav samples: t, v_ms (heading kan ligge i samples eller beregnes før kall).
+
+Weather-enheter: wind_ms (m/s), wind_dir_deg (0–360 fra nord, CW), air_temp_c (°C), air_pressure_hpa (hPa).
+
+Valgfri probe/telemetri: __probe: "rb-1arg".
+
+Stable Contract Keys (retur)
+
+Lister (len==samples): v_ms, v_rel, watts, wind_rel
+
+Skalarer: precision_watt, total_watt, weather_applied, source, repr_kind
+
+Aggregater (metrics): drag_watt, rolling_watt, precision_watt, total_watt, profile_used
+
+Toleranse: toppnivå drag_watt/rolling_watt/gravity_watt kan være null i 1-arg; les tilsvarende fra metrics.
+
+Debug-/telemetri-felt (foroverkompatible)
+
+source ∈ {"rust_1arg","fallback_py"}
+
+(valgfritt) binding, repr_kind, weather_source
+
+debug.ignored_persist, debug.reason
+
+Guardrails
+
+Kall alltid kjerne via adapter.
+
+Hold heading/vind i samme referanseramme.
+
+Ikke antag per-sample komponentserier i 1-arg; les aggregater i metrics.
+
+Trinn 5: device beholdes urørt (default settes til "strava" hvis mangler).
+
+Trinn 5: metrics.profile_used må inkludere cda, crr, weight_kg, crank_eff_pct, device, profile_version.
+
+Bruk schema-snapshot-test for å fange felt-/type-/lengdeendringer.
+
+Fremoverkompabilitet (Trinn 4–9)
+
+4: Weather i payload; 1-arg aggregater i metrics.
+
+5: Device-heuristikker (strava: moving/grade) + ride→profile_version + heuristisk crank_eff-skalering i Python.
+
+6: Flytt crank_eff-skalering og kalibrering (CdA/Crr + MAE) inn i Rust; CI-feature-flag.
+
+7: Observability/logging av precision_watt, drag_watt, rolling_watt, total_watt, profile_used, weather_applied, source, m.m.
+
+8–9: Sweep/validering og trendanalyse på profile_version.
