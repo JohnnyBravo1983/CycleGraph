@@ -311,18 +311,62 @@ fn enrich_metrics_on_object(
 ) -> serde_json::Value {
     use serde_json::{json, Value};
 
-    let (w_drag, w_roll, w_model, drag_watt, rolling_watt, precision_watt, total_watt)
+    // Time-weighted mean fra samples[].t
+    fn tw_mean(power: &[f64], samples: &[crate::Sample]) -> Option<f64> {
+        if power.is_empty() || samples.is_empty() || power.len() != samples.len() {
+            return None;
+        }
+        let mut sum = 0.0f64;
+        let mut tsum = 0.0f64;
+        for i in 0..samples.len() {
+            let t_cur = samples[i].t;
+            let t_prev = if i > 0 { samples[i - 1].t } else { t_cur };
+            let dt = (t_cur - t_prev).max(0.0);
+            if dt > 0.0 {
+                sum += power[i] * dt;
+                tsum += dt;
+            }
+        }
+        if tsum > 0.0 { Some(sum / tsum) } else { None }
+    }
+
+    // 1) Skalarer (fallback når core-power mangler)
+    let (_w_drag, _w_roll, _w_model, drag_watt, rolling_watt, precision_watt_fb, total_watt_fb)
         = compute_scalar_metrics(samples, profile);
 
+    // 2) Preferér tidvektet snitt fra core "power"/"watts" hvis tilgjengelig
+    let mut precision_watt = precision_watt_fb;
+    let mut total_watt     = total_watt_fb;
+
+    if let Some(obj) = resp.as_object() {
+        if let Some(arr) = obj.get("power").or_else(|| obj.get("watts")) {
+            if let Some(ps) = arr.as_array() {
+                let mut buf: Vec<f64> = Vec::with_capacity(ps.len());
+                for v in ps {
+                    buf.push(v.as_f64().unwrap_or(0.0));
+                }
+                if let Some(avg) = tw_mean(&buf, samples) {
+                    precision_watt = avg;
+                    total_watt = avg;
+                }
+            }
+        }
+    }
+
+    // 3) Gravity-komponent (resten) for synlighet i metrics
+    let gravity_watt = precision_watt - (drag_watt + rolling_watt);
+
+    // 4) Merge inn i resp, tving korrekt precision/total, legg til gravity_watt
     if let Some(obj) = resp.as_object_mut() {
-        // metrics
         match obj.get_mut("metrics") {
             Some(mv) if mv.is_object() => {
                 let m = mv.as_object_mut().unwrap();
+                // Behold eksisterende hvis satt; ellers sett. Tving precision/total.
                 m.entry("drag_watt").or_insert(json!(drag_watt));
                 m.entry("rolling_watt").or_insert(json!(rolling_watt));
-                m.entry("precision_watt").or_insert(json!(precision_watt));
-                m.entry("total_watt").or_insert(json!(total_watt));
+                m.insert("precision_watt".into(), json!(precision_watt));
+                m.insert("total_watt".into(), json!(total_watt));
+                m.insert("gravity_watt".into(), json!(gravity_watt));
 
                 // profile_used
                 let mut prof = serde_json::Map::new();
@@ -333,6 +377,7 @@ fn enrich_metrics_on_object(
                 m.entry("profile_used").or_insert(Value::Object(prof));
             }
             _ => {
+                // Opprett metrics-blokk
                 let mut prof = serde_json::Map::new();
                 if let Some(v) = profile.cda { prof.insert("cda".into(), json!(v)); }
                 if let Some(v) = profile.crr { prof.insert("crr".into(), json!(v)); }
@@ -344,45 +389,20 @@ fn enrich_metrics_on_object(
                     "rolling_watt": rolling_watt,
                     "precision_watt": precision_watt,
                     "total_watt": total_watt,
+                    "gravity_watt": gravity_watt,
                     "profile_used": prof
                 }));
             }
         }
 
-        // arrays
-        match obj.get_mut("arrays") {
-            Some(av) if av.is_object() => {
-                let a = av.as_object_mut().unwrap();
-                if !a.contains_key("w_drag") { a.insert("w_drag".into(), json!(w_drag)); }
-                if !a.contains_key("w_roll") { a.insert("w_roll".into(), json!(w_roll)); }
-                if !a.contains_key("w_model") { a.insert("w_model".into(), json!(w_model)); }
-            }
-            _ => {
-                obj.insert("arrays".into(), json!({
-                    "w_drag": w_drag,
-                    "w_roll": w_roll,
-                    "w_model": w_model
-                }));
-            }
-        }
-
-        // toppnivå standardfelt
-        obj.entry("source").or_insert(json!("rust_1arg"));
-        obj.entry("weather_applied").or_insert(json!(false));
-
-        // debug.reason = "ok" hvis ikke satt
-        let dbg = obj.entry("debug").or_insert(json!({}));
-        if let Some(d) = dbg.as_object() {
-            if !d.contains_key("reason") {
-                if let Some(d_mut) = obj.get_mut("debug").and_then(|v| v.as_object_mut()) {
-                    d_mut.insert("reason".into(), json!("ok"));
-                }
-            }
-        }
+        // Sett metadata om de mangler (ikke overskriv core)
+        obj.entry("source").or_insert(Value::from("rust_1arg"));
+        obj.entry("weather_applied").or_insert(Value::from(false));
     }
 
     resp
 }
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // TOLERANT PARSER
@@ -464,7 +484,7 @@ fn call_compute_from_json(json_in: &str) -> Result<String, String> {
 
                 // berik OBJECT-svar
                 if let Ok(resp_val) = serde_json::from_str::<serde_json::Value>(&out) {
-                    let enriched = enrich_metrics_on_object(resp_val, &core_samples, &obj.profile);
+                    let enriched = enrich_metrics_on_object(resp_val, &core_samples, &obj.profile, &w);
                     if let Ok(s) = serde_json::to_string(&enriched) { out = s; }
                 }
 
@@ -538,7 +558,7 @@ fn call_compute_from_json(json_in: &str) -> Result<String, String> {
     if repr_kind == "object" {
         if let Some((core_samples_obj, profile_tol)) = obj_opt {
             if let Ok(resp_val) = serde_json::from_str::<serde_json::Value>(&out) {
-                let enriched = enrich_metrics_on_object(resp_val, &core_samples_obj, &profile_tol);
+            let enriched = enrich_metrics_on_object(resp_val, &core_samples_obj, &profile_tol, &weather);    
                 if let Ok(s) = serde_json::to_string(&enriched) { out = s; }
             }
         }
@@ -631,8 +651,7 @@ fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult
         .unwrap_or_else(|_| serde_json::json!({ "debug": { "reason": "decode_error" } }));
 
     // 4) Berik svaret med skalarer, arrays, source/weather_applied
-    let enriched = enrich_metrics_on_object(core_resp_val, &core_samples, &obj.profile);
-
+    let enriched = enrich_metrics_on_object(core_resp_val, &core_samples, &obj.profile, &weather);
     // 5) Returnér som JSON-streng
     serde_json::to_string(&enriched)
         .map_err(|e| PyValueError::new_err(format!("json encode error: {e}")))
