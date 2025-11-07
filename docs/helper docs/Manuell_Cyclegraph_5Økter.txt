@@ -27,6 +27,7 @@ $Ids = @(
     16127771071,
     16333270450,  # ny økt
     16342459294   # ny økt
+    16381383185
 )
 
 # --- 2.1 Hjelpere (grader↔radianer + bearing) ---
