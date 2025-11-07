@@ -1,0 +1,204 @@
+# =====================================================================
+# CycleGraph Precision Watt testkjøring – Trinn 3 (Rust-first)
+# =====================================================================
+# Kjører flere Strava-aktiviteter gjennom analyze_session API-et.
+# Nå med heading_deg (fra lat/lng) OG eksplisitt weather i payloaden.
+# STRAVA_ACCESS_TOKEN må være satt i miljøet.
+# =====================================================================
+
+# --- 1) Basis ---
+$Base = "http://127.0.0.1:5175/api"
+$h = @{ Authorization = "Bearer $($env:STRAVA_ACCESS_TOKEN)" }
+
+# Toggle: bruk test-vær i payload for å verifisere at hele kjeden tar imot weather
+$UseTestWeather = $true
+$TestWeather = @{
+    wind_ms          = 3.0       # m/s
+    wind_dir_deg     = 270.0     # blåser FRA vest → TIL øst
+    air_temp_c       = 12.0      # °C
+    air_pressure_hpa = 1013.0    # hPa
+}
+
+# --- 2) Aktiviteter som skal analyseres ---
+$Ids = @(
+    16311219004,  # baseline test
+    16279854313,
+    16262232459,
+    16127771071,
+    16333270450,  # ny økt
+    16342459294   # ny økt
+)
+
+# --- 2.1 Hjelpere (grader↔radianer + bearing) ---
+function To-Rad([double]$deg) { [Math]::PI * $deg / 180.0 }
+function Bearing-Deg([double]$lat1, [double]$lon1, [double]$lat2, [double]$lon2) {
+    $φ1 = To-Rad $lat1; $φ2 = To-Rad $lat2
+    $Δλ = To-Rad ($lon2 - $lon1)
+    $y  = [Math]::Sin($Δλ) * [Math]::Cos($φ2)
+    $x  = [Math]::Cos($φ1) * [Math]::Sin($φ2) - [Math]::Sin($φ1) * [Math]::Cos($φ2) * [Math]::Cos($Δλ)
+    $θ  = [Math]::Atan2($y, $x) * 180.0 / [Math]::PI
+    if ($θ -lt 0) { $θ += 360.0 }
+    return $θ
+}
+
+# --- 3) Strava helpers ---
+function Get-StravaStreams([long]$Id) {
+    $h = @{ Authorization = "Bearer $($env:STRAVA_ACCESS_TOKEN)" }
+    $keys = "time,velocity_smooth,altitude,grade_smooth,latlng,distance,moving"
+    $u = "https://www.strava.com/api/v3/activities/$Id/streams?keys=$keys&key_by_type=true"
+    Invoke-RestMethod -Method GET -Headers $h -Uri $u
+}
+function Get-StravaActivity([long]$Id) {
+    $h = @{ Authorization = "Bearer $($env:STRAVA_ACCESS_TOKEN)" }
+    Invoke-RestMethod -Method GET -Headers $h -Uri "https://www.strava.com/api/v3/activities/$Id"
+}
+
+# --- 4) Profil (HARDKODET for test) ---
+$Cda = 0.30
+$Crr = 0.004
+$Wkg = 111.0
+
+# --- 5) Bygg payload m/ heading_deg (+ valgfri weather) ---
+function Build-SessionPayload($S, [double]$CdaLocal, [double]$CrrLocal, [double]$WLocal, [bool]$IncludeWeather=$false, $WeatherObj=$null) {
+    $t  = @($S.time.data)
+    $v  = @($S.velocity_smooth.data)
+    $a  = @($S.altitude.data)
+    $g  = @($S.grade_smooth.data)
+    $ll = @($S.latlng.data)
+
+    $tc=$t.Count; $vc=$v.Count; $ac=$a.Count
+    $lc=($ll | ForEach-Object { $_ }) | Measure-Object | Select-Object -ExpandProperty Count
+    if (-not $lc) { $lc = 0 }
+
+    $n_baseline = [Math]::Min([Math]::Min($tc,$vc), $ac)
+    $n = if ($lc -gt 0) { [Math]::Min($n_baseline, $lc) } else { $n_baseline }
+    if ($n -le 0) { throw "Streams mangler data (time/velocity/altitude)" }
+
+    # heading_deg
+    $headings = $null
+    if ($lc -gt 1) {
+        $headings = New-Object 'System.Collections.Generic.List[double]'
+        for ($i=0; $i -lt $n; $i++) {
+            if ($i -lt ($n-1) -and $ll[$i] -ne $null -and $ll[$i+1] -ne $null) {
+                $lat1 = [double]$ll[$i][0];   $lon1 = [double]$ll[$i][1]
+                $lat2 = [double]$ll[$i+1][0]; $lon2 = [double]$ll[$i+1][1]
+                $hdg = Bearing-Deg $lat1 $lon1 $lat2 $lon2
+            } elseif ($i -gt 0) {
+                $hdg = $headings[$i-1]
+            } else {
+                $hdg = 0.0
+            }
+            $headings.Add([double]$hdg)
+        }
+        if ($headings.Count -ge 2) { $headings[0] = $headings[1] }
+        Write-Host ("[GPS] latlng OK — heading_deg beregnet for {0} punkter" -f $headings.Count) -ForegroundColor Green
+    } else {
+        Write-Host "[GPS] latlng mangler/skjult — kjører uten heading_deg (vind retningskomp.≈0)" -ForegroundColor Yellow
+    }
+
+    # samples
+    $samples = New-Object 'System.Collections.Generic.List[object]'
+    $speedStop = 0.5
+    for ($i=0; $i -lt $n; $i++) {
+        $obj = @{
+            t          = [double]$t[$i]
+            v_ms       = [double]$v[$i]
+            altitude_m = [double]$a[$i]
+            moving     = ([double]$v[$i] -ge $speedStop)
+        }
+        if ($g.Count -gt $i -and $null -ne $g[$i]) {
+            try { $obj.grade=[double]$g[$i] } catch {}
+        }
+        if ($headings -and $headings.Count -gt $i) {
+            $obj.heading_deg = [double]$headings[$i]
+        }
+        $samples.Add($obj)
+    }
+
+    $payload = @{
+        samples = $samples
+        profile = @{ cda=$CdaLocal; crr=$CrrLocal; weight_kg=$WLocal; calibrated=$false }
+    }
+
+    if ($IncludeWeather -and $null -ne $WeatherObj) {
+        # Viktig: toppnøkkel "weather" – sessions.py vil flate denne inn i third
+        $payload.weather = $WeatherObj
+    }
+
+    return $payload
+}
+
+# --- 6) Analyze API call ---
+function Analyze-Session($Payload) {
+    $json = ($Payload | ConvertTo-Json -Depth 12 -Compress)
+    Invoke-RestMethod -Method POST `
+        -Uri "$Base/sessions/local-mini/analyze?force_recompute=true&debug=1" `
+        -ContentType "application/json" -Body $json
+}
+
+# --- 7) Preflight: verifiser at vi faktisk får latlng fra Strava ---
+Write-Host "=== Preflight: sjekker latlng på første ID ==="
+try {
+    $pf = Get-StravaStreams $Ids[0]
+    $hasLL = ($pf.latlng -and $pf.latlng.data -and $pf.latlng.data.Count -gt 1)
+    if ($hasLL) {
+        Write-Host ("✅ {0}: latlng OK (count={1})" -f $Ids[0], $pf.latlng.data.Count) -ForegroundColor Green
+    } else {
+        Write-Host ("❌ {0}: latlng mangler — sjekk token-scopes (activity:read_all) og aktivitetens kart-privacy" -f $Ids[0]) -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host ("⚠️ Preflight feilet: {0}" -f $_.Exception.Message) -ForegroundColor Red
+}
+
+# --- 8) Kjør for hver aktivitet ---
+$out = "_debug"; if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
+
+foreach ($id in $Ids) {
+    try {
+        $act     = Get-StravaActivity $id
+        $streams = Get-StravaStreams  $id
+
+        $payload = if ($UseTestWeather) {
+            Build-SessionPayload $streams $Cda $Crr $Wkg $true $TestWeather
+        } else {
+            Build-SessionPayload $streams $Cda $Crr $Wkg $false $null
+        }
+
+        # lagre payload for revisjon
+        ($payload | ConvertTo-Json -Depth 12) | Set-Content (Join-Path $out "session_$id.json") -Encoding utf8
+
+        if ($payload.ContainsKey("weather")) {
+            $w=$payload.weather
+            Write-Host ("[WX] payload weather → T={0}°C P={1}hPa wind_ms={2} dir={3}°" -f $w.air_temp_c,$w.air_pressure_hpa,$w.wind_ms,$w.wind_dir_deg) -ForegroundColor Cyan
+        } else {
+            Write-Host "[WX] payload weather → <none>" -ForegroundColor DarkCyan
+        }
+
+        $res = Analyze-Session $payload
+        $m   = $res.metrics
+
+        $P=[double]$m.precision_watt
+        $D=[double]$m.drag_watt
+        $R=[double]$m.rolling_watt
+        $avg=[double]$act.average_watts
+        $dev=$act.device_watts
+
+        $diff=$null; $pct=$null
+        if ($avg -gt 0) { $diff=$P-$avg; $pct=100.0*$diff/$avg }
+
+        $dragPct=($(if($P){100*$D/$P}else{0}))
+        $rollPct=($(if($P){100*$R/$P}else{0}))
+        $ratioTxt = if ($pct -ne $null) {
+            ("Δ={0:+0.0} W ({1:+0.0} %) vs Strava{2}" -f $diff,$pct,($(if($dev){" (device)"}else{" (est)"})))
+        } else { "Strava avg_watts n/a" }
+
+        "{0} | src={1} uf={2} wa={3} | P={4:N1} D={5:N1} ({6,5:N1} %) R={7:N1} ({8,5:N1} %) | {9} | Profile: CdA={10}, Crr={11}, W={12}" -f `
+            $id,$res.source,$res.debug.used_fallback,$res.weather_applied,`
+            $P,$D,$dragPct,$R,$rollPct,$ratioTxt,$Cda,$Crr,$Wkg
+
+    } catch {
+        "FAIL $id → $($_.Exception.Message)"
+    }
+}
+
+"=== Kjøring ferdig ==="

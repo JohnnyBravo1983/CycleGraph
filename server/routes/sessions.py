@@ -249,7 +249,7 @@ async def debug_rb(request: Request):
 async def analyze_session(
     sid: str,
     request: Request,
-    no_weather: bool = Query(False),  # beholdt for signatur-compat (ikke brukt i trinn 3)
+    no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
     debug: int = Query(0),
 ):
@@ -270,7 +270,8 @@ async def analyze_session(
 
     profile_scrubbed = _scrub_profile(profile_in)
 
-    # Estimat-konfig (3. argument) – IKKE vær
+    # --- Estimat + Weather (tredje-argument) ---
+    # 1) bygg estimat_cfg
     estimat_cfg: Dict[str, Any] = {}
     if force_recompute:
         estimat_cfg["force"] = True
@@ -279,7 +280,19 @@ async def analyze_session(
     elif isinstance(body.get("estimate"), dict):
         estimat_cfg.update(body["estimate"])
 
-    # --- (VALGFRITT MEN ANBEFALT) MINIMAL NORMALISERING AV SAMPLES ---
+    # 2) trekk ut weather fra body, filtrer til kjernenixler
+    weather_in = {}
+    if not no_weather and isinstance(body.get("weather"), dict):
+        w = body["weather"]
+        for k in ("wind_ms", "wind_dir_deg", "air_temp_c", "air_pressure_hpa"):
+            if k in w and w[k] is not None:
+                weather_in[k] = w[k]
+
+    # 3) third = estimat + weather (rs_power_json vil splitte selv)
+    third = dict(estimat_cfg)
+    third.update(weather_in)
+
+    # --- (VALGFRITT) NORMALISERING AV SAMPLES ---
     def _coerce_f(x):
         try:
             return float(x)
@@ -291,15 +304,12 @@ async def analyze_session(
         if not isinstance(s, dict):
             continue
         t = _coerce_f(s.get("t", 0.0))
-        v_ms = s.get("v_ms")
-        if v_ms is None:
-            v_ms = s.get("v_mps", s.get("v"))
+        v_ms = s.get("v_ms", s.get("v_mps", s.get("v")))
         v_ms = _coerce_f(v_ms)
         alt = _coerce_f(s.get("altitude_m", s.get("alt")))
         g = s.get("grade", s.get("slope"))
         try:
-            g = float(g)
-            has_g = True
+            g = float(g); has_g = True
         except Exception:
             has_g = False
         out_s = {"t": t, "v_ms": v_ms, "altitude_m": alt}
@@ -315,16 +325,13 @@ async def analyze_session(
         except Exception:
             pass
         mapped.append(out_s)
-    # --- SLUTT NORMALISERING ---
 
     # ---------- HARD RUST SHORT-CIRCUIT ----------
     if rs_power_json is not None:
-        # Kall adapter – NO-FALLBACK ved feil i debugfasen
         try:
-            # NB: IKKE send weather som 3. arg i Trinn 3
-            r = rs_power_json(mapped, profile_scrubbed, estimat_cfg or {})
+            # ✅ nå sender vi BOTH estimat og weather i tredje-argumentet
+            r = rs_power_json(mapped, profile_scrubbed, third)
         except Exception as e:
-            # 🚫 Trinn 3 debug: IKKE gå til fallback; returnér rust_error
             print(f"[SVR] [RUST] exception (no-fallback mode): {e!r}", file=sys.stderr, flush=True)
             return {
                 "source": "rust_error",
@@ -338,15 +345,13 @@ async def analyze_session(
                 },
             }
 
-        # Parse adapter-output til dict, ellers returner rust_error
         resp: Dict[str, Any] = {}
         if isinstance(r, dict):
-            resp = r  # type: ignore[assignment]
+            resp = r
         else:
             try:
                 resp = json.loads(r) if isinstance(r, (str, bytes, bytearray)) else {}
             except Exception as e:
-                # 🚫 Trinn 3 debug: IKKE falle til fallback ved JSON-feil – returnér årsak
                 print(f"[SVR] [RUST] json.loads failed (no-fallback): {e!r}", file=sys.stderr, flush=True)
                 return {
                     "source": "rust_error",
@@ -362,7 +367,7 @@ async def analyze_session(
                 }
 
         if isinstance(resp, dict):
-            # Pakk flat → metrics (belte & bukseseler), men ikke overskriv tall
+            # Pakk flat → metrics hvis nødvendig
             if "metrics" not in resp:
                 keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
                 if any(k in resp for k in keys):
@@ -371,71 +376,51 @@ async def analyze_session(
                         mtmp.setdefault("profile_used", resp["profile_used"])
                     resp["metrics"] = mtmp
 
-            # Sett defaults uten å overstyre verdier fra Rust
             resp.setdefault("source", "rust_1arg")
-            resp.setdefault("weather_applied", False)
+            # 🔁 Ikke hardkod weather_applied=False – sett ut fra om weather ble sendt inn
+            if "weather_applied" not in resp:
+                resp["weather_applied"] = bool(weather_in)
 
-            # TEST-KRAV: metrics.profile_used == innsendt profil (rå inn-profil)
             m = resp.setdefault("metrics", {})
             m.setdefault("profile_used", dict(profile_in))
             m.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
-            # Sanity for Trinn 3: total_watt = precision_watt hvis ikke satt
             m.setdefault("total_watt", m.get("precision_watt", 0.0))
 
-            # Debug-oppdateringer
             dbg = resp.setdefault("debug", {})
             dbg.setdefault("reason", "ok")
             dbg["force_recompute"] = bool(force_recompute)
             dbg["persist_ignored"] = bool(force_recompute)
             dbg["ignored_persist"] = bool(force_recompute)
-            # Patch: eksplisitt no-fallback og weather_source
             dbg["used_fallback"] = False
             if not dbg.get("weather_source"):
-                dbg["weather_source"] = "neutral"
+                dbg["weather_source"] = "payload" if weather_in else "neutral"
             if force_recompute:
                 dbg["estimat_cfg_used"] = dict(estimat_cfg)
 
-            # Vurder om vi faktisk har metrics
             rust_has_metrics = isinstance(m, dict) and any(
                 k in m for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
             )
-
             if rust_has_metrics:
-                # (5) Sett kilde og flagg eksplisitt per gren
-                resp["source"] = "rust_1arg"
-                resp["weather_applied"] = False
-                # Debug: sett eksplisitt og rydd opp ev. blanke verdier
-                dbg = resp.setdefault("debug", {})
-                dbg["used_fallback"] = False
-                if not dbg.get("weather_source"):
-                    dbg["weather_source"] = "neutral"
-                dbg.setdefault("reason", "ok")
-                # Sanity for Trinn 3: total_watt = precision_watt
-                m.setdefault("total_watt", m.get("precision_watt", 0.0))
-                final = _ensure_contract_shape(resp)
-                return final
-            else:
-                # 🚫 Trinn 3 debug: IKKE falle videre; returnér årsak
-                print("[SVR] [RUST] missing/invalid metrics (no-fallback)", file=sys.stderr, flush=True)
-                return {
-                    "source": "rust_error",
-                    "weather_applied": False,
-                    "metrics": {},
-                    "debug": {
-                        "reason": "no-metrics-from-rust",
-                        "used_fallback": False,
-                        "weather_source": "neutral",
-                        "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
-                        "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
-                    },
-                }
+                return _ensure_contract_shape(resp)
 
-    # ---------- PURE FALLBACK_PY (minimal) ----------
-    # Bruk rå innsendt profil i metrics.profile_used gjennom helperen
+            print("[SVR] [RUST] missing/invalid metrics (no-fallback)", file=sys.stderr, flush=True)
+            return {
+                "source": "rust_error",
+                "weather_applied": False,
+                "metrics": {},
+                "debug": {
+                    "reason": "no-metrics-from-rust",
+                    "used_fallback": False,
+                    "weather_source": "payload" if weather_in else "neutral",
+                    "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
+                    "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
+                },
+            }
+
+    # ---------- PURE FALLBACK_PY ----------
     profile_used = dict((body or {}).get("profile") or {})
     weather_applied = False
 
-    # Kun benyttes ved faktisk Rust-feil/ugyldig output – justert signatur
     fallback_metrics = _fallback_metrics(
         mapped,
         profile_used,
@@ -456,7 +441,6 @@ async def analyze_session(
             "used_fallback": True,
             "weather_source": "neutral",
         },
-        # speil innsendt profil eksplisitt (i tillegg til speil via ensure)
         "profile_used": profile_used,
         "sid": sid,
     }

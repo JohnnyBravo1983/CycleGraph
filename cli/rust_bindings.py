@@ -29,6 +29,37 @@ def _coerce_jsonish(x: Any) -> Any:
             return x
     return x
 
+def _ensure_json_str(x: Any) -> str:
+    """Sørg for JSON-streng til Rust (tåler dict/list/bytes/str)."""
+    if isinstance(x, (dict, list)):
+        return json.dumps(x, separators=(",", ":"))
+    if isinstance(x, (bytes, bytearray)):
+        try:
+            return x.decode("utf-8")
+        except Exception:
+            return x.decode(errors="ignore")
+    if isinstance(x, str):
+        return x
+    return json.dumps(x)
+
+
+# --- splitt third i weather- og estimat-deler ------------------------------
+_WEATHER_KEYS = {"wind_ms", "wind_dir_deg", "air_temp_c", "air_pressure_hpa"}
+
+def _split_third(third_in: Any):
+    """
+    Tar 'third' (kan være dict/JSON-str) og deler i:
+      weather: {wind_ms, wind_dir_deg, air_temp_c, air_pressure_hpa}
+      estimat: resten (f.eks. force, debug-flagg)
+    """
+    t = _coerce_jsonish(third_in)
+    if not isinstance(t, dict):
+        return {}, {}
+
+    weather = {k: t[k] for k in list(t.keys()) if k in _WEATHER_KEYS and t[k] is not None}
+    estimat = {k: v for k, v in t.items() if k not in _WEATHER_KEYS}
+    return weather, estimat
+
 
 # ---------------------------------------------------------------------------
 # Kalibrering (Rust eller fallback)
@@ -112,12 +143,12 @@ def calibrate_session_dict(
 
 
 # ---------------------------------------------------------------------------
-# Compute-adapter (ren OBJECT + fallback TRIPLE)
+# Compute-adapter (ren OBJECT + fallback V3)
 # ---------------------------------------------------------------------------
 def _call_rust_compute(payload: Dict[str, Any]) -> str:
     """
     Serialiserer payload, dumper den til en tempfil med SHA i navnet,
-    logger fingerprint (til stderr), og kaller 1-arg-exporten.
+    logger fingerprint (til STDERR), og kaller 1-arg-exporten.
     """
     s = json.dumps(payload)
     sha = hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -129,10 +160,21 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
     except Exception:
         tmp = "<mem>"
 
-    # Fingerprint til STDERR → behold ren JSON på STDOUT
+    # Fingerprint til STDERR → ryddig separasjon fra adapter-retur
     try:
         keys = list(payload.keys())
-        print(f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={keys} FILE={tmp}", file=sys.stderr)
+        print(f"[RB] PAYLOAD SHA256={sha} LEN={len(s)} KEYS={keys} FILE={tmp}", file=sys.stderr, flush=True)
+        if "weather" in payload:
+            w = payload["weather"]
+            print(
+                "[RB] WEATHER OUT → "
+                f"T={w.get('air_temp_c')}°C P={w.get('air_pressure_hpa')}hPa "
+                f"wind_ms={w.get('wind_ms')} dir={w.get('wind_dir_deg')}°",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            print("[RB] WEATHER OUT → <none>", file=sys.stderr, flush=True)
     except Exception:
         pass
 
@@ -149,38 +191,41 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ROBUST ADAPTER: OBJECT først (ren, alltid estimat), fallback til TRIPLE
+# ROBUST ADAPTER: OBJECT først (ren, alltid estimat), flatten weather → Rust
 # ---------------------------------------------------------------------------
-def rs_power_json(samples, profile, third=None) -> str:
+def rs_power_json(samples, profile, third) -> str:
     """
-    Backcompat for gamle 3-args kall (samples, profile, estimat).
-    Denne ADAPTEREN sender alltid en ren OBJECT med 'estimat' (minst {}).
-    'weather' sendes aldri i denne stien.
-    Ved parse-feil i Rust (ValueError/parse error), faller vi tilbake til TRIPLE.
+    Pakk JSON til Rust:
+      {
+        "samples": [...],
+        "profile": {...},
+        "weather": {...?},   # <-- VIKTIG: egen toppnøkkel
+        "estimat": {...?}
+      }
     """
-    samples = _coerce_jsonish(samples)
-    profile = _coerce_jsonish(profile)
-    third   = _coerce_jsonish(third)
+    if _RUST_1ARG is None and _RUST_V3 is None:
+        raise RuntimeError("Rust core adapter not available")
 
-    # Alltid ha med estimat (minst {})
-    payload: Dict[str, Any] = {
-        "samples": samples,
-        "profile": profile,
-        "estimat": third if isinstance(third, dict) else {},
-    }
+    sam = _coerce_jsonish(samples)
+    pro = _coerce_jsonish(profile)
 
-    try:
-        # Primær: 1-arg OBJECT
-        return _call_rust_compute(payload)
-    except Exception as e_obj:
-        # Fallback: TRIPLE (legacy)
+    # Del opp third i vær + estimat
+    weather, estimat = _split_third(third)
+
+    # Bygg payload
+    payload: Dict[str, Any] = {"samples": sam, "profile": pro}
+    if weather:
+        # Koercer flyt-typer forsiktig
         try:
-            tri = [samples, profile, payload["estimat"]]
-            s = json.dumps(tri)
-            if _RUST_1ARG is not None:
-                return _RUST_1ARG(s)
-            if _RUST_V3 is not None:
-                return _RUST_V3(s)
-            raise RuntimeError("Ingen Rust-export tilgjengelig i fallback (TRIPLE).")
-        except Exception as e_tri:
-            raise ValueError(f"adapter OBJECT->TRIPLE failed: obj={e_obj!r}; tri={e_tri!r}")
+            if "wind_ms" in weather:          weather["wind_ms"] = float(weather["wind_ms"])
+            if "wind_dir_deg" in weather:     weather["wind_dir_deg"] = float(weather["wind_dir_deg"])
+            if "air_temp_c" in weather:       weather["air_temp_c"] = float(weather["air_temp_c"])
+            if "air_pressure_hpa" in weather: weather["air_pressure_hpa"] = float(weather["air_pressure_hpa"])
+        except Exception:
+            pass
+        payload["weather"] = weather
+    if estimat:
+        payload["estimat"] = estimat
+
+    # Kall Rust (med tydelig RB-logging)
+    return _call_rust_compute(payload)
