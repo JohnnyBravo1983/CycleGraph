@@ -5,7 +5,10 @@ from cli.profile_binding import load_user_profile, compute_profile_version, bind
 import json
 import sys
 import traceback
-from typing import Any, Dict
+import hashlib
+import math
+import time
+from typing import Any, Dict, Tuple, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
@@ -23,6 +26,9 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 G = 9.80665
 RHO_DEFAULT = 1.225  # enkel fallback-rho
+
+# --- WEATHER konfig ---
+REDUCE_10M_TO_2M = 0.75  # konservativ nedskalering 10 m → 2 m (landevei)
 
 
 # ----------------- HELPERE (kontrakt + nominelle metrics) -----------------
@@ -166,6 +172,114 @@ def _t6_calib_csv_append(sid, n, calibrated, status, mae, mean_pred, mean_dev):
             f.write(f"{sid},{n},{calibrated},{status},{'' if mae is None else mae},{'' if mean_pred is None else mean_pred},{'' if mean_dev is None else mean_dev}\n")
     except Exception:
         pass
+
+# --- Vær-hjelpere ---
+def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+    lat_sum = lon_sum = 0.0
+    n_ll = 0
+    t_abs = []
+
+    for s in samples or []:
+        lat = s.get("lat_deg"); lon = s.get("lon_deg")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            lat_sum += float(lat); lon_sum += float(lon); n_ll += 1
+        ta = s.get("t_abs")
+        if isinstance(ta, (int, float)):
+            t_abs.append(float(ta))
+
+    center_lat = (lat_sum / n_ll) if n_ll > 0 else None
+    center_lon = (lon_sum / n_ll) if n_ll > 0 else None
+
+    ts_hour = None
+    if t_abs:
+        mid = t_abs[len(t_abs)//2]
+        ts_hour = int(round(mid / 3600.0)) * 3600
+
+    return center_lat, center_lon, ts_hour
+
+def _iso_hour_from_unix(ts_hour: int) -> str:
+    # UNIX → "YYYY-MM-DDTHH:00"
+    import datetime as _dt
+    return _dt.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
+
+def _unix_from_iso_hour(s: str) -> int:
+    import datetime as _dt
+    return int(_dt.datetime.strptime(s, "%Y-%m-%dT%H:00").replace(tzinfo=_dt.timezone.utc).timestamp())
+
+async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Optional[Dict[str, float]]:
+    """
+    Hent timesoppløst vær fra Open-Meteo i m/s (10 m), °C, hPa.
+    Returnerer dict med felt klare for fysikkmotoren (etter skalering til 2 m).
+    """
+    import aiohttp
+    # Vi låser til m/s for å unngå enhetsfeil.
+    # Bruker 'past_days' bredt nok til å dekke historiske økter rundt ts_hour.
+    base = (
+        "https://archive-api.open-meteo.com/v1/era5"
+        "?latitude={lat}&longitude={lon}"
+        "&hourly=temperature_2m,pressure_msl,windspeed_10m,winddirection_10m"
+        "&windspeed_unit=ms"
+        "&timezone=UTC"
+        "&past_days=30"
+    ).format(lat=lat, lon=lon)
+
+    # Vi trenger bare én time (ts_hour); filterer client-side på første timepost
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(base, timeout=12) as resp:
+                if resp.status != 200:
+                    print(f"[WX] open-meteo HTTP {resp.status}")
+                    return None
+                payload = await resp.json()
+
+        hrs = payload.get("hourly") or {}
+        times = hrs.get("time") or []
+        t2m   = hrs.get("temperature_2m") or []
+        pmsl  = hrs.get("pressure_msl") or []
+        w10   = hrs.get("windspeed_10m") or []      # m/s (10 m)
+        wdir  = hrs.get("winddirection_10m") or []  # deg (fra)
+
+        if not (times and t2m and pmsl and w10 and wdir):
+            print("[WX] open-meteo payload missing fields")
+            return None
+
+        # Finn index for ønsket UTC-time (ts_hour er UNIX sekunder avrundet time)
+        wanted_iso = _iso_hour_from_unix(ts_hour)  # f.eks. "2025-11-09T14:00"
+        try:
+            idx = times.index(wanted_iso)
+        except ValueError:
+            # Fallback: nærmeste time
+            idx = min(range(len(times)), key=lambda i: abs(_unix_from_iso_hour(times[i]) - ts_hour))
+
+        # Les verdier
+        t_c    = float(t2m[idx])
+        p_hpa  = float(pmsl[idx])
+        w10_ms = float(w10[idx])     # m/s @10 m
+        w_deg  = float(wdir[idx])    # fra-retning
+
+        # Skaler 10 m → 2 m
+        w2_ms = w10_ms * float(REDUCE_10M_TO_2M)
+
+        return {
+            "air_temp_c":       t_c,
+            "air_pressure_hpa": p_hpa,
+            "wind_ms":          w2_ms,   # endelig m/s (≈2 m)
+            "wind_dir_deg":     w_deg,   # "fra"-retning
+            "meta": {
+                "windspeed_10m_ms": w10_ms,
+                "reduce_factor":    REDUCE_10M_TO_2M,
+                "source":           "open-meteo/era5"
+            }
+        }
+    except Exception as e:
+        print(f"[WX] fetch_open_meteo error: {e}")
+        return None
+
+def _wx_fp(wx: Dict[str, Any]) -> str:
+    try:
+        return hashlib.sha1(json.dumps(wx, sort_keys=True).encode("utf-8")).hexdigest()
+    except Exception:
+        return ""
 
 
 def _nominal_metrics(profile: dict) -> dict:
@@ -394,7 +508,7 @@ async def analyze_session(
 
     profile_scrubbed = _scrub_profile(profile)
 
-    # --- Estimat + Weather (tredje-argument) ---
+    # --- Estimat (tredje-argument) ---
     estimat_cfg: Dict[str, Any] = {}
     if force_recompute:
         estimat_cfg["force"] = True
@@ -403,16 +517,95 @@ async def analyze_session(
     elif isinstance(body.get("estimate"), dict):
         estimat_cfg.update(body["estimate"])
 
-    weather_in = {}
-    if not no_weather and isinstance(body.get("weather"), dict):
-        w = body["weather"]
-        for k in ("wind_ms", "wind_dir_deg", "air_temp_c", "air_pressure_hpa"):
-            if k in w and w[k] is not None:
-                weather_in[k] = w[k]
+    # === WX PATCH START ===
+    # --- WEATHER: finn anker (lat/lon + ts_hour) ---
+    hint = dict((body or {}).get("weather_hint") or {})
+    center_lat, center_lon, ts_hour = _center_latlon_and_hour_from_samples(samples)
 
-    # third = estimat + weather (rs_power_json vil splitte selv)
+    if center_lat is None: center_lat = hint.get("lat_deg")
+    if center_lon is None: center_lon = hint.get("lon_deg")
+    if ts_hour   is None:  ts_hour   = hint.get("ts_hour")
+
+    wx_used: Optional[Dict[str, float]] = None
+    wx_meta: Dict[str, Any] = {
+        "provider":  "open-meteo/era5",
+        "lat_used":  float(center_lat) if isinstance(center_lat, (int,float)) else None,
+        "lon_used":  float(center_lon) if isinstance(center_lon, (int,float)) else None,
+        "ts_hour":   int(ts_hour) if isinstance(ts_hour, (int,float)) else None,
+        "height":    "10m->2m",
+        "unit_wind": "m/s",
+        "cache_key": None,
+    }
+
+    # Tillat eksplisitt client-vær (dev/test), men ellers hent selv
+    wx_payload = dict((body or {}).get("weather") or {})
+    if wx_payload:
+        w_ms = float(wx_payload.get("wind_ms", 0.0))
+        w_dd = float(wx_payload.get("wind_dir_deg", 0.0))
+        t_c  = float(wx_payload.get("air_temp_c", 0.0))
+        p_h  = float(wx_payload.get("air_pressure_hpa", 0.0))
+        wx_used = {
+            "wind_ms":          w_ms,  # forventet i m/s
+            "wind_dir_deg":     w_dd,  # fra-retning
+            "air_temp_c":       t_c,
+            "air_pressure_hpa": p_h,
+            "dir_is_from":      True,  # <-- NYTT: eksplisitt semantikk
+            "meta": { "injected_client": True, "reduce_factor": None, "windspeed_10m_ms": None }
+        }
+    else:
+        if isinstance(center_lat, (int,float)) and isinstance(center_lon, (int,float)) and isinstance(ts_hour, int):
+            wx_meta["cache_key"] = f"om:{round(center_lat,4)}:{round(center_lon,4)}:{ts_hour}"
+            wx_fetched = await _fetch_open_meteo_hour_ms(float(center_lat), float(center_lon), int(ts_hour))
+            if wx_fetched:
+                wx_used = wx_fetched
+                wx_used["dir_is_from"] = True  # <-- NYTT: eksplisitt semantikk
+
+    # Bygg third med weather hvis tilgjengelig
     third = dict(estimat_cfg)
-    third.update(weather_in)
+    weather_applied = False
+    
+    if wx_used and not no_weather:
+        # Normaliser til kanoniske navn for Rust-bindingen
+        wind_ms_val = float(wx_used.get("wind_ms", 0.0))
+        wind_dir_deg_val = float(wx_used.get("wind_dir_deg", 0.0))
+        air_temp_c_val = float(wx_used.get("air_temp_c", 15.0))
+        air_pressure_hpa_val = float(wx_used.get("air_pressure_hpa", 1013.25))
+        
+        # Oppdater third med kanoniske navn på toppnivå
+        third.update({
+            "wind_ms": wind_ms_val,
+            "wind_dir_deg": wind_dir_deg_val,
+            "air_temp_c": air_temp_c_val,
+            "air_pressure_hpa": air_pressure_hpa_val,
+            "dir_is_from": True
+        })
+        
+        # Behold metadata for serverens observabilitet
+        third["weather_meta"] = wx_meta
+        fp = _wx_fp(wx_used)
+        third["weather_fp"] = fp
+        weather_applied = True
+
+        try:
+            print(
+                f"[WX] hour={wx_meta['ts_hour']} lat={wx_meta['lat_used']:.5f} lon={wx_meta['lon_used']:.5f} "
+                f"T={wx_used['air_temp_c']}°C P={wx_used['air_pressure_hpa']}hPa "
+                f"wind_2m={wx_used['wind_ms']:.2f} m/s from={wx_used['wind_dir_deg']}° "
+                f"(10m={wx_used.get('meta',{}).get('windspeed_10m_ms')} m/s, "
+                f"factor={wx_used.get('meta',{}).get('reduce_factor')}) fp={fp[:8]}"
+            )
+        except Exception:
+            pass
+    else:
+        # IKKE send 0-vær til Rust - fjern eventuelle vær-nøkler
+        for k in ["wind_ms", "wind_dir_deg", "air_temp_c", "air_pressure_hpa", "dir_is_from"]:
+            third.pop(k, None)
+        weather_applied = False
+        if no_weather:
+            print("[WX] weather disabled via no_weather flag")
+        else:
+            print("[WX] no weather available (missing lat/lon/ts_hour or fetch failed)")
+    # === WX PATCH END ===
 
     # --- Enhetsheuristikk på samples (før mapping/Rust) ---
     samples = body.get("samples") or []
@@ -452,6 +645,22 @@ async def analyze_session(
         except Exception:
             pass
         mapped.append(out_s)
+
+    # --- DEBUG PROBE: show what we actually pass to binding ---
+    try:
+        t_keys = sorted(list(third.keys()))
+        wx_nested = third.get("weather") if isinstance(third.get("weather"), dict) else None
+        print(
+            "[SVR→RB] third keys:",
+            t_keys,
+            " wx_nested_keys=",
+            (sorted(wx_nested.keys()) if wx_nested else None),
+            " flat_wx=",
+            {k: third.get(k) for k in ("wind_ms","wind_dir_deg","air_temp_c","air_pressure_hpa","dir_is_from")},
+            flush=True,
+        )
+    except Exception:
+        pass
 
     # ---------- HARD RUST SHORT-CIRCUIT ----------
     if rs_power_json is not None:
@@ -498,6 +707,12 @@ async def analyze_session(
                 pu["profile_version"] = profile_version
                 metrics["profile_used"] = pu
 
+                # --- Legg til weather metadata i metrics ---
+                if weather_applied and wx_used:
+                    metrics["weather_used"] = wx_used
+                    metrics["weather_meta"] = wx_meta
+                    metrics["weather_fp"] = _wx_fp(wx_used)
+
                 # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
                 try:
                     import os  # lokal import
@@ -553,6 +768,7 @@ async def analyze_session(
                     metrics.setdefault("calibration_status", "fallback")
 
                 resp["metrics"] = metrics
+                resp["weather_applied"] = weather_applied
             except Exception:
                 pass
         else:
@@ -580,6 +796,12 @@ async def analyze_session(
                 pu["profile_version"] = profile_version
                 metrics["profile_used"] = pu
 
+                # --- Legg til weather metadata i metrics ---
+                if weather_applied and wx_used:
+                    metrics["weather_used"] = wx_used
+                    metrics["weather_meta"] = wx_meta
+                    metrics["weather_fp"] = _wx_fp(wx_used)
+
                 # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
                 try:
                     import os  # lokal import
@@ -635,6 +857,7 @@ async def analyze_session(
                     metrics.setdefault("calibration_status", "fallback")
 
                 resp["metrics"] = metrics
+                resp["weather_applied"] = weather_applied
             except Exception as e:
                 print(f"[SVR] [RUST] json.loads failed (no-fallback): {e!r}", file=sys.stderr, flush=True)
                 return {
@@ -662,15 +885,21 @@ async def analyze_session(
 
             resp.setdefault("source", "rust_1arg")
             if "weather_applied" not in resp:
-                resp["weather_applied"] = bool(weather_in)
+                resp["weather_applied"] = weather_applied
 
             m = resp.setdefault("metrics", {})
             pu = m.setdefault("profile_used", dict(profile))
             if isinstance(pu, dict):
                 pu.setdefault("profile_version", profile_version)
                 m["profile_used"] = pu
-            m.setdefault("weather_applied", bool(resp.get("weather_applied", False)))
+            m.setdefault("weather_applied", weather_applied)
             m.setdefault("total_watt", m.get("precision_watt", 0.0))
+
+            # Legg til weather metadata hvis ikke allerede satt
+            if weather_applied and wx_used and "weather_used" not in m:
+                m["weather_used"] = wx_used
+                m["weather_meta"] = wx_meta
+                m["weather_fp"] = _wx_fp(wx_used)
 
             dbg = resp.setdefault("debug", {})
             dbg.setdefault("reason", "ok")
@@ -679,7 +908,7 @@ async def analyze_session(
             dbg["ignored_persist"] = bool(force_recompute)
             dbg["used_fallback"] = False
             if not dbg.get("weather_source"):
-                dbg["weather_source"] = "payload" if weather_in else "neutral"
+                dbg["weather_source"] = "historical" if weather_applied else "neutral"
             if force_recompute:
                 dbg["estimat_cfg_used"] = dict(estimat_cfg)
 
@@ -687,7 +916,60 @@ async def analyze_session(
                 k in m for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
             )
             if rust_has_metrics:
-                return _ensure_contract_shape(resp)
+                result = _ensure_contract_shape(resp)
+                
+                # --- Trinn 7: Observability Logging ---
+                def _write_observability(resp: dict) -> None:
+                    """Intern Trinn7-helper for JSON+CSV observability logging."""
+                    import os, csv, json, datetime
+                    os.makedirs("logs", exist_ok=True)
+                    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+                    # Full JSON-dump (én per run)
+                    jpath = f"logs/trinn7-observability_{ts}.json"
+                    try:
+                        with open(jpath, "w", encoding="utf-8") as jf:
+                            json.dump(resp, jf, ensure_ascii=False, indent=2)
+                    except Exception as e_json:
+                        print(f"[SVR][OBS] JSON-write failed: {e_json!r}", flush=True)
+
+                    # CSV-record med flate nøkkelfelter
+                    m = dict(resp.get("metrics") or {})
+                    pu = dict((m.get("profile_used") or {})) if isinstance(m, dict) else {}
+                    dbg = dict(resp.get("debug") or {})
+                    row = {
+                        "precision_watt": m.get("precision_watt"),
+                        "total_watt": m.get("total_watt"),
+                        "weather_applied": resp.get("weather_applied"),
+                        "crank_eff_pct": pu.get("crank_eff_pct") or (resp.get("profile_used") or {}).get("crank_eff_pct"),
+                        "calibration_mae": m.get("calibration_mae"),
+                        "calibrated": m.get("calibrated"),
+                        "calibration_status": m.get("calibration_status"),
+                        "source": resp.get("source"),
+                        "repr_kind": resp.get("repr_kind"),
+                        "weather_source": dbg.get("weather_source"),
+                        "profile_version": pu.get("profile_version"),
+                        "debug_reason": dbg.get("reason"),
+                    }
+
+                    csv_path = "logs/trinn7-observability.csv"
+                    try:
+                        write_header = not os.path.exists(csv_path)
+                        with open(csv_path, "a", newline="", encoding="utf-8") as cf:
+                            w = csv.DictWriter(cf, fieldnames=list(row.keys()))
+                            if write_header:
+                                w.writeheader()
+                            w.writerow(row)
+                        print(f"[SVR][OBS] wrote {csv_path} + {jpath}", flush=True)
+                    except Exception as e_csv:
+                        print(f"[SVR][OBS] CSV-write failed: {e_csv!r}", flush=True)
+
+                try:
+                    _write_observability(result)
+                except Exception as e:
+                    print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
+
+                return result
 
             print("[SVR] [RUST] missing/invalid metrics (no-fallback)", file=sys.stderr, flush=True)
             return {
@@ -697,7 +979,7 @@ async def analyze_session(
                 "debug": {
                     "reason": "no-metrics-from-rust",
                     "used_fallback": False,
-                    "weather_source": "payload" if weather_in else "neutral",
+                    "weather_source": "historical" if weather_applied else "neutral",
                     "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
                     "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
                 },
@@ -706,7 +988,6 @@ async def analyze_session(
     # ---------- PURE FALLBACK_PY ----------
     profile_used = dict(profile)
     profile_used["profile_version"] = profile_version
-    weather_applied = False
 
     fallback_metrics = _fallback_metrics(
         mapped,
@@ -715,9 +996,15 @@ async def analyze_session(
         profile_used=profile_used,
     )
 
+    # Legg til weather metadata i fallback også
+    if weather_applied and wx_used:
+        fallback_metrics["weather_used"] = wx_used
+        fallback_metrics["weather_meta"] = wx_meta
+        fallback_metrics["weather_fp"] = _wx_fp(wx_used)
+
     resp = {
         "source": "fallback_py",
-        "weather_applied": False,
+        "weather_applied": weather_applied,
         "metrics": fallback_metrics,
         "debug": {
             "reason": "fallback-path",
@@ -726,11 +1013,10 @@ async def analyze_session(
             "persist_ignored": bool(force_recompute),
             "ignored_persist": bool(force_recompute),
             "used_fallback": True,
-            "weather_source": "neutral",
+            "weather_source": "historical" if weather_applied else "neutral",
         },
         "profile_used": profile_used,
         "sid": sid,
     }
     print("[SVR] [FB] returning fallback_py")
     return _ensure_contract_shape(resp)
-

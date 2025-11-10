@@ -44,12 +44,20 @@ def _ensure_json_str(x: Any) -> str:
 
 
 # --- splitt third i weather- og estimat-deler ------------------------------
-_WEATHER_KEYS = {"wind_ms", "wind_dir_deg", "air_temp_c", "air_pressure_hpa"}
+# Utvidet med 2m-vind og dir_is_from som vi mapper/viderekobler
+_WEATHER_KEYS = {
+    "wind_ms",
+    "wind_2m_ms",        # <— NY
+    "wind_dir_deg",
+    "air_temp_c",
+    "air_pressure_hpa",
+    "dir_is_from",       # <— NY (bool)
+}
 
 def _split_third(third_in: Any):
     """
     Tar 'third' (kan være dict/JSON-str) og deler i:
-      weather: {wind_ms, wind_dir_deg, air_temp_c, air_pressure_hpa}
+      weather: {wind_ms, wind_2m_ms, wind_dir_deg, air_temp_c, air_pressure_hpa, dir_is_from}
       estimat: resten (f.eks. force, debug-flagg)
     """
     t = _coerce_jsonish(third_in)
@@ -169,7 +177,7 @@ def _call_rust_compute(payload: Dict[str, Any]) -> str:
             print(
                 "[RB] WEATHER OUT → "
                 f"T={w.get('air_temp_c')}°C P={w.get('air_pressure_hpa')}hPa "
-                f"wind_ms={w.get('wind_ms')} dir={w.get('wind_dir_deg')}°",
+                f"wind_ms={w.get('wind_ms')} dir={w.get('wind_dir_deg')}° from={w.get('dir_is_from')}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -212,18 +220,55 @@ def rs_power_json(samples, profile, third) -> str:
     # Del opp third i vær + estimat
     weather, estimat = _split_third(third)
 
-    # Bygg payload
+    # Bygg payload tidlig, legg til weather/estimat under
     payload: Dict[str, Any] = {"samples": sam, "profile": pro}
+
+    # -------------------------------------------------------------------
+    # PATCH: Normaliser vind til “TO”-retning (+ alias/koerser)
+    # -------------------------------------------------------------------
     if weather:
-        # Koercer flyt-typer forsiktig
+        # 1) Map mulige alias -> kanoniske nøkler
         try:
-            if "wind_ms" in weather:          weather["wind_ms"] = float(weather["wind_ms"])
-            if "wind_dir_deg" in weather:     weather["wind_dir_deg"] = float(weather["wind_dir_deg"])
-            if "air_temp_c" in weather:       weather["air_temp_c"] = float(weather["air_temp_c"])
-            if "air_pressure_hpa" in weather: weather["air_pressure_hpa"] = float(weather["air_pressure_hpa"])
+            # vindhastighet
+            if "wind_ms" not in weather and "wind_2m_ms" in weather:
+                weather["wind_ms"] = weather.get("wind_2m_ms")
+            # lufttrykk alias
+            if "air_pressure_hpa" not in weather and "pressure_hpa" in weather:
+                weather["air_pressure_hpa"] = weather.get("pressure_hpa")
         except Exception:
             pass
+
+        # 2) Koercer typer forsiktig
+        try:
+            if "wind_ms" in weather and weather["wind_ms"] is not None:
+                weather["wind_ms"] = float(weather["wind_ms"])
+            if "wind_dir_deg" in weather and weather["wind_dir_deg"] is not None:
+                weather["wind_dir_deg"] = float(weather["wind_dir_deg"])
+            if "air_temp_c" in weather and weather["air_temp_c"] is not None:
+                weather["air_temp_c"] = float(weather["air_temp_c"])
+            if "air_pressure_hpa" in weather and weather["air_pressure_hpa"] is not None:
+                weather["air_pressure_hpa"] = float(weather["air_pressure_hpa"])
+        except Exception:
+            pass
+
+        # 3) “FROM” (meteorologisk) -> “TO” (vektor) normalisering
+        #    Default: dir_is_from=True når ikke oppgitt
+        try:
+            dir_is_from = bool(weather.get("dir_is_from", True))
+        except Exception:
+            dir_is_from = True
+
+        try:
+            wd = float(weather.get("wind_dir_deg", 0.0))
+            wd = wd % 360.0
+            if dir_is_from:
+                wd = (wd + 180.0) % 360.0
+            weather["wind_dir_deg"] = wd
+        except Exception:
+            pass
+
         payload["weather"] = weather
+
     if estimat:
         payload["estimat"] = estimat
 

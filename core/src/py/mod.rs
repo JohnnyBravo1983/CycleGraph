@@ -22,6 +22,7 @@ use serde_json::{self as json, Map as JsonMap, Value};
 use serde_path_to_error as spte;
 
 use crate::Weather as CoreWeather;
+use crate::Sample; // Added import for Sample type
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Konstanter for fysikk
@@ -264,11 +265,14 @@ fn mean(xs: &[f64]) -> f64 {
     if xs.is_empty() { 0.0 } else { xs.iter().copied().sum::<f64>() / (xs.len() as f64) }
 }
 
+/// Fallback/beriking: regn skalarer når core ikke leverer alt.
+/// Nå med vær slik at drag bruker relativ luftfart (v_air^3) basert på cosinus-loven.
 fn compute_scalar_metrics(
-    samples: &[crate::Sample],
+    samples: &Vec<crate::Sample>,
     profile: &ProfileInTol,
+    weather: &CoreWeather,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>, f64, f64, f64, f64) {
-    let cda = profile.cda.unwrap_or(0.25);
+    let cda = profile.cda.unwrap_or(0.30);
     let crr = profile.crr.unwrap_or(0.004);
     let weight = profile.weight_kg.unwrap_or(85.0);
     let rho = RHO_DEFAULT;
@@ -278,17 +282,37 @@ fn compute_scalar_metrics(
     let mut w_model = Vec::with_capacity(samples.len());
     let mut device_watts = Vec::new();
 
+    // ───────────────────────────────────────────────
+    // Vindretning er "fra"; konverter til "til"
+    // slik at 0° (vind fra nord) betyr luft blåser mot sør.
+    // ───────────────────────────────────────────────
+    let wind_ms = weather.wind_ms.max(0.0);
+    let wind_to_deg = weather.wind_dir_deg % 360.0;
+    
     for s in samples {
         let v = s.v_ms.max(0.0);
-        let w_d = 0.5 * rho * cda * v * v * v;
+
+        // Relativ vinkel mellom sykkel-heading og vindens "til"-retning
+        let delta_rad = ((wind_to_deg + 180.0) - s.heading_deg).to_radians();
+
+
+        // Luftrelativ fart (cosinusloven for vektorene)
+        let v_air = (v.powi(2) + wind_ms.powi(2) - 2.0 * v * wind_ms * delta_rad.cos()).sqrt();
+
+        // Aerodynamisk drag ~ v_air^3
+        let w_d = 0.5 * rho * cda * v_air.powi(3);
+
+        // Rullemostand (uavhengig av vind)
         let w_r = crr * weight * G * v;
+
+        // Modellert effekt uten gravitasjon
         let w_m = w_d + w_r;
 
         w_drag.push(w_d);
         w_roll.push(w_r);
         w_model.push(w_m);
 
-        // Bruk målt effekt om tilgjengelig
+        // Målt effekt, hvis tilgjengelig
         if let Some(w) = s.device_watts {
             if w.is_finite() {
                 device_watts.push(w);
@@ -299,20 +323,27 @@ fn compute_scalar_metrics(
     let drag_watt = mean(&w_drag);
     let rolling_watt = mean(&w_roll);
     let precision_watt = drag_watt + rolling_watt;
-    let total_watt = if !device_watts.is_empty() { mean(&device_watts) } else { precision_watt };
+    let total_watt = if !device_watts.is_empty() {
+        mean(&device_watts)
+    } else {
+        precision_watt
+    };
 
     (w_drag, w_roll, w_model, drag_watt, rolling_watt, precision_watt, total_watt)
 }
 
+
 fn enrich_metrics_on_object(
     mut resp: serde_json::Value,
-    samples: &[crate::Sample],
+    samples: &Vec<crate::Sample>,
     profile: &ProfileInTol,
+    repr_kind: &str,
+    weather: &CoreWeather,
 ) -> serde_json::Value {
     use serde_json::{json, Value};
 
     // Time-weighted mean fra samples[].t
-    fn tw_mean(power: &[f64], samples: &[crate::Sample]) -> Option<f64> {
+    fn tw_mean(power: &[f64], samples: &Vec<crate::Sample>) -> Option<f64> {
         if power.is_empty() || samples.is_empty() || power.len() != samples.len() {
             return None;
         }
@@ -330,13 +361,20 @@ fn enrich_metrics_on_object(
         if tsum > 0.0 { Some(sum / tsum) } else { None }
     }
 
-    // 1) Skalarer (fallback når core-power mangler)
+    // 1) Skalarer (fallback når core-power mangler).
+    // Bruk faktisk vær om repr_kind tilsier objekt-vær, ellers nøytral.
+    let neutral = neutral_weather();
+    let wx_for_scalar = if repr_kind == "object" {
+        weather
+    } else {
+        &neutral
+    };
     let (_w_drag, _w_roll, _w_model, drag_watt, rolling_watt, precision_watt_fb, total_watt_fb)
-        = compute_scalar_metrics(samples, profile);
+        = compute_scalar_metrics(samples, profile, wx_for_scalar);
 
     // 2) Preferér tidvektet snitt fra core "power"/"watts" hvis tilgjengelig
     let mut precision_watt = precision_watt_fb;
-    let mut total_watt     = total_watt_fb;
+    let mut total_watt = total_watt_fb;
 
     if let Some(obj) = resp.as_object() {
         if let Some(arr) = obj.get("power").or_else(|| obj.get("watts")) {
@@ -484,7 +522,10 @@ fn call_compute_from_json(json_in: &str) -> Result<String, String> {
 
                 // berik OBJECT-svar
                 if let Ok(resp_val) = serde_json::from_str::<serde_json::Value>(&out) {
-                    let enriched = enrich_metrics_on_object(resp_val, &core_samples, &obj.profile, &w);
+                    // Denne grenen bruker objekt-representasjon ("object"). Værvariabelen i dette scope heter `w`.
+                    let repr_kind = "object";
+                    let wx_for_scalar: &CoreWeather = &w;
+                    let enriched = enrich_metrics_on_object(resp_val, &core_samples, &obj.profile, repr_kind, wx_for_scalar);    
                     if let Ok(s) = serde_json::to_string(&enriched) { out = s; }
                 }
 
@@ -558,7 +599,10 @@ fn call_compute_from_json(json_in: &str) -> Result<String, String> {
     if repr_kind == "object" {
         if let Some((core_samples_obj, profile_tol)) = obj_opt {
             if let Ok(resp_val) = serde_json::from_str::<serde_json::Value>(&out) {
-            let enriched = enrich_metrics_on_object(resp_val, &core_samples_obj, &profile_tol, &weather);    
+                // Denne grenen bruker også objekt-representasjon. Her heter værvariabelen `weather`.
+                let repr_kind = "object";
+                let wx_for_scalar: &CoreWeather = &weather;
+                let enriched = enrich_metrics_on_object(resp_val, &core_samples_obj, &profile_tol, repr_kind, wx_for_scalar);   
                 if let Ok(s) = serde_json::to_string(&enriched) { out = s; }
             }
         }
@@ -609,7 +653,6 @@ fn call_compute_power_with_wind_from_json_v3(json_in: &str) -> Result<String, St
 // ──────────────────────────────────────────────────────────────────────────────
 // PyO3-FUNKSJONER — 1-ARG EXPORT (OBJECT → core → enrich → JSON)
 // ──────────────────────────────────────────────────────────────────────────────
-
 #[pyfunction]
 fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult<String> {
     use serde_json::Value as J;
@@ -651,7 +694,18 @@ fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult
         .unwrap_or_else(|_| serde_json::json!({ "debug": { "reason": "decode_error" } }));
 
     // 4) Berik svaret med skalarer, arrays, source/weather_applied
-    let enriched = enrich_metrics_on_object(core_resp_val, &core_samples, &obj.profile, &weather);
+    // Hvis du har et felt i payload som angir representasjon, bruk det her.
+    // Inntil videre default'er vi til "object" for bakoverkompatibilitet.
+    let repr_kind: &str = "object";
+
+    let enriched = enrich_metrics_on_object(
+        core_resp_val,
+        &core_samples,
+        &obj.profile,
+        repr_kind,
+        &weather,
+    );
+
     // 5) Returnér som JSON-streng
     serde_json::to_string(&enriched)
         .map_err(|e| PyValueError::new_err(format!("json encode error: {e}")))

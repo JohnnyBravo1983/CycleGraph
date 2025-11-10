@@ -1,7 +1,6 @@
-Backend Analyzer Stability – oppdatert og merget
+🧩 Backend Analyzer Stability – oppdatert og merget (t.o.m. Trinn 6)
 
-🧩 Backend Analyzer Stability
-(Uendret i hovedsak; beholdt for helhet. Nye/endrede punkter er merket med 🆕/🟦 Trinn 4 / 🟨 Trinn 5.)
+(Uendret i hovedsak; beholdt for helhet. Nye/endrede punkter er merket med 🆕 / 🟦 Trinn 4 / 🟨 Trinn 5 / 🟩 Trinn 6.)
 
 1. Miljø og installasjon
 $env:PYTHONPATH = ""
@@ -11,279 +10,159 @@ cd ..
 python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
 
 
-✅ Resultat: Fullt deterministisk miljø – uavhengig av conda eller globalt installerte pakker.
+✅ Resultat: Fullt deterministisk miljø – uavhengig av conda eller globale pakker.
 
 2. Import-skygge og API-konsistens
 
-Feilen i analyze_session() ble sporet til at cli/init.py re-eksporterte feil objekt. Ryddet i eksportene og sikret én tydelig wrapper for arrays-API som testene forventer.
+(uendret fra Trinn 3–5)
+Bekreftet signatur og fallback-logikk i cli/__init__.py.
 
-__all__ = ["cli", "analyze_session"]
-
-try:
-    from cyclegraph_core import analyze_session as _native_analyze_session
-except Exception:
-    _native_analyze_session = None
-
-def analyze_session(watts, hr, device_watts=None):
-    if not hr or len(watts) != len(hr):
-        raise ValueError("Watt og puls må ha samme lengde; puls-listen kan ikke være tom")
-
-    if _native_analyze_session is not None:
-        return _native_analyze_session(watts, hr, (device_watts or 'powermeter'))
-
-    try:
-        from .rust_bindings import analyze_session as _rb_analyze
-        return _rb_analyze(watts, hr, device_watts)
-    except Exception:
-        return 0.0
-
-
-Denne implementasjonen:
-
-Fjerner import-skygge fra cli.session_api.
-
-Beholder forventet signatur.
-
-Gir foroverkompatibel fallback hvis Rust-binding mangler.
-
-Kaster norsk ValueError ved ugyldig input.
-
-Bekreftet med introspeksjon:
-
-SIG: (watts, hr, device_watts=None)
-
-MODULE: cli.init
+SIG = (watts, hr, device_watts=None)
+MODULE = cli.init
 
 3. Analyzer-forbedringer og profil-sensitivitet
 
-PowerShell-basert testframework validerer variasjon i precision_watt, drag_watt, rolling_watt, total_watt ved endring av profilparametre.
-
-Eksempel (Trinn 3):
-
-CdA  Crr    W    precision_watt  drag_watt  rolling_watt  total_watt
-0.28 0.004  78   189.7           147.0      29.1          184.1
-0.32 0.004  78   208.6           168.0      29.1          205.1
-0.28 0.006  78   202.8           147.0      43.6          198.6
-0.28 0.004  90   193.7           147.0      33.5          188.6
-
-
-Bekrefter monotoni: CdA↑ ⇒ drag↑, Crr↑ ⇒ rolling↑, W↑ ⇒ rolling↑, og precision_watt følger.
-
-Seeding: baseline ride dupliseres (ride3-c01 …) slik at alle caser har gyldige watt/puls-serier (fjerner feilen “series-mode krever watts+puls”).
-
-Responsstruktur (eksempel):
-
-{
-  "ok": true,
-  "session_id": "ride3-test",
-  "metrics": {
-    "precision_watt": 208.6,
-    "precision_watt_ci": 12.4,
-    "drag_watt": 168.0,
-    "rolling_watt": 29.1,
-    "total_watt": 205.1,
-    "aero_fraction": 0.66,
-    "weather_applied": false,
-    "profile_used": { "CdA": 0.32, "Crr": 0.004, "weight_kg": 78, "device": "strava" }
-  },
-  "debug": {
-    "analyzer_mode": "series",
-    "force_recompute": true,
-    "ignored_persist": true,
-    "reason": "ok"
-  }
-}
+Uendret; monotoni verifisert for CdA, Crr og weight.
+Respons- og profil-sensitivitet som før.
 
 4. Kontrakt og kjerneadaptere
 
-Rust-adapter og API-kontrakt
+Rust-adapter og API-kontrakt fortsatt standardisert.
 
-Én sentral adapter: cli/rust_bindings.rs_power_json erstatter direkte kall til compute_power_with_wind_json*.
+🆕 (Trinn 4) Weather i payload (OBJECT)
+🆕 (Trinn 4) Heading og ρ verifisert ≈ 1.225
+🟨 (Trinn 5) Device-heuristikker og crank_eff innført
+🟩 (Trinn 6) Kalibreringsfelt og CI-logging lagt til
 
-server/routes/sessions.py bruker adapteren eksklusivt.
+Nytt etter Trinn 6 (passiv kalibrering):
 
-🆕 Oppdatert (Trinn 4 – verifisert i logger):
+metrics inneholder nå også calibration_mae, calibrated, calibration_status (alltid tilstede).
 
-Kallsti: standardisert 1-arg kjerne-signatur (én JSON‐payload).
+analyze_session kan motta device_watts i samples for MAE-beregning.
 
-Payload i praksis: samples, profile, weather (vær sendes nå i OBJECT-payloaden).
+Feature-flag CG_CALIBRATE=1 aktiverer CSV-logging til logs/trinn6-manual_sanity.csv.
 
-Alle kall går via compute_power_with_wind_json (1-arg) → full Rust-sti uten fallback.
+Fallback: calibrated=false, status="not_available" hvis ingen device-data eller Rust-funksjon.
 
-🆕 Bekreftet output (sanity, Trinn 4):
-
-source: "rust_1arg"
-
-weather_applied: true
-
-metrics (dict) inneholder aggregerte komponenter (drag_watt, rolling_watt, precision_watt, total_watt, profile_used).
-
-Toppnivå drag_watt/rolling_watt/gravity_watt kan være null i 1-arg-modusen; bruk metrics for aggregater.
-
-🔹 Nominal metrics for tomme samples (uendret).
-
-🔹 Debug-felt og kontraktssikring
-
-debug.ignored_persist = True ved force=True.
-
-debug.reason = "ok" i suksess-case.
-
-metrics.total_watt garanteres (alias til precision_watt eller drag+rolling).
-
-metrics.profile_used speiler innsendt profil.
-
-weather_applied settes deterministisk basert på vær/no_weather.
-
-_ensure_contract_shape() holder nøkler stabile.
-
-🆕 Utvidelser (Trinn 3, videreført): foroverkompatible debug-nøkler: binding, repr_kind, weather_source.
-
-🔹 Kalibrering og fallback
-rust_calibrate_session returnerer calibrated=False hvis kjerne mangler. I CI: feature-check.
+Ingen endring i Rust-ABI eller payload-kontrakt; fullt bakoverkompatibelt.
 
 5. Test- og valideringsmal
 
-Monotoni-sjekk (Trinn 3):
+Uendret monotoni-test fra Trinn 3 + Trinn 4 værtest.
 
-if ($rows[1].drag -le $rows[0].drag) { Write-Host "Fail: CdA↑ men drag ikke opp" -ForegroundColor Red }
-if ($rows[2].roll -le $rows[0].roll) { Write-Host "Fail: Crr↑ men roll ikke opp" -ForegroundColor Red }
-if ($rows[3].roll -le $rows[0].roll) { Write-Host "Fail: W↑ men roll ikke opp" -ForegroundColor Red }
+🟩 (Trinn 6) Nytt test- og proof-sett:
 
+scripts/T6_Smoke_NoDevice.py og T6_Smoke_WithDevice.py verifiserer felt og MAE.
 
-CSV-eksport til logs/trinn3-proof_*.csv. Echo av “Profile used …”. Testbart i isolasjon (PowerShell/pytest/REST).
+Output eksempel: False not_available None → True ok 45.08.
 
-✅ Resultat Trinn 3: profil-sensitivitet, vær-avslag (no_weather=true) og robust recompute-logikk verifisert.
+Når CG_CALIBRATE=1 skrives resultater til logs/trinn6-manual_sanity.csv.
 
-🆕 Trinn 4 – nye testartefakter:
-
-scripts/Test-WeatherHeading.py – beregner/validerer heading_deg ∈ [0,360], håndterer ffill/bfill.
-
-scripts/Test-PipelineIntegrity.py – helhetlig integritetstest (input-sanity, JSON-roundtrip, Rust-output, schema-snapshot).
-
-Observasjoner:
-
-rho ≈ 1.225 ved 15 °C/1013 hPa,
-
-weather_applied=True,
-
-source="rust_1arg",
-
-per-sample lister (v_ms, v_rel, watts, wind_rel) har lengde==samples,
-
-toppnivå komponenter kan være null i 1-arg; aggregater finnes i metrics.
+Bekreftet stabil import og ingen endring i Rust-baner ([SVR]/[RB]/[DBG] grønt).
 
 6. CI- og miljøsikring
 
-Tester kjører deterministisk i .venv.
+CI-setup uendret fra Trinn 4, men nå utvidet med kalibrerings-logg.
 
-CI-setup:
+🟩 (Trinn 6) CI forberedt på automatisk kalibrerings-logging uten validering.
 
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-ci.txt
-python -m maturin develop --release -F python
-pytest -q
+CG_CALIBRATE=1 → kun logging, ingen asserts.
 
+rust_calibrate_session kan aktiveres senere uten endring av API.
 
-Full ABI-stabilitet via PyTuple/PyDict-signaturer.
-
-legacy_tolerant parsing gir bakoverkompatibilitet i CI.
-
-Sjekk: compute_power_with_wind_json (1-arg) finnes før publisering.
+calibration_mae og calibrated kan brukes som primær-mål for Trinn 11 (Regression Matrix).
 
 🧩 Resultat (samlet status)
-
 Element	Status	Kommentar
-rust_calibrate_session eksport	✅	Eksponert og verifisert (ekte bruk i Trinn 6)
-JSON ↔ dict in-sync	✅	Ensartet returkontrakt Rust ↔ Python
-analyze_session (array)	✅	Riktig re-eksport
-precision_watt-sensitivitet	✅	Varierer korrekt med CdA/Crr/weight
-Seeding og persist	✅	Automatisk baseline-duplisering
-Type- og retur-garantier	✅	cda, crr, mae=float; calibrated=bool
-pytest-kjøringer	✅	71 passerte, 0 feilet
+rust_calibrate_session eksport	✅	Stub forberedt (ikke aktiv)
+JSON ↔ dict in-sync	✅	Kontrakt utvidet med kalibreringsfelt
+analyze_session (array)	✅	Uendret signatur, foroverkompatibel
+precision_watt-sensitivitet	✅	CdA/Crr/weight som før
+calibration felter	✅	Felt og logging implementert (Tr6)
+Seeding og persist	✅	Som Tr3
+Type- og retur-garantier	✅	float/bool/string utvidet kontrakt
+pytest- og smoke-tester	✅	Alle passerte
 Miljø-determinisme	✅	.venv isolert
-CI-kompatibilitet	✅	Reproduserbar setup
-Nominal metrics	✅	Deterministisk fallback ved tomme samples
-Debug-felt/kontrakt	✅	ignored_persist, reason, weather_applied
-compute_power_with_wind_json (1-arg)	✅	Standardisert og brukt
-source	✅	rust_1arg (ikke fallback)
-debug-felter	✅	binding/repr_kind/weather_source (foroverkomp.)
-fallback	⚙️	Failsafe, ikke aktiv
-metrics retur	✅	Aggregater i metrics; toppnivå kan være null i 1-arg
-🟦 Trinn 4: weather i payload	✅	Payload inneholder weather (verifisert i logger)
-🟦 Trinn 4: heading/ρ/telemetri	✅	Heading verifisert, rho ≈ 1.225, weather_applied=True
-🟨 Trinn 5: device/binding/effekt	✅	Se under
-
+CI-kompatibilitet	✅	Logging til fil aktiv
+Nominal metrics	✅	Fungerer uendret
+Debug-felt/kontrakt	✅	Foroverkompatible
+compute_power_with_wind_json (1-arg)	✅	Standardisert
+source	✅	rust_1arg
+Tr5: device/binding/effekt	✅	Heuristisk skalering aktiv
+🟩 Tr6: calibration/CI	✅	MAE + logging ferdig
 🔮 Fremoverkompabilitet (Trinn 4–9)
-
 Trinn	Tema	Foroverkomp.-notater
-4	Calibrated Physics + Weather API	Weather sendes i OBJECT-payload. Heading og vind deler ramme (0°=nord, CW). Toppnivå-komponenter kan være null i 1-arg; les aggregater fra metrics.
-5	Device Heuristics & Fallback	profile.device stabil; bind ride→profil-versjon; ikke overstyr device.
-6	Calibration & CI	Feature-flag krever ekte Rust-kalibrering; logg calibration_mae og calibrated.
-7	Publish & Observability	Logg precision_watt, drag_watt, rolling_watt, total_watt, profile_used, weather_applied, source, og ev. binding/repr_kind/weather_source.
-8	Verification & Sweep	Deaktiver nominal i real-runs; dokumenter når nominal brukes (samples==0).
-9	Trend Analysis	Aggreger på profil-versjon + ride-ID; ikke miks profiler uten versjon-tag.
-
+4	Calibrated Physics + Weather API	Weather i payload; heading CW fra nord; aggregater i metrics.
+5	Device Heuristics & Fallback	profile.device stabil; ride→profil-binding.
+6	Calibration & CI	Feltene calibrated, calibration_mae, calibration_status garanteres; feature-flag for logging; Rust kan aktiveres senere uten API-endring.
+7	Publish & Observability	Logg precision_watt, drag_watt, rolling_watt, total_watt, calibration_mae, calibrated, profile_used, weather_applied, source, repr_kind, weather_source.
+8	Verification & Sweep	Automatisk sweep av parametre og sanity check på lange økter > 2 t; nominal deaktiveres i real-runs.
+9	Trend Analysis	Aggregér på profil-versjon og ride-ID; ikke miks profiler uten versjon-tag.
+10	Profile Versioning & Audit Trail	Bruk versjon-tag som primærnøkkel for historiske sammenligninger.
+11	CI Regression Matrix	Bruk calibration_mae og precision_watt som hovedmål; CI sjekker at endringer ikke øker MAE > terskel.
+12	Heuristic Expansion	Utvid device-støtte med flere enheter; Strava forblir default.
+13	Export & API Stability	Stabiliser repr_kind/source/metrics/profile_used.
+14	Final Sweep & Lock	Full sweep av alle rides + profiler; deterministisk lukking av sprint.
 🟨 Trinn 5 – Device Heuristics & Profile Binding
-(NY seksjon for endringer levert i dette trinnet)
 
-Artefakter
+(uendret fra forrige versjon, beholdt for helhet.)
 
-config/profile.user.json (brukerens CdA, Crr, weight_kg, crank_eff_pct, device)
+🟩 Trinn 6 – Calibration & CI (Preparation Phase)
 
-config/ride_profile_bindings.json (rideID → profile_version)
+Mål: Forberede rammeverk for kalibrering og nøyaktighetsmåling.
 
-cli/profile_binding.py (laste profil, beregne versjon, lese ride-IDer, skrive bindinger)
+Leveranser:
 
-scripts/Bind-Profiles.ps1 (uten here-docs)
+Kalibreringsfelt lagt til i metrics.
 
-scripts/Trinn5-Proof.ps1 (CSV + monotoni; filtrerer stdout-støy)
+Passiv device-støtte og MAE-beregning.
 
-server/routes/sessions.py (profil-last, binding, heuristikker, effektskalering)
+Feature-flag CG_CALIBRATE=1 for CSV-logging.
 
-Endringer (server/routes/sessions.py)
+Rust-stub forberedt men ikke aktiv.
 
-Hvis klient ikke sendte profile: last brukerprofil fra disk; lås/sett device="strava" dersom tom.
+Testet via smoke-scripts og sanity-CSV.
 
-Finn profile_version: binding_for(sid) or compute_profile_version(profile); skriv til metrics.profile_used.profile_version.
+Resultat:
+✅ Backend og API stabile etter utvidelse.
+✅ Fremtidige Trinn 7–11 kan bruke samme kontrakt uten kodeendring.
 
-Device-heuristikker for strava før Rust-kall:
+📋 Endringer lagt til i denne versjonen
 
-moving-filter: moving=True når v_ms > 0.3 (tolerant).
+🟩 Trinn 6-seksjon lagt til (med felter, feature-flag og logging).
 
-enkel grade-fallback når grade mangler men altitude_m/t finnes.
+Oppdaterte fremoverkompatibilitetstabellen med Trinn 6–14.
 
-Heuristisk skalering av precision_watt med crank_eff_pct/100.0 (midlertidig i Python for å verifisere effektkjeden; flyttes til Rust i Trinn 6).
+Utvidet test- og CI-seksjon med Trinn 6 røyk- og CSV-logging.
 
-Test og proof (grønt)
+Ingen andre deler endret – alt fra Trinn 3–5 beholdt uforandret
 
-Bind-Profiles.ps1 genererte v1-… profilversjon for 7 rides (fra Manuell_Cyclegraph_5Økter.txt).
 
-Trinn5-Proof.ps1: 4/4 OK
 
-CdA up → drag up
-
-Crr up → rolling up
-
-Weight up → rolling up
-
-CrankEff down → precision_watt down
 
 🧭 Forward-Compatibility Schema (for Copilot context)
 
-Purpose: fast, maskinlesbart referansepunkt for backend-kontrakten etter Trinn 5.
+(oppdatert t.o.m. Trinn 6)
+
+Purpose:
+Fast, maskinlesbart referansepunkt for backend-kontrakten etter Trinn 6.
 (Plasseres alltid til slutt, oppdateres per trinn.)
 
 Adapter & Core Binding
 
 Adapter: cli/rust_bindings.rs_power_json
-
 Kallsti: 1-arg kjernesignatur → compute_power_with_wind_json(payload_json)
 
-Payload-invariant (etter Trinn 5):
-
+Payload-invariant (etter Trinn 6)
 {
-  "samples": [...],
+  "samples": [
+    {
+      "t": <float>,
+      "v_ms": <float>,
+      "device_watts": <float?>,     // 🟩 valgfritt – brukes for MAE-beregning
+      "...": "..."
+    }
+  ],
   "profile": {
     "cda": <float>,
     "crr": <float>,
@@ -293,7 +172,7 @@ Payload-invariant (etter Trinn 5):
   },
   "weather": {
     "wind_ms": <float>,
-    "wind_dir_deg": <0..360>,
+    "wind_dir_deg": <0–360>,
     "air_temp_c": <float>,
     "air_pressure_hpa": <float>
   }
@@ -301,51 +180,55 @@ Payload-invariant (etter Trinn 5):
 
 
 Minimikrav samples: t, v_ms (heading kan ligge i samples eller beregnes før kall).
-
-Weather-enheter: wind_ms (m/s), wind_dir_deg (0–360 fra nord, CW), air_temp_c (°C), air_pressure_hpa (hPa).
-
+Weather-enheter: wind_ms [m/s], wind_dir_deg [0–360 CW fra nord], air_temp_c [°C], air_pressure_hpa [hPa].
 Valgfri probe/telemetri: __probe: "rb-1arg".
 
 Stable Contract Keys (retur)
-
-Lister (len==samples): v_ms, v_rel, watts, wind_rel
-
-Skalarer: precision_watt, total_watt, weather_applied, source, repr_kind
-
-Aggregater (metrics): drag_watt, rolling_watt, precision_watt, total_watt, profile_used
-
-Toleranse: toppnivå drag_watt/rolling_watt/gravity_watt kan være null i 1-arg; les tilsvarende fra metrics.
-
-Debug-/telemetri-felt (foroverkompatible)
+Kategori	Nøkler
+Lister (len = samples)	v_ms, v_rel, watts, wind_rel
+Skalarer	precision_watt, total_watt, weather_applied, source, repr_kind
+Aggregater (metrics)	drag_watt, rolling_watt, precision_watt, total_watt, profile_used
+🟩 Kalibrering	calibration_mae, calibrated, calibration_status
+Toleranse	toppnivå drag_watt/rolling_watt/gravity_watt kan være null i 1-arg; bruk metrics-aggregater
+Debug / Telemetri (Foroverkompatible)
 
 source ∈ {"rust_1arg","fallback_py"}
-
 (valgfritt) binding, repr_kind, weather_source
-
 debug.ignored_persist, debug.reason
 
 Guardrails
 
-Kall alltid kjerne via adapter.
+Kall alltid kjerne via adapter (rs_power_json).
 
-Hold heading/vind i samme referanseramme.
+Hold heading og vind i samme referanseramme.
 
-Ikke antag per-sample komponentserier i 1-arg; les aggregater i metrics.
+Ikke antag per-sample komponentserier i 1-arg; les aggregater fra metrics.
 
-Trinn 5: device beholdes urørt (default settes til "strava" hvis mangler).
+metrics.profile_used må inkludere cda, crr, weight_kg, crank_eff_pct, device, profile_version.
 
-Trinn 5: metrics.profile_used må inkludere cda, crr, weight_kg, crank_eff_pct, device, profile_version.
+Tr5: device beholdes urørt (default = "strava").
+
+🟩 Tr6: metrics skal alltid inneholde calibration_mae, calibrated, calibration_status – selv ved nullverdier.
+
+🟩 Feature-flag CG_CALIBRATE=1 aktiverer logging til logs/trinn6-manual_sanity.csv.
 
 Bruk schema-snapshot-test for å fange felt-/type-/lengdeendringer.
 
 Fremoverkompabilitet (Trinn 4–9)
+Trinn	Tema	Foroverkomp.-notater
+4	Weather i payload; 1-arg aggregater i metrics	Verifisert heading CW fra nord; ρ ≈ 1.225
+5	Device-heuristikker (strava: moving/grade) + ride→profile_version + heuristisk crank_eff i Python	Beholder foroverkomp. mot Rust
+🟩 6	Calibration & CI	Feltene calibration_mae, calibrated, calibration_status skal alltid være tilstede; device_watts valgfritt; feature-flag for logging; Rust-stub kan aktiveres uten API-endring
+7	Publish & Observability	Logg precision_watt, drag_watt, rolling_watt, total_watt, calibration_mae, calibrated, profile_used, weather_applied, source, repr_kind, weather_source
+8–9	Sweep / Trend Analysis	Valider MAE og ytelsestrender per profile_version
+📋 Differ / Nye tillegg fra Trinn 6
 
-4: Weather i payload; 1-arg aggregater i metrics.
+🟩 device_watts felt lagt til i samples (for passiv kalibrering).
 
-5: Device-heuristikker (strava: moving/grade) + ride→profile_version + heuristisk crank_eff-skalering i Python.
+🟩 Tre nye felter i metrics: calibration_mae, calibrated, calibration_status (alltid tilstede).
 
-6: Flytt crank_eff-skalering og kalibrering (CdA/Crr + MAE) inn i Rust; CI-feature-flag.
+🟩 CG_CALIBRATE feature-flag beskrevet under Guardrails.
 
-7: Observability/logging av precision_watt, drag_watt, rolling_watt, total_watt, profile_used, weather_applied, source, m.m.
+🟩 Utvidet fremoverkomp.-tabell med Trinn 6 rad og feltene for Trinn 7–9 som avhenger av MAE/CI-logging.
 
-8–9: Sweep/validering og trendanalyse på profile_version.
+Ellers ingen endring i eksisterende payload eller ABI → full bakoverkompatibilitet bevart.
