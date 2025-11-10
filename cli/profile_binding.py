@@ -56,3 +56,8 @@ def binding_for(sid: str) -> str:
         return m.get(str(sid)) or ""
     except Exception:
         return ""
+
+# --- Trinn 7 compat alias ---
+def binding_from(*args, **kwargs):
+    """Compat alias: gammel navn -> ny funksjon."""
+    return binding_for(*args, **kwargs)

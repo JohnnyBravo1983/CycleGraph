@@ -1,6 +1,6 @@
 ﻿# server/routes/sessions.py
 from __future__ import annotations
-from cli.profile_binding import load_user_profile, compute_profile_version, binding_for
+from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
 
 import json
 import sys
@@ -172,6 +172,52 @@ def _t6_calib_csv_append(sid, n, calibrated, status, mae, mean_pred, mean_dev):
             f.write(f"{sid},{n},{calibrated},{status},{'' if mae is None else mae},{'' if mean_pred is None else mean_pred},{'' if mean_dev is None else mean_dev}\n")
     except Exception:
         pass
+
+# --- Trinn 7: Observability Logging ---
+def _write_observability(resp: dict) -> None:
+    """Intern Trinn7-helper for JSON+CSV observability logging."""
+    import os, csv, json, datetime
+    os.makedirs("logs", exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    # Full JSON-dump (én per run)
+    jpath = f"logs/trinn7-observability_{ts}.json"
+    try:
+        with open(jpath, "w", encoding="utf-8") as jf:
+            json.dump(resp, jf, ensure_ascii=False, indent=2)
+    except Exception as e_json:
+        print(f"[SVR][OBS] JSON-write failed: {e_json!r}", flush=True)
+
+    # CSV-record med flate nøkkelfelter
+    m = dict(resp.get("metrics") or {})
+    pu = dict((m.get("profile_used") or {})) if isinstance(m, dict) else {}
+    dbg = dict(resp.get("debug") or {})
+    row = {
+        "precision_watt": m.get("precision_watt"),
+        "total_watt": m.get("total_watt"),
+        "weather_applied": resp.get("weather_applied"),
+        "crank_eff_pct": pu.get("crank_eff_pct") or (resp.get("profile_used") or {}).get("crank_eff_pct"),
+        "calibration_mae": m.get("calibration_mae"),
+        "calibrated": m.get("calibrated"),
+        "calibration_status": m.get("calibration_status"),
+        "source": resp.get("source"),
+        "repr_kind": resp.get("repr_kind"),
+        "weather_source": dbg.get("weather_source"),
+        "profile_version": pu.get("profile_version"),
+        "debug_reason": dbg.get("reason"),
+    }
+
+    csv_path = "logs/trinn7-observability.csv"
+    try:
+        write_header = not os.path.exists(csv_path)
+        with open(csv_path, "a", newline="", encoding="utf-8") as cf:
+            w = csv.DictWriter(cf, fieldnames=list(row.keys()))
+            if write_header:
+                w.writeheader()
+            w.writerow(row)
+        print(f"[SVR][OBS] wrote {csv_path} + {jpath}", flush=True)
+    except Exception as e_csv:
+        print(f"[SVR][OBS] CSV-write failed: {e_csv!r}", flush=True)
 
 # --- Vær-hjelpere ---
 def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[float], Optional[float], Optional[int]]:
@@ -504,7 +550,7 @@ async def analyze_session(
 
     # Finn profile_version (binding for sid hvis finnes, ellers hash av aktiv profil)
     sid_key = sid or ""
-    profile_version = binding_for(sid_key) or compute_profile_version(profile)
+    profile_version = binding_from(sid_key) or compute_profile_version(profile)
 
     profile_scrubbed = _scrub_profile(profile)
 
@@ -669,7 +715,7 @@ async def analyze_session(
             r = rs_power_json(mapped, profile_scrubbed, third)
         except Exception as e:
             print(f"[SVR] [RUST] exception (no-fallback mode): {e!r}", file=sys.stderr, flush=True)
-            return {
+            err_resp = {
                 "source": "rust_error",
                 "weather_applied": False,
                 "metrics": {},
@@ -680,6 +726,12 @@ async def analyze_session(
                     "exception": repr(e),
                 },
             }
+            err_resp = _ensure_contract_shape(err_resp)
+            try:
+                _write_observability(err_resp)
+            except Exception as e_log:
+                print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
+            return err_resp
 
         resp: Dict[str, Any] = {}
         if isinstance(r, dict):
@@ -860,7 +912,7 @@ async def analyze_session(
                 resp["weather_applied"] = weather_applied
             except Exception as e:
                 print(f"[SVR] [RUST] json.loads failed (no-fallback): {e!r}", file=sys.stderr, flush=True)
-                return {
+                err_resp = {
                     "source": "rust_error",
                     "weather_applied": False,
                     "metrics": {},
@@ -872,6 +924,12 @@ async def analyze_session(
                         "exception": repr(e),
                     },
                 }
+                err_resp = _ensure_contract_shape(err_resp)
+                try:
+                    _write_observability(err_resp)
+                except Exception as e_log:
+                    print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
+                return err_resp
 
         if isinstance(resp, dict):
             # Pakk flat → metrics hvis nødvendig
@@ -916,107 +974,65 @@ async def analyze_session(
                 k in m for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
             )
             if rust_has_metrics:
-                result = _ensure_contract_shape(resp)
-                
-                # --- Trinn 7: Observability Logging ---
-                def _write_observability(resp: dict) -> None:
-                    """Intern Trinn7-helper for JSON+CSV observability logging."""
-                    import os, csv, json, datetime
-                    os.makedirs("logs", exist_ok=True)
-                    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-
-                    # Full JSON-dump (én per run)
-                    jpath = f"logs/trinn7-observability_{ts}.json"
-                    try:
-                        with open(jpath, "w", encoding="utf-8") as jf:
-                            json.dump(resp, jf, ensure_ascii=False, indent=2)
-                    except Exception as e_json:
-                        print(f"[SVR][OBS] JSON-write failed: {e_json!r}", flush=True)
-
-                    # CSV-record med flate nøkkelfelter
-                    m = dict(resp.get("metrics") or {})
-                    pu = dict((m.get("profile_used") or {})) if isinstance(m, dict) else {}
-                    dbg = dict(resp.get("debug") or {})
-                    row = {
-                        "precision_watt": m.get("precision_watt"),
-                        "total_watt": m.get("total_watt"),
-                        "weather_applied": resp.get("weather_applied"),
-                        "crank_eff_pct": pu.get("crank_eff_pct") or (resp.get("profile_used") or {}).get("crank_eff_pct"),
-                        "calibration_mae": m.get("calibration_mae"),
-                        "calibrated": m.get("calibrated"),
-                        "calibration_status": m.get("calibration_status"),
-                        "source": resp.get("source"),
-                        "repr_kind": resp.get("repr_kind"),
-                        "weather_source": dbg.get("weather_source"),
-                        "profile_version": pu.get("profile_version"),
-                        "debug_reason": dbg.get("reason"),
-                    }
-
-                    csv_path = "logs/trinn7-observability.csv"
-                    try:
-                        write_header = not os.path.exists(csv_path)
-                        with open(csv_path, "a", newline="", encoding="utf-8") as cf:
-                            w = csv.DictWriter(cf, fieldnames=list(row.keys()))
-                            if write_header:
-                                w.writeheader()
-                            w.writerow(row)
-                        print(f"[SVR][OBS] wrote {csv_path} + {jpath}", flush=True)
-                    except Exception as e_csv:
-                        print(f"[SVR][OBS] CSV-write failed: {e_csv!r}", flush=True)
-
+                # --- Trinn 7: kontraktsikre + observability ---
                 try:
-                    _write_observability(result)
+                    ensured = _ensure_contract_shape(resp)
+                    _write_observability(ensured)
+                    return ensured
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
+                    return _ensure_contract_shape(resp)
+            else:
+                # --- PATCH B: RUST ga ikke gyldige metrics (no-fallback) ---
+                print("[SVR] [RUST] missing/invalid metrics (no-fallback)", file=sys.stderr, flush=True)
+                err = {
+                    "source": "rust_error",
+                    "weather_applied": False,
+                    "metrics": {},
+                    "debug": {
+                        "reason": "no-metrics-from-rust",
+                        "used_fallback": False,
+                        "weather_source": "historical" if weather_applied else "neutral",
+                        "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
+                        "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
+                    },
+                }
+                # Trinn 7: kontraktsikre + observability for feilsvar også
+                err = _ensure_contract_shape(err)
+                try:
+                    _write_observability(err)
+                except Exception as e:
+                    print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
+                return err
 
-                return result
-
-            print("[SVR] [RUST] missing/invalid metrics (no-fallback)", file=sys.stderr, flush=True)
-            return {
-                "source": "rust_error",
-                "weather_applied": False,
-                "metrics": {},
-                "debug": {
-                    "reason": "no-metrics-from-rust",
-                    "used_fallback": False,
-                    "weather_source": "historical" if weather_applied else "neutral",
-                    "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
-                    "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
-                },
-            }
-
-    # ---------- PURE FALLBACK_PY ----------
-    profile_used = dict(profile)
+    # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
+    profile_used = _profile_used_from(profile)
     profile_used["profile_version"] = profile_version
-
+    
     fallback_metrics = _fallback_metrics(
         mapped,
-        profile_used,
-        weather_applied=weather_applied,
-        profile_used=profile_used,
+        profile,                 # NB: profile, ikke profile_used
+        weather_applied=False,   # fallback: behandle som uten vær
+        profile_used=profile_used,  # inkluderer profile_version
     )
-
-    # Legg til weather metadata i fallback også
-    if weather_applied and wx_used:
-        fallback_metrics["weather_used"] = wx_used
-        fallback_metrics["weather_meta"] = wx_meta
-        fallback_metrics["weather_fp"] = _wx_fp(wx_used)
 
     resp = {
         "source": "fallback_py",
-        "weather_applied": weather_applied,
+        "weather_applied": False,
         "metrics": fallback_metrics,
         "debug": {
-            "reason": "fallback-path",
-            "note": "Legacy Python path executed (no Rust result short-circuited).",
-            "force_recompute": bool(force_recompute),
-            "persist_ignored": bool(force_recompute),
-            "ignored_persist": bool(force_recompute),
+            "reason": "fallback_py",
             "used_fallback": True,
-            "weather_source": "historical" if weather_applied else "neutral",
+            "weather_source": "neutral",
+            "adapter_resp_keys": [],
+            "metrics_seen": list(fallback_metrics.keys()),
         },
-        "profile_used": profile_used,
-        "sid": sid,
     }
-    print("[SVR] [FB] returning fallback_py")
-    return _ensure_contract_shape(resp)
+
+    # Trinn 7: kontraktsikre + observability før return
+    resp = _ensure_contract_shape(resp)
+    try:
+        _write_observability(resp)
+    except Exception as e:
+        print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
+    return resp

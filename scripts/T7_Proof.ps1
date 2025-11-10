@@ -1,9 +1,9 @@
-# scripts/T7_Proof.ps1  (ASCII-safe, no BOM)
+# scripts/T7_Proof.ps1  (ASCII-safe)
+param([string]$OutDir = "logs")
+
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:PYTHONIOENCODING = 'utf-8'
-
-param([string]$OutDir = "logs")
 
 # 1) Ensure output dir
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
@@ -116,3 +116,5 @@ if ($result.csv_ok) {
 }
 
 Write-Host "=== Trinn 7 Proof done ==="
+
+
