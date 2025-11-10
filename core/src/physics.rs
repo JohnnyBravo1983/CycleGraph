@@ -281,6 +281,10 @@ pub fn compute_components(
     crr: f64,
     weight: f64,
     rho: f64,
+    // Nye valgfrie parametre for vind
+    wind_ms_opt: Option<&Vec<f64>>,
+    wind_dir_deg_opt: Option<&Vec<f64>>,
+    heading_deg_opt: Option<&Vec<f64>>,
 ) -> Components {
     let mass = weight;
     let n = vel.len();
@@ -292,7 +296,35 @@ pub fn compute_components(
 
     for i in 0..n {
         let v = vel[i].max(0.0);
-        let p_drag = 0.5 * rho * cda * v.powi(3);
+
+        // --- beregn relativ luftfart ---
+        let v_rel_ms = if let (Some(wind_ms), Some(wind_dir), Some(heading)) =
+            (wind_ms_opt, wind_dir_deg_opt, heading_deg_opt)
+        {
+            let w_ms = wind_ms[i];
+            let w_dir_deg = wind_dir[i];
+            let hdg_deg = heading[i];
+
+            // heading_deg er retning syklist, wind_dir_deg er "TO"-retning → gjør den om til "FROM"
+            let heading_rad = hdg_deg.to_radians();
+            let wind_from_rad = (w_dir_deg + 180.0).to_radians();
+
+            let wind_vx = w_ms * wind_from_rad.sin();
+            let wind_vy = w_ms * wind_from_rad.cos();
+
+            let rider_vx = v * heading_rad.sin();
+            let rider_vy = v * heading_rad.cos();
+
+            let v_rel_x = rider_vx + wind_vx;
+            let v_rel_y = rider_vy + wind_vy;
+            (v_rel_x * v_rel_x + v_rel_y * v_rel_y).sqrt()
+        } else {
+            // fallback uten vinddata
+            v
+        };
+
+        // --- komponenter ---
+        let p_drag = 0.5 * rho * cda * v_rel_ms.powi(3);
         let p_roll = crr * mass * G * v * (1.0 - 0.5 * grad[i] * grad[i]);
         let p_climb = (mass * G * v * grad[i]).max(0.0);
         let p = p_drag + p_roll + p_climb;
