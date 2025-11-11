@@ -8,6 +8,10 @@ import traceback
 import hashlib
 import math
 import time
+import os
+import csv
+import datetime
+from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -159,7 +163,6 @@ def _t6_pick_predicted_series(result_dict):
     return []
 
 def _t6_calib_csv_append(sid, n, calibrated, status, mae, mean_pred, mean_dev):
-    import os
     if os.getenv("CG_CALIBRATE","") != "1":
         return
     try:
@@ -176,7 +179,6 @@ def _t6_calib_csv_append(sid, n, calibrated, status, mae, mean_pred, mean_dev):
 # --- Trinn 7: Observability Logging ---
 def _write_observability(resp: dict) -> None:
     """Intern Trinn7-helper for JSON+CSV observability logging."""
-    import os, csv, json, datetime
     os.makedirs("logs", exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -245,12 +247,10 @@ def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[
 
 def _iso_hour_from_unix(ts_hour: int) -> str:
     # UNIX → "YYYY-MM-DDTHH:00"
-    import datetime as _dt
-    return _dt.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
+    return datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
 
 def _unix_from_iso_hour(s: str) -> int:
-    import datetime as _dt
-    return int(_dt.datetime.strptime(s, "%Y-%m-%dT%H:00").replace(tzinfo=_dt.timezone.utc).timestamp())
+    return int(datetime.datetime.strptime(s, "%Y-%m-%dT%H:00").replace(tzinfo=datetime.timezone.utc).timestamp())
 
 async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Optional[Dict[str, float]]:
     """
@@ -530,13 +530,65 @@ async def analyze_session(
     except Exception:
         body = {}
 
+    # --- T8: robust normalisering av body ---
+    # Tillat at body kan være dict, list, str/bytes → form til {samples, profile, weather}
+    def _coerce_payload(x):
+        import json as _json
+        # 1) str/bytes → parse
+        if isinstance(x, (str, bytes, bytearray)):
+            try:
+                x = _json.loads(x)
+            except Exception:
+                x = {}
+        # 2) list → anta samples
+        if isinstance(x, list):
+            return {"samples": x, "profile": {}, "weather": {}}
+        # 3) dict → sørg for nøkler
+        if isinstance(x, dict):
+            out = dict(x)
+            if "samples" not in out or not isinstance(out.get("samples"), list):
+                out["samples"] = []
+            if "profile" not in out or not isinstance(out.get("profile"), dict):
+                out["profile"] = {}
+            if "weather" not in out or not isinstance(out.get("weather"), dict):
+                out["weather"] = {}
+            return out
+        # 4) alt annet → tom payload
+        return {"samples": [], "profile": {}, "weather": {}}
+
+    body = _coerce_payload(body)
+
     # Valider shape (lagre original info om klienten faktisk sendte profil)
-    samples = list((body or {}).get("samples") or [])
-    profile_in = dict((body or {}).get("profile") or {})
+    samples = body["samples"]
+    profile_in = body["profile"]
     client_sent_profile = bool(profile_in)
 
     if not isinstance(samples, list) or not isinstance(profile_in, dict):
         raise HTTPException(status_code=400, detail="Missing 'samples' or 'profile'")
+
+    # --- Trinn 8A: Guardrail for 'nominal' (kun i test-modus) ---
+    test_mode = bool(int(os.environ.get("CG_TESTMODE", "0")))
+    if not test_mode and isinstance(body, dict) and "nominal" in body:
+        body.pop("nominal", None)
+
+    # --- Trinn 8B: Payload capture (valgfri) ---
+    try:
+        if bool(int(os.environ.get("CG_DUMP_PAYLOAD", "0"))):
+            LOGS = Path(__file__).resolve().parents[2] / "logs"
+            LOGS.mkdir(exist_ok=True)
+            dump_path = LOGS / "_t8_baseline_payload.json"
+            # Lag et minimalt, trygt snapshot (samples + profile + weather + optional debug)
+            payload_snapshot = {
+                "samples": samples,
+                "profile": profile_in or {},
+                "weather": (body.get("weather") or {}),
+                "debug": (body.get("debug") or {})
+            }
+            with dump_path.open("w", encoding="utf-8") as f:
+                json.dump(payload_snapshot, f, ensure_ascii=False)
+    except Exception:
+        # Ikke la capture feile requesten
+        pass
 
     # --- Profil-normalisering (Patch A) ---
     profile = _ensure_profile_device((body.get("profile") or {}))
@@ -767,7 +819,6 @@ async def analyze_session(
 
                 # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
                 try:
-                    import os  # lokal import
                     _pred_series = _t6_pick_predicted_series(resp)
                     _dev_series = _t6_extract_device_watts(samples)
 
@@ -856,7 +907,6 @@ async def analyze_session(
 
                 # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
                 try:
-                    import os  # lokal import
                     _pred_series = _t6_pick_predicted_series(resp)
                     _dev_series = _t6_extract_device_watts(samples)
 

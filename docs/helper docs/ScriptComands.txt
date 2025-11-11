@@ -1,0 +1,15 @@
+Viktige Comands
+
+#Start Server no Reload
+ scripts\start-api-no-reload.ps1
+
+# multiple rides (server-vær)
+.\scripts\E2E.Multiple_Rides.ps1
+
+# multiple rides med injisert testvær
+.\scripts\E2E.Multiple_Rides.ps1 -UseTestWeather
+
+# hvis du en dag må fjerne /api:
+.\scripts\E2E.Multiple_Rides.ps1 -UseApiPrefix:$false
+
+.\scripts\BasicE2E_3Rides.ps1 

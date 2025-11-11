@@ -1,0 +1,55 @@
+{
+  "calibrated": false,
+  "metrics": {
+    "drag_watt": 183.75,
+    "gravity_watt": -13.151860499999998,
+    "precision_watt": 210.67527486910996,
+    "profile_used": {
+      "calibrated": false,
+      "cda": 0.3,
+      "crr": 0.004,
+      "weight_kg": 78.0,
+      "crank_eff_pct": 95.5,
+      "device": "strava",
+      "profile_version": "v1-df69063bfca4-20251110"
+    },
+    "rolling_watt": 30.596747999999998,
+    "total_watt": 201.1948875,
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available",
+    "weather_applied": false
+  },
+  "source": "rust_1arg",
+  "v_rel": [
+    10.0,
+    10.0
+  ],
+  "watts": [
+    201.1948875,
+    201.1948875
+  ],
+  "weather_applied": false,
+  "wind_rel": [
+    0.0,
+    0.0
+  ],
+  "repr_kind": "object_v3",
+  "debug": {
+    "reason": "ok",
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false,
+    "used_fallback": false,
+    "weather_source": "neutral"
+  },
+  "profile_used": {
+    "calibrated": false,
+    "cda": 0.3,
+    "crr": 0.004,
+    "weight_kg": 78.0,
+    "crank_eff_pct": 95.5,
+    "device": "strava",
+    "profile_version": "v1-df69063bfca4-20251110"
+  }
+}

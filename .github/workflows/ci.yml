@@ -273,3 +273,119 @@ jobs:
             -s ../schema/session_metrics.v1.json \
             -s ../schema/daily_user_metrics.v1.json \
             -s ../schema/trends_response.v1.json
+  t8-sweep:
+    name: "T8 Sweep – Monotoni, Invarians & Pivoter"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Run Trinn 8 checks (PowerShell)"
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $csvPath = "logs/trinn8-sweep_matrix.csv"
+          if (-not (Test-Path $csvPath)) {
+            throw "Mangler $csvPath. Commit filen (deterministisk input til T8), eller generer den i et tidligere steg."
+          }
+
+          # 0) Les CSV
+          $rows = Import-Csv $csvPath
+
+          # 1) Numeriske felt (punktum-desimal internt)
+          $rowsN = $rows | Select-Object *,
+            @{n='cdaD';            e={[double]($_.cda            -replace ',','.')}},
+            @{n='crrD';            e={[double]($_.crr            -replace ',','.')}},
+            @{n='weight_kgD';      e={[double]($_.weight_kg      -replace ',','.')}},
+            @{n='effD';            e={[double]($_.crank_eff_pct  -replace ',','.')}},
+            @{n='drag_wattD';      e={[double]($_.drag_watt      -replace ',','.')}},
+            @{n='rolling_wattD';   e={[double]($_.rolling_watt   -replace ',','.')}},
+            @{n='precision_wattD'; e={[double]($_.precision_watt -replace ',','.')}},
+            @{n='total_wattD';     e={[double]($_.total_watt     -replace ',','.')}}
+
+          # 2) Grid-sjekk
+          $exp = 5*5*4*4  # CdA(5) x Crr(5) x Weight(4) x Eff(4)
+          if ($rowsN.Count -ne $exp) { throw "Grid size mismatch: expected $exp, got $($rowsN.Count)" }
+
+          Write-Host "Actual rows: $($rowsN.Count)"
+          Write-Host "✅ Grid size OK (=$exp)"
+
+          function Assert-StrictInc([double[]]$arr, [string]$label) {
+            for ($i=1; $i -lt $arr.Count; $i++) {
+              if (!($arr[$i] -gt $arr[$i-1])) {
+                throw "Monotoni-feil ($label): $($arr[$i-1]) !< $($arr[$i]) @ idx=$i"
+              }
+            }
+          }
+
+          # 3) Drag ↑ med CdA (for hver fast kombinasjon av Crr,Weight,Eff)
+          $groups = $rowsN | Group-Object crrD, weight_kgD, effD
+          foreach ($g in $groups) {
+            $seq = $g.Group | Sort-Object cdaD | ForEach-Object { $_.drag_wattD }
+            Assert-StrictInc $seq "drag vs cda in [$($g.Name)]"
+          }
+          Write-Host "✅ Drag strictly increases with CdA for all (Crr,Weight,Eff)."
+
+          # 4) Rolling ↑ med Crr (for hver fast kombinasjon av CdA,Weight,Eff)
+          $groups = $rowsN | Group-Object cdaD, weight_kgD, effD
+          foreach ($g in $groups) {
+            $seq = $g.Group | Sort-Object crrD | ForEach-Object { $_.rolling_wattD }
+            Assert-StrictInc $seq "rolling vs crr in [$($g.Name)]"
+          }
+          Write-Host "✅ Rolling strictly increases with Crr for all (CdA,Weight,Eff)."
+
+          # 5) Rolling ↑ med Weight (for hver fast kombinasjon av CdA,Crr,Eff)
+          $groups = $rowsN | Group-Object cdaD, crrD, effD
+          foreach ($g in $groups) {
+            $seq = $g.Group | Sort-Object weight_kgD | ForEach-Object { $_.rolling_wattD }
+            Assert-StrictInc $seq "rolling vs weight in [$($g.Name)]"
+          }
+          Write-Host "✅ Rolling strictly increases with Weight for all (CdA,Crr,Eff)."
+
+          # 6) Drag invariant over (Crr,Weight,Eff) for hver CdA
+          $cdas = $rowsN.cdaD | Sort-Object -Unique
+          foreach ($c in $cdas) {
+            $uniq = ($rowsN | Where-Object { $_.cdaD -eq $c } | Select-Object -ExpandProperty drag_wattD | Sort-Object -Unique)
+            if ($uniq.Count -ne 1) { throw "Drag invarians feilet for CdA=$c (fant $($uniq.Count) unike verdier)" }
+          }
+          Write-Host "✅ Drag is invariant over (Crr,Weight,Eff) for each CdA."
+
+          # 7) Eksporter pivoter (precision, drag, rolling) for alle weight×eff
+          [System.Threading.Thread]::CurrentThread.CurrentCulture = 'en-US'
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+          $weights = ($rowsN.weight_kgD | Sort-Object -Unique)
+          $effs    = ($rowsN.effD        | Sort-Object -Unique)
+          $crrs    = ($rowsN.crrD        | Sort-Object -Unique)
+          $cdas    = ($rowsN.cdaD        | Sort-Object -Unique)
+
+          function Write-Pivot([string]$metric, [double]$w, [double]$eff) {
+            $pivot = foreach ($cda in $cdas) {
+              $row = [ordered]@{ cda = $cda }
+              foreach ($crr in $crrs) {
+                $val = ($rowsN | Where-Object {
+                  $_.weight_kgD -eq $w -and $_.effD -eq $eff -and $_.cdaD -eq $cda -and $_.crrD -eq $crr
+                } | Select-Object -First 1 | Select-Object -ExpandProperty $metric -ErrorAction SilentlyContinue)
+                $row["crr=$crr"] = $val
+              }
+              [pscustomobject]$row
+            }
+            $out = "logs/t8_pivot_${metric}_w$($w)_eff$($eff).csv"
+            $pivot | Export-Csv $out -NoTypeInformation -Encoding UTF8
+            Write-Host "📝 Wrote $out"
+          }
+
+          foreach ($w in $weights) {
+            foreach ($e in $effs) {
+              Write-Pivot 'precision_wattD' $w $e
+              Write-Pivot 'drag_wattD'       $w $e
+              Write-Pivot 'rolling_wattD'    $w $e
+            }
+          }
+
+      - name: "Upload T8 pivot artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: t8-pivots
+          path: logs/t8_pivot_*.csv
