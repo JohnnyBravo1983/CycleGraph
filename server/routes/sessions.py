@@ -11,6 +11,7 @@ import time
 import os
 import csv
 import datetime
+import re
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 
@@ -1087,6 +1088,17 @@ async def analyze_session(
                     # --- END TRINN 10 ---
                     
                     _write_observability(ensured)
+                    
+                    # --- Ride-specific result logging ---
+                    rid = str(sid)
+                    safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
+                    outdir = Path("logs") / "results"
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    (outdir / f"result_{safe}.json").write_text(
+                        json.dumps(ensured, ensure_ascii=False, indent=2, separators=(",", ": ")), 
+                        encoding="utf-8"
+                    )
+                    
                     return ensured
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
@@ -1184,6 +1196,16 @@ async def analyze_session(
     
     try:
         _write_observability(resp)
+        
+        # --- Ride-specific result logging ---
+        rid = str(sid)
+        safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
+        outdir = Path("logs") / "results"
+        outdir.mkdir(parents=True, exist_ok=True)
+        (outdir / f"result_{safe}.json").write_text(
+            json.dumps(resp, ensure_ascii=False, indent=2, separators=(",", ": ")), 
+            encoding="utf-8"
+        )
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
     return resp
