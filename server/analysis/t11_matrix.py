@@ -15,7 +15,7 @@ from pathlib import Path
 from subprocess import check_output
 import httpx
 
-# Respekter no_weather fra env i CI
+# Respekter no_weather fra env i CI (modulnivå default)
 CG_NO_WX = (os.environ.get("CG_T11_NO_WEATHER", "0").strip().lower() in ("1", "true", "yes"))
 
 GOLDEN_RIDES: List[str] = [
@@ -251,8 +251,12 @@ def _load_samples_for(ride_id: str) -> list:
 
 def _analyze_one(url_base: str, ride_id: str, profile: dict, frozen: bool) -> dict | None:
     url = f"{url_base}/api/sessions/{ride_id}/analyze"
+
+    # Re-les env her for å fange opp at andre trinn (f.eks. T14) endrer vær-modus uten restart
+    CG_NO_WX_RUNTIME = (os.environ.get("CG_T11_NO_WEATHER", "0").strip().lower() in ("1", "true", "yes"))
+
     params = {
-        "no_weather": True if CG_NO_WX else False,
+        "no_weather": True if CG_NO_WX_RUNTIME else False,
         "force_recompute": False,
         "debug": 0,
     }
@@ -263,7 +267,7 @@ def _analyze_one(url_base: str, ride_id: str, profile: dict, frozen: bool) -> di
     }
 
     # Om vi kjører "frozen" lokalt uten CG_NO_WX, kan vi hinte til serveren:
-    if frozen and not CG_NO_WX:
+    if frozen and not CG_NO_WX_RUNTIME:
         payload.setdefault("weather", {})
         payload["weather"]["__mode"] = "frozen"
 

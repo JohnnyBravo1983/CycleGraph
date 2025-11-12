@@ -463,36 +463,52 @@ jobs:
           cd ..
           $GITHUB_WORKSPACE/.venv/bin/python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
 
-      - name: Boot API on :5175 and wait (no heredoc)
-        shell: bash
+      - name: T14 Final Sweep & Lock
+        shell: powershell
         run: |
-          nohup $GITHUB_WORKSPACE/.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 5175 > uvicorn.log 2>&1 &
-          printf "%s\n" \
-            "import time, urllib.request, sys" \
-            "base='http://127.0.0.1:5175'" \
-            "t0=time.time(); ok=False" \
-            "while time.time()-t0<25:" \
-            "    time.sleep(0.5)" \
-            "    try:" \
-            "        with urllib.request.urlopen(base+'/api/profile/get', timeout=2) as r:" \
-            "            ok=(r.status==200)" \
-            "            break" \
-            "    except Exception:" \
-            "        pass" \
-            "print('server ok' if ok else 'server not ready')" \
-            "sys.exit(0 if ok else 1)" \
-            > wait_server.py
-          $GITHUB_WORKSPACE/.venv/bin/python wait_server.py
+          # --- Determinisme ---
+          $env:CG_SERVER         = "http://127.0.0.1:5175"
+          $env:TZ                = "UTC"
+          $env:LANG              = "C"
+          $env:LC_ALL            = "C"
+          $env:PYTHONHASHSEED    = "0"
 
-      - name: Run T11 accuracy matrix (PowerShell; don't fail build)
-        shell: pwsh
-        continue-on-error: true
-        env:
-          CG_WX_MODE: frozen
-          CG_T11_NO_WEATHER: "1"
-          CG_SERVER: http://127.0.0.1:5175
-        run: |
-          ./scripts/T11_Run_Matrix.ps1
+          # --- Start Uvicorn i bakgrunnen (Windows PowerShell 5) ---
+          $job = Start-Job -ScriptBlock { python -m uvicorn app:app --host 127.0.0.1 --port 5175 }
+
+          # Poll til API svarer (maks ~25s)
+          $ok = $false
+          1..50 | ForEach-Object {
+            try {
+              Invoke-WebRequest "$env:CG_SERVER/api/profile/get" -UseBasicParsing -TimeoutSec 2 | Out-Null
+              $ok = $true
+              break
+            } catch {}
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not $ok) {
+            Write-Host "Server not up. Uvicorn output follows:"
+            Receive-Job $job -Keep | Out-String | Write-Host
+            throw "Server failed to start"
+          }
+
+          # --- T11: Regression Matrix (rask baseline uten vær) ---
+          # Sikre deterministisk og rask kjøring for T11
+          $env:CG_T11_NO_WEATHER = "1"
+          scripts/T11_Run_Matrix.ps1
+
+          # --- T14: Final Sweep (frozen weather) + Export + Verify ---
+          # T14 skal bruke vær (frossent); nullstill no_weather-flagget
+          $env:CG_T11_NO_WEATHER = ""
+          scripts/T14_Final_Sweep.ps1 -Server $env:CG_SERVER
+
+          # --- Rydd opp i bakgrunnsjobb ---
+          Stop-Job $job -Force | Out-Null
+          Receive-Job $job -Keep | Out-Null
+
+      - name: PyTest
+        shell: powershell
+        run: pytest -q
 
       - name: Ensure T11 CSV exists (fallback if missing)
         shell: bash
