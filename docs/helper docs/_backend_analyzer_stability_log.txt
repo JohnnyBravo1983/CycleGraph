@@ -137,7 +137,193 @@ Utvidet test- og CI-seksjon med Trinn 6 røyk- og CSV-logging.
 
 Ingen andre deler endret – alt fra Trinn 3–5 beholdt uforandret
 
+🟩 Trinn 7 – Publish & Observability (foroverkomp.): Alle response-stier (ok, fallback, no-fallback) kontraktsikres før retur og logging,
+ slik at alle felter alltid finnes (null er tillatt). weather_source og profile_version logges konsekvent for senere sweep/trend uten API-endringer.
+🟩 Trinn 8 – Verification & Sweep (ny del)
 
+Grid-sweep: CdA ∈ {0.28…0.32} × Crr ∈ {0.003…0.006} × weight ∈ {70,78,85,90} × eff ∈ {90,93,95,96} → 400 rader (bekreftet).
+
+Monotoni/invarians verifisert:
+
+Drag ↑ strengt med CdA; invariant vs Crr, weight, eff når CdA holdes fast.
+
+Rolling ↑ strengt med Crr; ~proporsjonal med weight; invariant vs CdA.
+
+Precision/total watt = (drag + rolling) skalert korrekt med crank_eff_pct (rider_power = wheel_power / η).
+
+Pivot-eksporter skrevet til logs/ for alle kombinasjoner av weight×eff og for metrikker: precision_wattD, drag_wattD, rolling_wattD.
+
+Kultur/uformaterings-guard: tall normaliseres til punktum-desimal (en-US) før CSV-eksport for deterministisk CI.
+
+Sanity-scriptet fanger og asserter monotoni, invarians og riktig grid-størrelse; feiler hardt ved brudd.
+
+Resultatet dokumenterer at backend-analysen følger fysisk forventning før lengre real-world runs.
+
+Små oppdateringer i eksisterende seksjoner
+
+(3) Analyzer-forbedringer: “Monotoni verifisert” → presiser hvilke relasjoner (drag↔CdA, rolling↔Crr/weight, eff-skalering).
+
+(4) Kontrakt/adapters: presiser at precision_watt etter Trinn 5 alltid skaleres ved retur med crank_eff_pct.
+
+(5) Test- og valideringsmal: legg inn “T8_MonotonicitySweep.ps1” som fast del av pre-merge smoke (kjører pivot + asserts).
+
+(6) CI: ny jobb “t8_sweep” (hurtig, fil-basert) som produserer artefakter t8_pivot_*.csv og publiserer dem.
+
+🟩 Trinn 9 – Trend Analysis (låst)
+
+Status: ✅ Fullført og låst.
+Formål: Aggregere ride-nivå-metrikker per profile_version og weather_source for enkel trend/QA.
+
+Artefakter (skrives til logs/<scope>/latest/):
+
+trinn9_trend_summary.csv
+Kolonner (stabile):
+profile_version,precision_watt_mean,precision_watt_std,precision_watt_count,drag_watt_mean,drag_watt_std,drag_watt_count,rolling_watt_mean,rolling_watt_std,rolling_watt_count,avg_watt_mean,avg_watt_std,avg_watt_count,w_per_beat_mean,w_per_beat_std,w_per_beat_count,calibration_mae_mean,calibration_mae_std,calibration_mae_count
+
+trinn9_pivot_<metric>_v<profile>.csv for precision_watt,drag_watt,rolling_watt,avg_watt,w_per_beat,calibration_mae
+Kolonner (stabile): weather_source,mean,std,count
+
+trinn9_anomalies.csv (robusthetslogg): kind, [column], [count]
+
+Datagrunnlag og regler (server/analysis/trend9.py):
+
+Leser result_*.json (obligatorisk) og matcher frivillig session_*.json på samme id.
+
+w_per_beat = precision_watt / avg_hr (fallback avg_watt / avg_hr) der avg_hr er gjennomsnitt av samples[*].hr|heartrate|heart_rate|bpm kun når moving=true.
+
+avg_watt: gjennomsnitt av per-sample precision_watt hvis logget, ellers metrics.total_watt fallback metrics.precision_watt.
+
+weather_source settes i analyze-respons (toppnivå) og speiles i metrics.weather_source.
+Verdien er obligatorisk i Tr9-artefakter.
+
+Alle CSV-er er UTF-8 uten BOM, desimal . og UTC-antakelser.
+
+DoD Trinn 9:
+
+Minst 5–9 sessions gir ikke-tom trend_summary og ≥1 pivot_*.
+
+robustness_check rapporterer kind:"none" for grønn kjøring.
+
+weather_source og profile_version tilstede på alle rader.
+
+🔒 Kontrakt-garantier (akkumulerte, gjelder fra Tr4 → Tr9)
+
+Toppnivå i analyze-respons:
+source, weather_applied, weather_source, profile_version, debug, metrics{…}, profile_used{…}
+
+metrics inneholder alltid (kan være null):
+precision_watt, drag_watt, rolling_watt, total_watt, calibration_mae, weather_source, weather_meta?, weather_used?, weather_fp?
+
+Navn som ikke endres videre:
+precision_watt, drag_watt, rolling_watt, total_watt, calibration_mae, profile_version, weather_source.
+
+🔮 Foroverkompabilitet (Trinn 10–13) – tillegg til denne rapporten
+🟦 Trinn 10 — Profile Versioning & Audit Trail
+
+Definisjon:
+version_hash = sha1(json_canon(profile_subset))[:8]
+profile_version = "v1-" + version_hash + "-" + YYYYMMDD(UTC)
+
+profile_subset (kun disse feltene inngår i hash):
+rider_weight_kg, bike_type, bike_weight_kg, tire_width_mm, tire_quality, device
+(crank_efficiency er ikke brukerfelt og skal ikke hashes)
+
+Audit-logg (append-only): logs/profile/profile_versions.jsonl
+Felter: ts, profile_version, version_hash, profile_subset
+
+API-krav: analyze-respons speiler alltid brukt profile_version i toppnivå og metrics.profile_used.profile_version.
+
+🟦 Trinn 11 — CI Regression Matrix
+
+Datasett (golden rides): 16127771071, 16262232459, 16279854313, 16311219004, 16333270450
+
+Gates:
+
+Accuracy gate: mean(calibration_mae over golden) ≤ BASE_MAE + 2.5 W (rides uten device ekskluderes fra snitt; rapportér count).
+
+Fysikk gate (T8): Monotoni/invarians må holde; grid_size == 400; CSV-format deterministisk.
+
+CI-artefakter:
+
+artifacts/t8_pivot_*.csv
+
+artifacts/t11_matrix.csv med kolonner:
+git_sha, profile_version, weather_source, ride_id, precision_watt, drag_watt, rolling_watt, total_watt, calibration_mae
+
+Re-kjørt Tr9: trinn9_trend_summary.csv, trinn9_pivot_*.csv
+
+🟦 Trinn 12 — (Fjernet for MVP)
+
+Ingen nye devices i MVP. device-felt beholdes for fremtid.
+
+🟦 Trinn 13 — Export & Final Lock
+
+Eksportkommando: scripts/export_all.ps1 → export/<YYYYMMDD>/
+
+Mapper/filer:
+
+sessions.jsonl (én rad pr ride) — minimumsskjema:
+
+{
+  "ride_id": "16311219004",
+  "profile_version": "v1-6568af79-20251112",
+  "weather_source": "open-meteo/era5",
+  "metrics": {
+    "precision_watt": 208.6,
+    "drag_watt": 131.3,
+    "rolling_watt": 34.5,
+    "total_watt": 187.3,
+    "calibration_mae": null,
+    "weather_source": "open-meteo/era5"
+  }
+}
+
+
+trend_summary.csv (identisk header som Tr9)
+
+trend_pivots/*.csv
+
+profile_versions.jsonl (fra Tr10)
+
+Determinisme-guards: TZ=UTC, LANG=C, PYTHONHASHSEED=0, BOM-løst, float_format="%.6f".
+Vær kan kjøres i “frozen” modus for bit-stabile resultater.
+
+Deprecation-policy: Felter merkes deprecated_* minst én sprint før de evt. fjernes.
+
+📎 Referanse: “Forward-Compatibility Schema” (for Copilot/QA)
+{
+  "ride_id": "string",                       // Strava activity id (string)
+  "profile_version": "string",               // "v1-<hash>-<YYYYMMDD>"
+  "weather_source": "string",                // f.eks. "open-meteo/era5"
+  "device": "string",                        // "strava" i MVP
+  "metrics": {
+    "precision_watt": "number|null",
+    "drag_watt": "number|null",
+    "rolling_watt": "number|null",
+    "total_watt": "number|null",
+    "calibration_mae": "number|null",
+    "weather_source": "string"
+  },
+  "profile_used": {
+    "profile_version": "string",
+    "rider_weight_kg": "number",
+    "bike_type": "string",
+    "bike_weight_kg": "number",
+    "tire_width_mm": "number",
+    "tire_quality": "string",
+    "device": "string"
+  }
+}
+
+📝 Endringer i denne rapportversjonen (patch-logg)
+
+🟩 Lagt til Trinn 9 – Trend Analysis (artefakter, regler, DoD).
+
+🟦 Utvidet Kontrakt-garantier med faste feltnavn + speiling av weather_source/profile_version.
+
+🟦 Ny Foroverkompabilitet Tr10–13 (versjonering, CI-matrix, eksport/determinisme).
+
+📎 Lagt inn Forward-Compatibility Schema for Copilot/CI/QA.
 
 
 🧭 Forward-Compatibility Schema (for Copilot context)

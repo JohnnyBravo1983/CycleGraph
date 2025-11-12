@@ -13,3 +13,6 @@ Viktige Comands
 .\scripts\E2E.Multiple_Rides.ps1 -UseApiPrefix:$false
 
 .\scripts\BasicE2E_3Rides.ps1 
+
+# venv kommando
+.venv\Scripts\Activate.ps1

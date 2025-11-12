@@ -51,7 +51,12 @@ app.add_middleware(
 # -----------------------------------------------------------------------------
 
 from server.routes import sessions
+from server.routes.profile_router import router as profile_router
+from server.routes.sessions_list_router import router as sessions_list_router
+
 app.include_router(sessions.router)
+app.include_router(profile_router)
+app.include_router(sessions_list_router)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cyclegraph.app")
@@ -249,12 +254,12 @@ def _extract_streams(session: Dict[str, Any]):
         streams.get("pulses"),
         streams.get("hr"),
         (s.get("data") or {}).get("streams", {}).get("pulses")
-        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
+        if isinstance((s.get("data") or {}).get("streams", dict)) else None,
     )
     velocity = _first_nonempty(
         streams.get("velocity_smooth"),
         (s.get("data") or {}).get("streams", {}).get("velocity_smooth")
-        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
+        if isinstance((s.get("data") or {}).get("streams", dict)) else None,
     )
     altitude = _first_nonempty(
         streams.get("altitude"),

@@ -600,9 +600,18 @@ async def analyze_session(
         profile = _ensure_profile_device(up)
         body["profile"] = profile
 
-    # Finn profile_version (binding for sid hvis finnes, ellers hash av aktiv profil)
-    sid_key = sid or ""
-    profile_version = binding_from(sid_key) or compute_profile_version(profile)
+    # --- TRINN 10: Profile versioning inject ---
+    from server.utils.versioning import compute_version, load_profile
+
+    # 1) hent subset for versjonering: klient → ellers disk
+    profile_in = dict((body or {}).get("profile") or {})
+    if profile_in:
+        subset = {k: profile_in.get(k) for k in ("rider_weight_kg","bike_type","bike_weight_kg","tire_width_mm","tire_quality","device")}
+    else:
+        prof_disk = load_profile()
+        subset = {k: prof_disk.get(k) for k in ("rider_weight_kg","bike_type","bike_weight_kg","tire_width_mm","tire_quality","device")}
+    vinfo = compute_version(subset)  # {"version_hash","profile_version","version_at"}
+    profile_version = vinfo["profile_version"]
 
     profile_scrubbed = _scrub_profile(profile)
 
@@ -661,14 +670,14 @@ async def analyze_session(
     # Bygg third med weather hvis tilgjengelig
     third = dict(estimat_cfg)
     weather_applied = False
-    
+
     if wx_used and not no_weather:
         # Normaliser til kanoniske navn for Rust-bindingen
         wind_ms_val = float(wx_used.get("wind_ms", 0.0))
         wind_dir_deg_val = float(wx_used.get("wind_dir_deg", 0.0))
         air_temp_c_val = float(wx_used.get("air_temp_c", 15.0))
         air_pressure_hpa_val = float(wx_used.get("air_pressure_hpa", 1013.25))
-        
+
         # Oppdater third med kanoniske navn på toppnivå
         third.update({
             "wind_ms": wind_ms_val,
@@ -677,7 +686,7 @@ async def analyze_session(
             "air_pressure_hpa": air_pressure_hpa_val,
             "dir_is_from": True
         })
-        
+
         # Behold metadata for serverens observabilitet
         third["weather_meta"] = wx_meta
         fp = _wx_fp(wx_used)
@@ -1024,9 +1033,37 @@ async def analyze_session(
                 k in m for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
             )
             if rust_has_metrics:
+                # --- Trinn 9: weather_source til toppnivå + metrics (før kontraktsikring / return) ---
+                # --- Weather source propagation (Trinn 9) ---
+                try:
+                    _m = resp.get("metrics") or {}
+                    _wm = (_m.get("weather_meta") or {})
+                    _prov = _wm.get("provider") or _wm.get("source") or _wm.get("name")
+                    resp["weather_source"] = _prov or "open-meteo"
+                    _m["weather_source"] = resp["weather_source"]
+                    resp["metrics"] = _m
+                except Exception:
+                    # Hold respons stabil selv om weather_meta mangler
+                    resp.setdefault("weather_source", "unknown")
+                    resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
+
+                # --- TRINN 10: Profile versioning inject ---
+                resp["profile_version"] = profile_version
+                mu = resp.setdefault("metrics", {}).setdefault("profile_used", {})
+                mu.update({**profile, "profile_version": profile_version})
+
                 # --- Trinn 7: kontraktsikre + observability ---
                 try:
                     ensured = _ensure_contract_shape(resp)
+                    
+                    # --- TRINN 10: mirror profile_used inn i metrics.profile_used også ---
+                    mu_top = ensured.setdefault("profile_used", {})
+                    mm = ensured.setdefault("metrics", {})
+                    mm.setdefault("profile_used", {})
+                    # sørg for identisk speiling
+                    mm["profile_used"] = dict(mu_top)
+                    # --- END TRINN 10 ---
+                    
                     _write_observability(ensured)
                     return ensured
                 except Exception as e:
@@ -1058,11 +1095,11 @@ async def analyze_session(
     # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
     profile_used = _profile_used_from(profile)
     profile_used["profile_version"] = profile_version
-    
+
     fallback_metrics = _fallback_metrics(
         mapped,
-        profile,                 # NB: profile, ikke profile_used
-        weather_applied=False,   # fallback: behandle som uten vær
+        profile,                # NB: profile, ikke profile_used
+        weather_applied=False,  # fallback: behandle som uten vær
         profile_used=profile_used,  # inkluderer profile_version
     )
 
@@ -1079,10 +1116,35 @@ async def analyze_session(
         },
     }
 
+    # --- Weather source propagation (Trinn 9) ---
+    try:
+        _m = resp.get("metrics") or {}
+        _wm = (_m.get("weather_meta") or {})
+        _prov = _wm.get("provider") or _wm.get("source") or _wm.get("name")
+        resp["weather_source"] = _prov or "open-meteo"
+        _m["weather_source"] = resp["weather_source"]
+        resp["metrics"] = _m
+    except Exception:
+        # Hold respons stabil selv om weather_meta mangler
+        resp.setdefault("weather_source", "unknown")
+        resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
+
+    # --- TRINN 10: Profile versioning inject ---
+    resp["profile_version"] = profile_version
+    mu = resp.setdefault("metrics", {}).setdefault("profile_used", {})
+    mu.update({**profile, "profile_version": profile_version})
+
     # Trinn 7: kontraktsikre + observability før return
     resp = _ensure_contract_shape(resp)
+    
+    # --- TRINN 10: mirror profile_used inn i metrics.profile_used (må stå helt til slutt før logging/return) ---
+    resp.setdefault("metrics", {})
+    resp["metrics"]["profile_used"] = dict(resp.get("profile_used") or {})
+    # --- END TRINN 10 ---
+
     try:
-        _write_observability(resp)
+        _write_observability(resp)  # skal nå logge metrics.profile_used også
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
+
     return resp

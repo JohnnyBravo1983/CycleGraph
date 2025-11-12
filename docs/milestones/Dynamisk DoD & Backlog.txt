@@ -462,81 +462,629 @@ git add .
 git commit -m "S14.5: Backend PW E2E: weather+profile in analyze, schema v0.7.3 persist, idempotent publish w/ token auto-refresh, 5h guard, logs/metrics."
 git tag -a v0.14.5 -m "Sprint 14.5 E2E PW backend complete"git push --follow-tags
 
-🧩 Sprint 15 — Frontend integrasjon + innholdsmigrering til cyclegraph.app
-🎯 Mål
-Koble frontend ←→ backend slik at bruker ser korrekte analyserte data (ikke mock) i Session Cards/Trend, og samtidig migrere landingssiden til cyclegraph.app (Vercel) – tospråklig, SEO/OG riktig, >90 Lighthouse.
-📦 Omfang (leveranser)
-Frontend (React/TS/Vite)
-Session Cards viser: PW, PW CI, CdA, crr_used, publish-status (done/failed/pending/none), publish_time, og Strava activity-link.
-Trend-visning (enkel): PW over tid for de siste N øktene (real data).
-Profil/kalibrering UI: dropdowns for bike_type, bike_weight_kg, tire_width_mm, tire_quality, felt for rider_weight_kg, bike_name; samtykke med versjon + tidsstempel.
-Toggle: “Publisér Precision Watt til Strava”.
-Lagring: POST/PUT til backend for profil; backend bruker dette ved neste analyze.
-Ingen mock: all visning leser ekte data fra API (/api/sessions/:id, /api/sessions/list, /api/profile/get).
-A11y: labels, fokus, tastatur.
-Migrering — cyclegraph.app (Vercel)
-Flytt alt fra landing/ inn i hovedrepo (f.eks. frontend/public eller frontend/app/landing).
-Konsolider i18n (NO/EN).
-Deploy med Vercel (main), DNS verifisert (root + www), favicon/OG/meta oppdatert, responsivt.
-Kjør Lighthouse og fiks >90 (SEO/Accessibility/Best Practices/Performance så langt det lar seg gjøre).
-Observabilitet
-Frontend feilhåndtering (UI-banner) for 401/403 (foreslå “Koble Strava på nytt”).
-Enkel “Activity log” i UI: siste analyze/publish med timestamp.
-🧪 DoD (sjekkliste)
-Funksjonelt
- Session Cards viser verdier fra ekte analyse (PW, CI, CdA, Crr brukt, publish-status/tid).
- Trend-graf henter ekte data (minst 5 økter).
- Profil/kalibrering kan lagres, og ny analyze bruker verdiene (verifiser med re-analyze ride1–5 og se endring).
- Publiseringstoggle kan settes i UI og respekteres i backend.
-Migrering
- cyclegraph.app og www.cyclegraph.app viser ny landingsside fra main-repo.
- NO/EN toggle fungerer; meta/OG/favicons riktig.
- Lighthouse SEO/Acc > 90 (logg resultat i docs/deployment-log.md).
-Ingen mock
- Alle API-kall går mot live endpoints. “Dummy”/mock slått av/ryddet.
-Akseptansekjøring
- Åpne frontend (npm run dev) → Session Cards viser data for ride1–5.
- Endre profil (f.eks. dekk-kategori) → re-analyze ride3 → PW endres konsistent.
- Slå på publish-toggle i UI → publisering skjer ved neste analyze/publish, kommentar inkluderer “Check out my full ride analysis at CycleGraph.app”.
- Lighthouse-rapport >90 (lagres i docs/deployment-log.md).
-🧽 (Frivillig) Sprint 16 — “Polish & Launch” (liten buffer)
-🎯 Mål
-Polish + release hygiene etter S15, kun for å beskytte kognitiv kapasitet.
-Omfang (light)
-Release notes + README oppdatert (Quick Start + Troubleshooting + Scripts).
-E2E-script: én kommando som kjører import→analyze→publish for et sett økter.
-Telemetry finpuss (labels, timing).
-Feiltekster i UI (oversatt + konsistente).
-Siste SEO (sitemap/robots, canonical).
-DoD
- “Launch Playbook” ferdig i /docs/launch-playbook.md.
- README Quick Start (dev) + brukerhjelp (kalibrering, publish).
- Demo-brukerflyt testet (kalibrer → last opp → analyze → publish → se på web).
- Alt grønt i CI.
-📌 Notater/Presiseringer fra innsikten din (og hvordan vi sjekker dem)
-Ride3 ble publisert med PW ≈ 225W (≠ Strava 198W).
-→ Vi kjører ride3/analyze på nytt med vær aktivert, og logger ut brukt crr_used, CdA, reason, precision_watt_ci.
-Værberegning var trolig ikke aktiv i den runden.
-→ Inngår i S14.5 DoD. Test: slå av/på vær via env-toggle (om du har), se effekt på PW.
-Defaults: må dokumenteres og matche UI-defaults senere (S15).
-→ S14.5: definér og bruk i backend. S15: bind til UI.
-Ride1/2/4/5 publiserte Strava-tall (ikke PW).
-→ S14.5: kjør analyze → PW for alle fem.
-Frontend skal lese alt fra API, ikke mock.
-→ Lagt i S15 + eksplisitt DoD “Ingen mock”.
-Profil/dropdowns + lagring + samtykke + kalibrering.
-→ Backend i S14.5 (verdier brukt i analyse). UI i S15.
-Øktlengde 5t → S14.5 (backend + test).
 
-Kommentar-tekst i Strava: “Check out my full ride analysis at CycleGraph.app”.
-→ S14.5 publish-format + S15 UI-toggle.
-🧯 Troubleshooting (kortversjon – ligger også i skriptene)
-has_token=False / Missing STRAVA_ACCESS_TOKEN → Server startet uten ny .env. Stopp, start fra repo-rot, load_dotenv(override=True) øverst i app.py.
-404 etter authorize → ok når du bruker manuell code. (Evt. legg /api/debug/oauth_capture i API.)
-Port i bruk → netstat -ano | findstr :5179 → taskkill /PID <PID> /F.
-Tom publish-respons i PS5.1 → endpoint kan returnere 204; bruk publish_ride.ps1 for tydelig output.
-from __future__ syntax error → må stå øverst i fila.
-Hvis du vil, kan jeg nå oppdatere publish-kommentaren (nøyaktig tekst), legge inn auto-refresh-snutten i publish.py/strava_auth.py, og gi deg en 1-kommando E2E som kjører alt for ride1–5 som siste steg i S14.5.
+# 🧩 Sprint 15 — Frontend integrasjon, trend & visuell polish (cyclegraph.app)
+
+**Periode:** 10.–24. november 2025
+**Tema:** Koble **frontend ←→ backend** slik at brukeren ser **ekte analyserte data (ikke mock)** i Session Cards og Trend. Samtidig migrerer vi landingssiden til **cyclegraph.app** (Vercel) med tospråklig innhold, riktig SEO/OG og **>90 Lighthouse**. Alt skal se minimalistisk og helhetlig ut, og løfte fram det solide arbeidet i backend.
+
+---
+
+## 🎯 Mål
+
+1. Live-data i UI (Session Cards, Trend, Økt-detalj) — **ingen mock**.
+2. Profil/kalibrering UI → re-analyze viser endring i **Precision Watt**.
+3. Migrere landingsside til **cyclegraph.app** (Vercel), **NO/EN** og SEO.
+4. Observabilitet i UI: feilbanner, activity-log, enkle timings.
+
+---
+
+## 📦 Omfang (leveranser)
+
+### Frontend (React/TS/Vite)
+
+**Datakilde:** live API (ingen mock).
+
+**Nytt datalag `src/lib/api.ts` med:**
+
+* `listSessions()`, `getSession(id)`, `analyze(id, opts)`
+* `getTrendSummary()`, `getTrendPivot(metric, profileVersion)`
+* `getProfile()`, `saveProfile(payload)`
+
+**Behold eksisterende komponenter/hover** – bytt **mock → api.ts** via adaptere.
+
+#### Session Cards (UI)
+
+Viser: `precision_watt (PW)`, `PW_CI` (når tilgjengelig), `CdA`, `crr_used`, `publish_status (done/failed/pending/none)`, `publish_time`, Strava-lenke.
+
+#### Trend (enkel)
+
+To kurver: **Avg Watt** og **Watt per Heartbeat (W/Beat)** over siste N økter.
+Data hentes fra `trend9_trend_summary.csv` og pivots via API-endepunkter.
+
+#### Økt-kurve (detalj)
+
+På klikk: vis tidsserie med hover for “sanntid watt” (bruk eksisterende hover‐logikk, men feed **live samples**).
+
+#### Profil/kalibrering UI
+
+Felter: `rider_weight_kg`, `bike_type`, `bike_weight_kg`, `tire_width_mm`, `tire_quality`, `bike_name`, **`cda` (default 0.30)**.
+**Ikke redigerbar:** `crank_efficiency` (**96%** — styres av backend/eksperimenter).
+Samtykke: versjon + tidsstempel.
+Toggle: “Publisér Precision Watt til Strava”.
+
+#### Onboarding-visuals (MVP-stubber)
+
+* `TirePreview`: responsiv illustrasjon av dekk som endrer dimensjon ved dropdown.
+* `RiderAvatar`: realistisk/minimalistisk avatar m/sykkel (placeholder‐stil).
+* `ProfileAccuracyMeter`: indikator som starter **~15–20 %** usikkerhet og synker mot **~3–5 %** etter hvert som felter fylles (MVP-heuristikk).
+  Styres av feature-flag **`VITE_FEAT_VISUALS=1`**.
+
+#### UI/UX
+
+* A11y: labels, fokus, tastatur.
+* Felles `<ApiErrorBanner />` for 401/403 m/tekst **“Koble Strava på nytt”**.
+* “Activity log” i UI: siste analyze/publish med timestamp.
+
+### Migrering — cyclegraph.app (Vercel)
+
+* Flytt alt fra `landing/` inn i repoet (f.eks. `frontend/app/landing`).
+* Konsolider i18n (NO/EN), oppdatér meta/OG/favicons, responsiv layout.
+* Deploy fra **main** (DNS verifisert for root + www).
+* Kjør Lighthouse og fiks **>90** (SEO/Accessibility/Best Practices/Performance).
+
+### Observabilitet (UI)
+
+* UI-banner for feil (401/403/5xx).
+* Enkle timings/labels i devtools‐logs.
+
+---
+
+## 🧠 Viktig beslutning: Bygge videre, ikke slette
+
+Vi **beholder** eksisterende komponenter (inkl. hover‐logikk) og layout som funker.
+
+**Strategi:**
+
+* Lag **adaptere** som mapper **backend → dagens prop-shape**:
+
+  * `mapSessionToCard(model)`
+  * `mapSamplesToSeries(samples)`
+  * `mapTrendCsvToSeries(csv)`
+* Bytt **kun datakilden** fra mock → `api.ts`.
+
+Dette gir rask vei til “shine”, mindre teknisk gjeld, og trygg overgang.
+
+---
+
+## 🔧 Implementasjonsplan (kort)
+
+* Datalag: `src/lib/api.ts` + adaptere (se under).
+* Session Cards: wire opp mot `listSessions()`/`getSession(id)`.
+* Trend: les summary/pivots → to kurver (AvgW, W/Beat).
+* Økt-kurve: ved klikk, hent `samples` → tegn kurve (gjenbruk hover).
+* Profil: form + lagring (POST/PUT) → **re-analyze** viser endring i PW.
+* Visuals (flagget): `TirePreview`, `RiderAvatar`, `ProfileAccuracyMeter`.
+* Migrering: landing → cyclegraph.app + Lighthouse > 90.
+* Polish: logo i header, spacing/typografi, tooltips.
+
+---
+
+## 🧱 API-kontrakter (referanse)
+
+> Kontraktene speiler Trinn 9 “Kontraktssikring & scalar-metrics”. Backend fyller **kun manglende nøkler**; den **overskriver ikke** tall felt som finnes.
+
+**Response toppnivå (eksempel):**
+
+```json
+{
+  "source": "rust_core|fallback_py",
+  "weather_applied": true,
+  "profile_used": { "cda": 0.30, "crr": 0.004, "weight_kg": 104, "crank_efficiency": 96 },
+  "metrics": {
+    "precision_watt": 246.2,
+    "drag_watt": 83.4,
+    "rolling_watt": 29.7,
+    "total_watt": 246.2,
+    "weather_applied": true,
+    "profile_used": { "cda": 0.30, "crr": 0.004, "weight_kg": 104, "crank_efficiency": 96 }
+  },
+  "samples": [ /* tidsserie */ ],
+  "publish": { "status": "none|pending|done|failed", "time": "2025-11-12T08:15:30Z" }
+}
+```
+
+**Trend summary (CSV) cols (eksempel):**
+
+```
+date, session_id, avg_watt, avg_hr, w_per_beat, cda_used, crr_used
+```
+
+**Profiler (eksempel payload):**
+
+```json
+{
+  "rider_weight_kg": 104,
+  "bike_weight_kg": 8.0,
+  "bike_type": "road",
+  "tire_width_mm": 28,
+  "tire_quality": "gp5000",
+  "bike_name": "Tarmac SL7",
+  "cda": 0.30,
+  "crank_efficiency": 96,
+  "consent": { "version": 1, "ts": "2025-11-10T10:00:00Z" },
+  "publish_to_strava": true
+}
+```
+
+---
+
+## ⚙️ Praktiske defaults (justerbare)
+
+* **cda:** default **0.30** (skulder-/vinterhalvår). Typisk spenn: 0.26–0.36 for road uten tempodrakt.
+* **crank_efficiency:** default **96%** (låst i UI; styres av backend/eksperimenter).
+* **bike_weight_kg:** default 8.0 (typisk lett landeveissykkel 7.2–8.8 kg).
+* **rider_weight_kg:** hent siste kjente profil ellers 80.0.
+* **tire_width_mm:** road 28, gravel 40, mtb 55, tt 25.
+* **tire_quality:** "gp5000" for road, "riddler" for gravel, "ikon" for mtb, "tt_slick" for tt.
+
+> Disse er kun UI-defaults. Backend er kilde for sannhet ved analyze.
+
+---
+
+## 🧩 `src/lib/api.ts` (skjelett + typer)
+
+```ts
+// src/lib/api.ts
+export type SessionId = string;
+
+export interface Profile {
+  rider_weight_kg: number;
+  bike_weight_kg: number;
+  bike_type: 'road' | 'gravel' | 'mtb' | 'tt';
+  tire_width_mm: number;
+  tire_quality: string;
+  bike_name?: string;
+  cda?: number; // aerodynamic drag area, default 0.30 (seasonal)
+  crank_efficiency?: number; // default 96, not editable by user
+  consent?: { version: number; ts: string };
+  publish_to_strava?: boolean;
+}
+
+export interface SamplePoint {
+  t: number;      // seconds from start
+  watt: number;   // precision watt
+  hr?: number;    // bpm
+}
+
+export interface AnalyzeMetrics {
+  precision_watt: number;
+  drag_watt: number;
+  rolling_watt: number;
+  total_watt: number;
+  weather_applied: boolean;
+  profile_used?: Partial<Profile>;
+}
+
+export interface PublishInfo {
+  status: 'none' | 'pending' | 'done' | 'failed';
+  time?: string;
+  strava_url?: string;
+}
+
+export interface AnalyzeResponse {
+  source: string;
+  weather_applied: boolean;
+  profile_used?: Partial<Profile>;
+  metrics: AnalyzeMetrics;
+  samples?: SamplePoint[];
+  publish?: PublishInfo;
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000/api';
+
+async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function listSessions(): Promise<{ id: SessionId; name: string; ts: string; }[]> {
+  return http('/sessions');
+}
+
+export async function getSession(id: SessionId): Promise<AnalyzeResponse> {
+  return http(`/sessions/${id}`);
+}
+
+export async function analyze(id: SessionId, opts?: { no_weather?: boolean; force?: boolean; }): Promise<AnalyzeResponse> {
+  const qs = new URLSearchParams();
+  if (opts?.no_weather) qs.set('no_weather', '1');
+  if (opts?.force) qs.set('force_recompute', '1');
+  return http(`/sessions/${id}/analyze?${qs.toString()}`, { method: 'POST', body: '{}' });
+}
+
+export async function getTrendSummary(): Promise<string> { // CSV string
+  const res = await fetch(`${API_BASE}/trend/summary.csv`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`Trend summary failed: ${res.status}`);
+  return res.text();
+}
+
+export async function getTrendPivot(metric: 'avg_watt'|'w_per_beat', profileVersion?: number): Promise<string> {
+  const qs = new URLSearchParams();
+  if (profileVersion != null) qs.set('profile_version', String(profileVersion));
+  const res = await fetch(`${API_BASE}/trend/pivot/${metric}.csv?${qs.toString()}`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`Trend pivot failed: ${res.status}`);
+  return res.text();
+}
+
+export async function getProfile(): Promise<Profile> {
+  return http('/profile');
+}
+
+export async function saveProfile(p: Profile): Promise<Profile> {
+  return http('/profile', { method: 'PUT', body: JSON.stringify(p) });
+}
+```
+
+---
+
+## 🔁 Adaptere (backend → UI-props)
+
+```ts
+// src/lib/adapters.ts
+import type { AnalyzeResponse, SamplePoint } from './api';
+
+export function mapSessionToCard(r: AnalyzeResponse) {
+  const m = r.metrics || ({} as any);
+  return {
+    precisionWatt: m.precision_watt ?? 0,
+    pwCI: (m as any).pw_ci ?? null, // når tilgjengelig senere
+    cda: (r.profile_used as any)?.cda ?? (m.profile_used as any)?.cda ?? 0.30,
+    crr: (r.profile_used as any)?.crr ?? (m.profile_used as any)?.crr ?? null,
+    crankEff: (r.profile_used as any)?.crank_efficiency ?? 96,
+    publishStatus: r.publish?.status ?? 'none',
+    publishTime: r.publish?.time ?? null,
+    stravaUrl: r.publish?.strava_url ?? null,
+    weatherApplied: r.weather_applied ?? m.weather_applied ?? false
+  };
+}
+
+export function mapSamplesToSeries(samples: SamplePoint[]) {
+  return (samples || []).map(s => ({ x: s.t, y: s.watt, hr: s.hr }));
+}
+
+export function mapTrendCsvToSeries(csv: string) {
+  // Enkel CSV→series (for Recharts). Kan byttes til Papaparse senere.
+  const lines = csv.trim().split(/\r?\n/);
+  const [header, ...rows] = lines;
+  const cols = header.split(',');
+  const idx = {
+    date: cols.indexOf('date'),
+    avg: cols.indexOf('avg_watt'),
+    beat: cols.indexOf('w_per_beat')
+  };
+  return rows.map(line => {
+    const c = line.split(',');
+    return { date: c[idx.date], avg: Number(c[idx.avg]), beat: Number(c[idx.beat]) };
+  });
+}
+```
+
+---
+
+## 🧩 Komponent-stubber
+
+### `<ApiErrorBanner />`
+
+```tsx
+// src/components/ApiErrorBanner.tsx
+import { AlertTriangle } from 'lucide-react';
+export default function ApiErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="border border-red-300 bg-red-50 text-red-800 p-3 rounded-2xl flex items-center gap-2">
+      <AlertTriangle className="w-5 h-5" />
+      <span>{message || 'Koble Strava på nytt'}</span>
+    </div>
+  );
+}
+```
+
+### `<ActivityLog />`
+
+```tsx
+// src/components/ActivityLog.tsx
+export type Activity = { ts: string; kind: 'analyze'|'publish'; detail?: string };
+export default function ActivityLog({ items }: { items: Activity[] }) {
+  return (
+    <div className="text-sm space-y-1">
+      {items.map((a, i) => (
+        <div key={i} className="flex justify-between">
+          <span className="opacity-70">{a.kind.toUpperCase()}</span>
+          <span>{new Date(a.ts).toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### `<SessionCard />`
+
+```tsx
+// src/components/SessionCard.tsx
+import ActivityLog from './ActivityLog';
+
+export default function SessionCard({ s }: { s: any }) {
+  return (
+    <div className="rounded-2xl shadow p-4 grid gap-2">
+      <div className="text-xl font-semibold">{s.name ?? 'Session'}</div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div>PW: <b>{Math.round(s.precisionWatt)}</b> W</div>
+        <div>CdA: {s.cda ?? '—'}</div>
+        <div>CRR: {s.crr ?? '—'}</div>
+        <div>Crank eff: {s.crankEff ?? 96}%</div>
+        <div>Status: {s.publishStatus}</div>
+      </div>
+      <ActivityLog items={s.activity ?? []} />
+    </div>
+  );
+}
+```
+
+### `<TrendChart />` (Recharts)
+
+```tsx
+// src/components/TrendChart.tsx
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+
+export default function TrendChart({ data }: { data: { date: string; avg: number; beat: number }[] }) {
+  return (
+    <div className="h-64">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <XAxis dataKey="date" />
+          <YAxis />
+          <Tooltip />
+          <Line type="monotone" dataKey="avg" dot={false} />
+          <Line type="monotone" dataKey="beat" dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+```
+
+### `<ProfileForm />`
+
+```tsx
+// src/components/ProfileForm.tsx
+import { useEffect, useState } from 'react';
+import { getProfile, saveProfile, type Profile } from '@/lib/api';
+
+// Enkle presets per sykkeltype + validering
+const PRESETS: Record<NonNullable<Profile['bike_type']>, { tire_width_mm: number; bike_weight_kg: number }> = {
+  road:  { tire_width_mm: 28, bike_weight_kg: 8.0 },
+  gravel:{ tire_width_mm: 40, bike_weight_kg: 9.5 },
+  mtb:   { tire_width_mm: 55, bike_weight_kg: 12.0 },
+  tt:    { tire_width_mm: 25, bike_weight_kg: 8.2 },
+};
+
+function clampBikeWeight(x: number) { return Math.min(16, Math.max(5.5, x)); }
+function clampCda(x: number) { return Math.min(0.5, Math.max(0.18, x)); }
+
+export default function ProfileForm() {
+  const [p, setP] = useState<Profile | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => { getProfile().then(v => setP({ cda: 0.30, crank_efficiency: 96, ...v } as Profile)).catch(e => setErr(e.message)); }, []);
+
+  if (err) return <div className="text-red-700">{err}</div>;
+  if (!p) return <div>Loading…</div>;
+
+  const set = (k: keyof Profile, v: any) => setP({ ...p!, [k]: v });
+
+  function onTypeChange(v: Profile['bike_type']) {
+    const preset = PRESETS[v];
+    setP({ ...p!, bike_type: v, tire_width_mm: preset.tire_width_mm, bike_weight_kg: preset.bike_weight_kg });
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const clean: Profile = {
+        ...p!,
+        bike_weight_kg: clampBikeWeight(Number(p!.bike_weight_kg ?? 8.0)),
+        cda: clampCda(Number(p!.cda ?? 0.30)),
+        crank_efficiency: 96,
+      };
+      await saveProfile(clean);
+    } catch (e: any) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <form className="grid gap-3" onSubmit={onSubmit}>
+      <label className="grid gap-1">
+        <span>Rider weight (kg)</span>
+        <input className="input" type="number" value={p.rider_weight_kg}
+               onChange={e => set('rider_weight_kg', Number(e.target.value))} />
+      </label>
+      <label className="grid gap-1">
+        <span>Bike weight (kg)</span>
+        <input className="input" type="number" value={p.bike_weight_kg}
+               onChange={e => set('bike_weight_kg', clampBikeWeight(Number(e.target.value)))} />
+        <span className="text-xs opacity-70">Typisk road: 7.2–8.8 kg</span>
+      </label>
+      <label className="grid gap-1">
+        <span>CdA</span>
+        <input className="input" type="number" step="0.01" value={p.cda ?? 0.30}
+               onChange={e => set('cda', clampCda(Number(e.target.value)))} />
+        <span className="text-xs opacity-70">Default vinter/shoulder: 0.30 (typisk 0.26–0.36)</span>
+      </label>
+      <label className="grid gap-1">
+        <span>Tire width (mm)</span>
+        <input className="input" type="number" value={p.tire_width_mm}
+               onChange={e => set('tire_width_mm', Number(e.target.value))} />
+      </label>
+      <label className="grid gap-1">
+        <span>Tire quality</span>
+        <input className="input" value={p.tire_quality}
+               onChange={e => set('tire_quality', e.target.value)} />
+      </label>
+      <label className="grid gap-1">
+        <span>Bike type</span>
+        <select className="input" value={p.bike_type} onChange={e => onTypeChange(e.target.value as any)}>
+          <option value="road">Road</option>
+          <option value="gravel">Gravel</option>
+          <option value="mtb">MTB</option>
+          <option value="tt">TT</option>
+        </select>
+      </label>
+      <label className="grid gap-1">
+        <span>Crank efficiency</span>
+        <input className="input" type="number" value={96} readOnly />
+        <span className="text-xs opacity-70">Låst i UI — styres av backend/eksperimenter</span>
+      </label>
+      <label className="grid gap-1">
+        <span>Publish to Strava</span>
+        <input type="checkbox" checked={!!p.publish_to_strava}
+               onChange={e => set('publish_to_strava', e.target.checked)} />
+      </label>
+      <button className="btn" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>
+    </form>
+  );
+}
+```
+
+---
+
+## 🧭 Router/wiring (enkelt eksempel)
+
+```tsx
+// src/app/App.tsx
+import { useEffect, useState } from 'react';
+import { listSessions, getSession, analyze, getTrendSummary } from '@/lib/api';
+import { mapSessionToCard, mapTrendCsvToSeries } from '@/lib/adapters';
+import SessionCard from '@/components/SessionCard';
+import TrendChart from '@/components/TrendChart';
+import ApiErrorBanner from '@/components/ApiErrorBanner';
+
+export default function App() {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [trend, setTrend] = useState<any[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    listSessions()
+      .then(async (rows) => {
+        const detailed = await Promise.all(rows.slice(0, 5).map(async r => mapSessionToCard(await getSession(r.id))));
+        setSessions(detailed);
+      })
+      .catch(e => setErr(e.message));
+
+    getTrendSummary()
+      .then(csv => setTrend(mapTrendCsvToSeries(csv)))
+      .catch(e => setErr(e.message));
+  }, []);
+
+  return (
+    <div className="max-w-5xl mx-auto p-6 grid gap-6">
+      {err && <ApiErrorBanner message={err} />}
+      <h1 className="text-2xl font-bold">CycleGraph</h1>
+      <TrendChart data={trend} />
+      <div className="grid md:grid-cols-2 gap-4">
+        {sessions.map((s, i) => <SessionCard key={i} s={s} />)}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 🌐 Miljø & build
+
+**.env.example**
+
+```
+VITE_API_BASE=http://127.0.0.1:8000/api
+VITE_FEAT_VISUALS=1
+```
+
+**Vite config (hint)**
+Sørg for `@` alias → `src/` og riktig basepath.
+
+---
+
+## 🌍 i18n stub (NO/EN)
+
+```
+src/i18n/no.json
+src/i18n/en.json
+src/lib/i18n.ts  // liten util + hook
+```
+
+---
+
+## 🧪 DoD (sjekkliste)
+
+**Funksjonelt**
+
+* Session Cards viser verdier fra **ekte analyse** (PW, CI, CdA, crr_used, publish-status/tid, crank eff 96%).
+* Trend viser **Avg Watt** og **W/Beat** (minst 5 økter, ekte data).
+* Økt-kurve med hover fungerer på **live samples**.
+* Profil kan lagres; ny **analyze** bruker verdiene (verifiser ved å endre dekk).
+  **CdA = 0.30** default reflekteres i analyze.
+* Publish-toggle: respekteres av backend.
+* **Crank efficiency:** ikke brukerredigerbar (**låst 96%**).
+
+**Migrering**
+
+* cyclegraph.app (og www) viser **ny landingsside** fra main-repo.
+* NO/EN toggle fungerer; meta/OG/favicons riktig.
+* Lighthouse **SEO/Acc > 90** (logges i `docs/deployment-log.md`).
+
+**Ingen mock**
+
+* Alle API-kall går mot live endpoints. “Dummy”/mock slått av/ryddet.
+
+**Akseptansekjøring**
+
+* Åpne frontend (`npm run dev`) → Session Cards viser data for **ride1–5**.
+* Endre profil (f.eks. `tire_quality`) → **re-analyze ride3** → PW endres konsistent.
+* Slå på publish-toggle → publisering skjer ved neste analyze/publish; kommentar inkluderer:
+  *“Check out my full ride analysis at CycleGraph.app”*.
+* Lighthouse-rapport >90 (lagres i `docs/deployment-log.md`).
+
+---
+
+## 🧯 Troubleshooting (kort)
+
+* **401/403** → “Koble Strava på nytt” (UI-banner).
+* **Port i bruk** → `netstat -ano | findstr :5175` → `taskkill /PID <PID> /F`.
+* **from-future-imports** må stå helt øverst (JS/TS: Vite config).
+* **PS 5.1/UTF8-BOM**: bruk `utf8/utf8-sig` der vi skriver JSON/CSV (backend/trend9 matcher).
+
+---
+
+## 🗺️ (Frivillig) Sprint 16 — “Polish & Launch”
+
+**Mål:** Polish + release hygiene etter S15.
+**Omfang:** Release notes, README (Quick Start + Troubleshooting + Scripts), E2E-script (import→analyze→publish), telemetri labels/timing, UI-feiltekster, sitemap/robots/canonical.
+**DoD:** `/docs/launch-playbook.md`, demo-flyt testet end-to-end, alt grønt i CI.
+
+
+
 
 git add .
 git commit -m "Lock S13–S15 frontlog: DoT, trends, PW E2E + Bike Setup, i18n migration"

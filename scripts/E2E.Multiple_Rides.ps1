@@ -1,9 +1,9 @@
 # =====================================================================
-# CycleGraph Precision Watt testkj??ring ??? Rust-first (flere ??kter)
+# CycleGraph Precision Watt testrun – Rust-first (flere økter)
 # =====================================================================
 # - Kun ASCII-tegn (ingen em-dash, ingen greske symboler)
 # - Heading beregnes fra lat/lon, sender weather_hint (midpoint + hour)
-# - STRAVA_ACCESS_TOKEN m?? v??re satt i milj??et (ev. .env load)
+# - STRAVA_ACCESS_TOKEN må være satt i miljøet (ev. .env load)
 # =====================================================================
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +13,7 @@ $Base = "http://127.0.0.1:5175/api"   # inkluderer /api-prefiks
 $ForceRecompute = $true
 $DebugLevel     = 1   # 0/1
 
-# V??r: la server hente selv (default). Sett $UseTestWeather=$true for ?? injisere test-v??r.
+# Vær: la server hente selv (default). Sett $UseTestWeather=$true for å injisere test-vær.
 $UseTestWeather = $false
 $TestWeather = @{
   wind_ms          = 3.0
@@ -28,8 +28,8 @@ $Ids = @(
   16279854313,
   16262232459,
   16127771071,
-  16333270450,  # ny ??kt
-  16342459294,  # ny ??kt
+  16333270450,  # ny økt
+  16342459294,  # ny økt
   16381383185,
   16396031026,
   16405483541
@@ -51,7 +51,8 @@ function Bearing-Deg([double]$lat1, [double]$lon1, [double]$lat2, [double]$lon2)
 # --- 3) Strava helpers ---
 function Get-StravaStreams([long]$Id) {
     $h = @{ Authorization = "Bearer $($env:STRAVA_ACCESS_TOKEN)" }
-    $keys = "time,velocity_smooth,altitude,grade_smooth,latlng,distance,moving"
+    # NB: inkluder heartrate for HR i payload
+    $keys = "time,velocity_smooth,altitude,grade_smooth,latlng,distance,moving,heartrate"
     $u = "https://www.strava.com/api/v3/activities/$Id/streams?keys=$keys&key_by_type=true"
     Invoke-RestMethod -Method GET -Headers $h -Uri $u
 }
@@ -65,7 +66,7 @@ $Cda = 0.30
 $Crr = 0.004
 $Wkg = 111.0
 
-# --- 4.1 Formatering/verifikasjon av v??r fra respons ---
+# --- 4.1 Formatering/verifikasjon av vær fra respons ---
 function Format-WeatherUsed($metrics) {
     try {
         $meta = $metrics.weather_meta
@@ -104,6 +105,10 @@ function Build-SessionPayload(
     $a  = @($S.altitude.data)
     $g  = @($S.grade_smooth.data)
     $ll = @($S.latlng.data)
+    $h  = @()
+    if ($S.PSObject.Properties.Name -contains 'heartrate') {
+        $h = @($S.heartrate.data)
+    }
 
     $tc=$t.Count; $vc=$v.Count; $ac=$a.Count
     $lc=($ll | ForEach-Object { $_ }) | Measure-Object | Select-Object -ExpandProperty Count
@@ -132,7 +137,7 @@ function Build-SessionPayload(
         if ($headings.Count -ge 2) { $headings[0] = $headings[1] }
         Write-Host ("[GPS] latlng OK - heading_deg beregnet for {0} punkter" -f $headings.Count) -ForegroundColor Green
     } else {
-        Write-Host "[GPS] latlng mangler/skjult - kj??rer uten heading_deg (vind retningskomp ??? 0)" -ForegroundColor Yellow
+        Write-Host "[GPS] latlng mangler/skjult - kjører uten heading_deg (vind retningskomp = 0)" -ForegroundColor Yellow
     }
 
     # Absolutt start (UNIX s) fra activity.start_date (UTC)
@@ -143,7 +148,7 @@ function Build-SessionPayload(
         } catch { $t0 = $null }
     }
 
-    # samples (med lat/lon + ev. t_abs)
+    # samples (med lat/lon + ev. t_abs + hr)
     $samples = New-Object 'System.Collections.Generic.List[object]'
     $latSum = 0.0; $lonSum = 0.0; $llCount = 0
     $speedStop = 0.5
@@ -171,11 +176,15 @@ function Build-SessionPayload(
         if ($t0 -ne $null) {
             $obj.t_abs = [double]($t0 + [double]$t[$i])  # absolutte sekunder
         }
+        # Heart rate per sample (hvis tilgjengelig)
+        if ($h.Count -gt $i -and $null -ne $h[$i]) {
+            try { $obj.hr = [double]$h[$i] } catch {}
+        }
 
         $samples.Add($obj)
     }
 
-    # Beregn "senter" og n??rmeste time (til hint)
+    # Beregn "senter" og nærmeste time (til hint)
     $centerLat = $null; $centerLon = $null; $hintHour = $null
     if ($llCount -gt 0) {
         $centerLat = $latSum / $llCount
@@ -185,7 +194,7 @@ function Build-SessionPayload(
         # velg midt-sample som representativ tid
         $midIdx = [int][Math]::Floor(($n-1)/2)
         $tAbsMid = [double]($t0 + [double]$t[$midIdx])
-        # rund til n??rmeste hele time (sekunder)
+        # rund til nærmeste hele time (sekunder)
         $hour = [int][Math]::Round($tAbsMid / 3600.0) * 3600
         $hintHour = $hour
     }
@@ -209,7 +218,7 @@ function Build-SessionPayload(
     }
 
     if ($IncludeWeather -and $null -ne $WeatherObj) {
-        # Kun for testing; i normal drift la denne v??re av
+        # Kun for testing; i normal drift la denne være av
         $payload.weather = $WeatherObj
     }
 
@@ -225,21 +234,27 @@ function Analyze-Session($Payload) {
         -ContentType "application/json" -Body $json
 }
 
-# --- 7) Preflight: verifiser at vi faktisk f??r latlng fra Strava ---
-Write-Host "=== Preflight: sjekker latlng p?? f??rste ID ==="
+# --- 7) Preflight: verifiser at vi faktisk får latlng og (helst) HR fra Strava ---
+Write-Host "=== Preflight: sjekker latlng/hr på første ID ==="
 try {
     $pf = Get-StravaStreams $Ids[0]
     $hasLL = ($pf.latlng -and $pf.latlng.data -and $pf.latlng.data.Count -gt 1)
+    $hasHR = ($pf.PSObject.Properties.Name -contains 'heartrate') -and ($pf.heartrate.data.Count -gt 1)
     if ($hasLL) {
         Write-Host ("OK {0}: latlng OK (count={1})" -f $Ids[0], $pf.latlng.data.Count) -ForegroundColor Green
     } else {
         Write-Host ("WARN {0}: latlng mangler - sjekk token-scopes (activity:read_all) og aktivitetens kart-privacy" -f $Ids[0]) -ForegroundColor Yellow
     }
+    if ($hasHR) {
+        Write-Host ("OK {0}: heartrate OK (count={1})" -f $Ids[0], $pf.heartrate.data.Count) -ForegroundColor Green
+    } else {
+        Write-Host ("WARN {0}: heartrate mangler - aktiviteten har kanskje ikke puls logget, eller token mangler scope" -f $Ids[0]) -ForegroundColor Yellow
+    }
 } catch {
     Write-Host ("Preflight feilet: {0}" -f $_.Exception.Message) -ForegroundColor Red
 }
 
-# --- 8) Kj??r for hver aktivitet ---
+# --- 8) Kjør for hver aktivitet ---
 $out = "_debug"; if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
 $summary = New-Object 'System.Collections.Generic.List[object]'
 
@@ -248,7 +263,7 @@ foreach ($id in $Ids) {
         $act     = Get-StravaActivity $id
         $streams = Get-StravaStreams  $id
 
-        # Alltid server-v??r for aktuell ??kt, men vi sender lat/lon + t_abs (+ hint)
+        # Alltid server-vær for aktuell økt, men vi sender lat/lon + t_abs (+ hint)
         if ($UseTestWeather) {
             $payload = Build-SessionPayload $streams $Cda $Crr $Wkg $true  $TestWeather $act.start_date
         } else {
@@ -278,7 +293,7 @@ foreach ($id in $Ids) {
 
         $m   = $res.metrics
 
-        # Vis hva serveren faktisk brukte av v??r (hvis exposed)
+        # Vis hva serveren faktisk brukte av vær (hvis exposed)
         $wxLine = Format-WeatherUsed $m
         if ($wxLine) {
             Write-Host $wxLine -ForegroundColor DarkYellow
@@ -340,5 +355,4 @@ $csvPath = Join-Path $out "weather_summary.csv"
 $summary | Export-Csv -Path $csvPath -NoTypeInformation
 Write-Host ("[OK] Skrev oppsummering: {0}" -f $csvPath) -ForegroundColor Green
 
-"=== Kj??ring ferdig ==="
-
+"=== Kjøring ferdig ==="
