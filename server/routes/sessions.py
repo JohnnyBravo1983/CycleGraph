@@ -600,6 +600,23 @@ async def analyze_session(
         profile = _ensure_profile_device(up)
         body["profile"] = profile
 
+    # --- TRINN 10.1: total weight (rider + bike) ---
+    # Vi bevarer rider_weight_kg og bike_weight_kg separat i profile_used,
+    # men 'weight_kg' som går til kjernen skal være SUM.
+    try:
+        rider_w = float((profile.get("rider_weight_kg") if profile.get("rider_weight_kg") is not None else profile.get("weight_kg")) or 75.0)
+    except Exception:
+        rider_w = 75.0
+    try:
+        bike_w = float(profile.get("bike_weight_kg") or 8.0)
+    except Exception:
+        bike_w = 8.0
+
+    total_w = rider_w + bike_w
+    profile["weight_kg"] = total_w              # brukes av kjernen
+    profile["total_weight_kg"] = total_w        # ren speil for tydelighet
+    # --- END TRINN 10.1 ---
+
     # --- TRINN 10: Profile versioning inject ---
     from server.utils.versioning import compute_version, load_profile
 
@@ -1049,8 +1066,13 @@ async def analyze_session(
 
                 # --- TRINN 10: Profile versioning inject ---
                 resp["profile_version"] = profile_version
-                mu = resp.setdefault("metrics", {}).setdefault("profile_used", {})
-                mu.update({**profile, "profile_version": profile_version})
+                mu_top = resp.setdefault("profile_used", {})
+                # Oppdater profile_used med totalvekt-informasjon
+                mu_top["rider_weight_kg"] = rider_w
+                mu_top["bike_weight_kg"] = bike_w
+                mu_top["weight_kg"] = total_w          # total
+                mu_top["total_weight_kg"] = total_w    # alias for klarhet
+                mu_top.update({**profile, "profile_version": profile_version})
 
                 # --- Trinn 7: kontraktsikre + observability ---
                 try:
@@ -1093,14 +1115,24 @@ async def analyze_session(
                 return err
 
     # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
-    profile_used = _profile_used_from(profile)
-    profile_used["profile_version"] = profile_version
+    # Bygg profile_used med totalvekt-informasjon for fallback
+    profile_used = {
+        "cda": float(profile.get("cda")) if profile.get("cda") is not None else 0.30,
+        "crr": float(profile.get("crr")) if profile.get("crr") is not None else 0.004,
+        "weight_kg": total_w,
+        "rider_weight_kg": rider_w,
+        "bike_weight_kg": bike_w,
+        "total_weight_kg": total_w,
+        "crank_eff_pct": float(profile.get("crank_eff_pct")) if profile.get("crank_eff_pct") is not None else 95.5,
+        "device": profile.get("device") or DEFAULT_DEVICE,
+        "profile_version": profile_version
+    }
 
     fallback_metrics = _fallback_metrics(
         mapped,
         profile,                # NB: profile, ikke profile_used
         weather_applied=False,  # fallback: behandle som uten vær
-        profile_used=profile_used,  # inkluderer profile_version
+        profile_used=profile_used,  # inkluderer profile_version og totalvekt
     )
 
     resp = {
@@ -1131,20 +1163,27 @@ async def analyze_session(
 
     # --- TRINN 10: Profile versioning inject ---
     resp["profile_version"] = profile_version
-    mu = resp.setdefault("metrics", {}).setdefault("profile_used", {})
-    mu.update({**profile, "profile_version": profile_version})
+    mu_top = resp.setdefault("profile_used", {})
+    # Oppdater profile_used med totalvekt-informasjon
+    mu_top["rider_weight_kg"] = rider_w
+    mu_top["bike_weight_kg"] = bike_w
+    mu_top["weight_kg"] = total_w          # total
+    mu_top["total_weight_kg"] = total_w    # alias for klarhet
+    mu_top.update({**profile, "profile_version": profile_version})
 
     # Trinn 7: kontraktsikre + observability før return
     resp = _ensure_contract_shape(resp)
     
-    # --- TRINN 10: mirror profile_used inn i metrics.profile_used (må stå helt til slutt før logging/return) ---
-    resp.setdefault("metrics", {})
-    resp["metrics"]["profile_used"] = dict(resp.get("profile_used") or {})
+    # --- TRINN 10: mirror profile_used inn i metrics.profile_used også ---
+    mu_top = resp.setdefault("profile_used", {})
+    mm = resp.setdefault("metrics", {})
+    mm.setdefault("profile_used", {})
+    # sørg for identisk speiling
+    mm["profile_used"] = dict(mu_top)
     # --- END TRINN 10 ---
-
+    
     try:
-        _write_observability(resp)  # skal nå logge metrics.profile_used også
+        _write_observability(resp)
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
-
     return resp
