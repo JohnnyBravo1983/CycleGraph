@@ -55,26 +55,16 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Export PYO3_PYTHON
-        shell: bash
-        run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
-
-      - name: Create and activate venv
+      - name: Create venv and install deps (explicit paths)
         shell: bash
         run: |
           python -m venv .venv
-          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          python -c "import sys; print('Using Python:', sys.executable)"
-
-      - name: Install Python deps (in venv)
-        shell: bash
-        run: |
-          python -m pip install -U pip
-          pip install maturin pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install --exists-action=i \
+          VENV="$GITHUB_WORKSPACE/.venv"
+          "$VENV/bin/python" -m pip install -U pip
+          "$VENV/bin/python" -m pip install maturin pytest
+          if [ -f requirements.txt ]; then "$VENV/bin/python" -m pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then "$VENV/bin/python" -m pip install -r requirements-dev.txt; fi
+          "$VENV/bin/python" -m pip install --exists-action=i \
             click \
             "fastapi>=0.110" \
             "fastapi[testclient]" \
@@ -82,6 +72,12 @@ jobs:
             httpx \
             requests \
             python-dotenv
+          echo "VIRTUAL_ENV=$VENV" >> "$GITHUB_ENV"
+          echo "$VENV/bin" >> "$GITHUB_PATH"
+
+      - name: Export PYO3_PYTHON
+        shell: bash
+        run: echo "PYO3_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
 
       - name: Provide test tokens/state
         shell: bash
@@ -109,12 +105,11 @@ jobs:
       - name: Build & install Python module with maturin (feature=python)
         working-directory: core
         shell: bash
-        run: python -m maturin develop --features python
+        run: $GITHUB_WORKSPACE/.venv/bin/python -m maturin develop --features python
 
       - name: Verify Python import
         shell: bash
-        run: |
-          python -c "import cyclegraph_core as cg; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
+        run: $GITHUB_WORKSPACE/.venv/bin/python -c "import cyclegraph_core as cg; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
 
       - name: Export PYTHONPATH
         shell: bash
@@ -139,7 +134,7 @@ jobs:
             "except Exception as e:" \
             "    print('conftest: patch skipped:', e)" \
             > conftest.py
-          python -c "import importlib.util; s=importlib.util.spec_from_file_location('conftest','conftest.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print('conftest sanity OK')"
+          $GITHUB_WORKSPACE/.venv/bin/python -c "import importlib.util; s=importlib.util.spec_from_file_location('conftest','conftest.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print('conftest sanity OK')"
 
       - name: Bootstrap T11 CSV (CI-only, to satisfy pytest)
         shell: bash
@@ -149,11 +144,11 @@ jobs:
             "git_sha,profile_version,weather_source,ride_id,precision_watt,drag_watt,rolling_watt,total_watt,calibration_mae" \
             "ci,v1-ci,none,demo,0.0,0.0,0.0,0.0," \
             > artifacts/t11_matrix.csv
-          python -c "from pathlib import Path; p=Path('artifacts/t11_matrix.csv'); import sys; assert p.exists() and p.stat().st_size>0; print('bootstrap t11_matrix.csv ok')"
+          $GITHUB_WORKSPACE/.venv/bin/python -c "from pathlib import Path; p=Path('artifacts/t11_matrix.csv'); import sys; assert p.exists() and p.stat().st_size>0; print('bootstrap t11_matrix.csv ok')"
 
       - name: pytest
         shell: bash
-        run: pytest -q
+        run: $GITHUB_WORKSPACE/.venv/bin/pytest -q
 
   full:
     name: Full pipeline (wheel + rust + frontend + schemas)
@@ -472,32 +467,29 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Python deps (base)
-        shell: bash
-        run: |
-          python -m pip install -U pip wheel setuptools
-          python -m pip install pytest fastapi "pydantic<3" uvicorn httpx requests python-dotenv
-
-      - name: Create venv for maturin
+      - name: Create venv and base deps (explicit paths)
         shell: bash
         run: |
           python -m venv .venv
-          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          python -m pip install -U pip wheel setuptools maturin
+          VENV="$GITHUB_WORKSPACE/.venv"
+          "$VENV/bin/python" -m pip install -U pip wheel setuptools maturin
+          "$VENV/bin/python" -m pip install pytest fastapi "pydantic<3" uvicorn httpx requests python-dotenv
+          echo "VIRTUAL_ENV=$VENV" >> "$GITHUB_ENV"
+          echo "$VENV/bin" >> "$GITHUB_PATH"
+          echo "PYO3_PYTHON=$VENV/bin/python" >> "$GITHUB_ENV"
 
       - name: Build Rust core (maturin develop)
         shell: bash
         run: |
           cd core
-          python -m maturin develop --release -F python
+          $GITHUB_WORKSPACE/.venv/bin/python -m maturin develop --release -F python
           cd ..
-          python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
+          $GITHUB_WORKSPACE/.venv/bin/python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
 
       - name: Boot API on :5175 and wait (no heredoc)
         shell: bash
         run: |
-          nohup python -m uvicorn app:app --host 127.0.0.1 --port 5175 > uvicorn.log 2>&1 &
+          nohup $GITHUB_WORKSPACE/.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 5175 > uvicorn.log 2>&1 &
           printf "%s\n" \
             "import time, urllib.request, sys" \
             "base='http://127.0.0.1:5175'" \
@@ -515,17 +507,17 @@ jobs:
             "print('server ok' if ok else 'server not ready')" \
             "sys.exit(0 if ok else 1)" \
             > wait_server.py
-          python wait_server.py
+          $GITHUB_WORKSPACE/.venv/bin/python wait_server.py
 
       - name: Run T11 accuracy matrix
         shell: pwsh
         run: |
           ./scripts/T11_Run_Matrix.ps1
-          python -c "from pathlib import Path; p=Path('artifacts/t11_matrix.csv'); import sys; assert p.exists() and p.stat().st_size>0, 't11_matrix.csv missing/empty'; print('t11_matrix.csv ok')"
+          python -c "from pathlib import Path; p=Path('artifacts/t11_matrix.csv'); import sys; assert p.exists() -and (p | Get-Item).Length -gt 0; print('t11_matrix.csv ok')"
 
       - name: CSV contract test (mini)
         shell: bash
-        run: pytest -q tests/test_t11_matrix_csv.py
+        run: $GITHUB_WORKSPACE/.venv/bin/pytest -q tests/test_t11_matrix_csv.py
 
       - name: Upload T11 artifacts
         uses: actions/upload-artifact@v4
