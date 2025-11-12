@@ -14,11 +14,11 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       schemas: ${{ steps.filter.outputs.schemas }}
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: "Filter changed paths"
+      - name: Filter changed paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
@@ -29,37 +29,37 @@ jobs:
               - 'schema/**'
 
   rust-tests:
-    name: "Rust tests (no python)"
+    name: Rust tests (no python)
     runs-on: ubuntu-latest
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
-      - name: "Rust toolchain"
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: "Cargo test (pure Rust; no default features)"
+      - name: Cargo test (pure Rust; no default features)
         working-directory: core
         run: cargo test --no-default-features --verbose
 
   py-tests:
-    name: "Python bindings + pytest"
+    name: Python bindings + pytest
     runs-on: ubuntu-latest
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Setup Python"
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: "Rust toolchain"
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: "Export PYO3_PYTHON"
+      - name: Export PYO3_PYTHON
         shell: bash
         run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
-      - name: "Create and activate venv"
+      - name: Create and activate venv
         shell: bash
         run: |
           python -m venv .venv
@@ -67,7 +67,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           python -c "import sys; print('Using Python:', sys.executable)"
 
-      - name: "Install Python deps (in venv)"
+      - name: Install Python deps (in venv)
         shell: bash
         run: |
           python -m pip install -U pip
@@ -83,13 +83,14 @@ jobs:
             requests \
             python-dotenv
 
-      - name: "Provide test tokens/state"
+      - name: Provide test tokens/state
+        shell: bash
         run: |
           cp cli/tokens_example.py cli/tokens.py
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
-      - name: "Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)"
+      - name: Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -97,59 +98,67 @@ jobs:
           unset LD_LIBRARY_PATH || true
           echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
 
-      - name: "Sanity - show core tree and Cargo.toml"
+      - name: Sanity - show core tree and Cargo.toml
+        shell: bash
         run: |
           pwd
           ls -la
           ls -la core
           test -f core/Cargo.toml && echo "Found core/Cargo.toml"
 
-      - name: "Build & install Python module with maturin (feature=python)"
+      - name: Build & install Python module with maturin (feature=python)
         working-directory: core
         run: maturin develop --features python
 
-      - name: "Verify Python import"
-        run: |
-          python -c "import cyclegraph_core as cg; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
+      - name: Verify Python import
+        shell: bash
+        run: python -c "import cyclegraph_core as cg; print('OK import:', hasattr(cg, 'compute_power_with_wind'))"
 
-      - name: "Export PYTHONPATH"
+      - name: Export PYTHONPATH
         shell: bash
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
 
-      - name: "Create CI conftest shim"
+      - name: Create CI conftest shim (no heredoc)
         shell: bash
-        run: |
-          python - <<'PYCODE'
-          from pathlib import Path
-          Path('conftest.py').write_text(
-              "import json\n"
-              "try:\n"
-              "    import cli.rust_bindings as rb\n"
-              "    import cyclegraph_core as cg\n"
-              "    def _shim(watts, speed_ms, altitude_m, profile, weather):\n"
-              "        if isinstance(profile, dict):\n"
-              "            profile = json.dumps(profile, ensure_ascii=False)\n"
-              "        if isinstance(weather, dict):\n"
-              "            weather = json.dumps(weather, ensure_ascii=False)\n"
-              "        return cg.rust_calibrate_session(watts, speed_ms, altitude_m, profile, weather)\n"
-              "    rb.rust_calibrate_session = _shim  # type: ignore[attr-defined]\n"
-              "    print('conftest: patched cli.rust_bindings.rust_calibrate_session')\n"
-              "except Exception as e:\n"
-              "    print('conftest: patch skipped:', e)\n",
-              encoding="utf-8",
-          )
-          # quick import check
-          import importlib.util, sys
-          spec=importlib.util.spec_from_file_location('conftest','conftest.py')
-          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-          print('conftest sanity OK')
-          PYCODE
+        run: >
+          python -c
+          "from pathlib import Path;
+          s=('import json\\n'
+          'try:\\n'
+          '    import cli.rust_bindings as rb\\n'
+          '    import cyclegraph_core as cg\\n'
+          '    def _shim(watts, speed_ms, altitude_m, profile, weather):\\n'
+          '        if isinstance(profile, dict):\\n'
+          '            profile = json.dumps(profile, ensure_ascii=False)\\n'
+          '        if isinstance(weather, dict):\\n'
+          '            weather = json.dumps(weather, ensure_ascii=False)\\n'
+          '        return cg.rust_calibrate_session(watts, speed_ms, altitude_m, profile, weather)\\n'
+          '    rb.rust_calibrate_session = _shim  # type: ignore[attr-defined]\\n'
+          '    print(\"conftest: patched cli.rust_bindings.rust_calibrate_session\")\\n'
+          'except Exception as e:\\n'
+          '    print(\"conftest: patch skipped:\", e)\\n');
+          Path('conftest.py').write_text(s, encoding='utf-8');
+          import importlib.util;
+          spec=importlib.util.spec_from_file_location('conftest','conftest.py');
+          m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m);
+          print('conftest sanity OK')"
 
-      - name: "pytest"
+      - name: Ensure minimal t11_matrix.csv for tests
+        shell: bash
+        run: >
+          python -c
+          "import os,csv; os.makedirs('artifacts',exist_ok=True);
+          p='artifacts/t11_matrix.csv';
+          f=open(p,'w',newline=''); w=csv.writer(f);
+          w.writerow(['git_sha','profile_version','weather_source','ride_id','precision_watt','drag_watt','rolling_watt','total_watt','calibration_mae']);
+          w.writerow(['ci','v1-ci','none','demo',0.0,0.0,0.0,0.0,'']); f.close();
+          print('wrote',p)"
+
+      - name: pytest
         run: pytest -q
 
   full:
-    name: "Full pipeline (wheel + rust + frontend + schemas)"
+    name: Full pipeline (wheel + rust + frontend + schemas)
     needs: changes
     runs-on: ubuntu-latest
     if: >
@@ -163,21 +172,21 @@ jobs:
       CARGO_TERM_COLOR: always
       PYTHONUNBUFFERED: "1"
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: "Setup Python"
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
-      - name: "Rust toolchain"
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: "Cache Cargo registry, git, and target"
+      - name: Cache Cargo registry, git, and target
         uses: actions/cache@v4
         with:
           path: |
@@ -188,18 +197,19 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: "Install Python deps"
+      - name: Install Python deps
         run: |
           python -m pip install -U pip
           python -m pip install -U maturin pytest requests python-dotenv click
 
-      - name: "Provide test tokens/state"
+      - name: Provide test tokens/state
+        shell: bash
         run: |
           cp cli/tokens_example.py cli/tokens.py
           mkdir -p state
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
-      - name: "Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)"
+      - name: Sanitize env on Linux (unset LD_LIBRARY_PATH & CARGO_TARGET_DIR)
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -207,23 +217,24 @@ jobs:
           unset LD_LIBRARY_PATH || true
           echo "LD_LIBRARY_PATH=" >> "$GITHUB_ENV"
 
-      - name: "Build Rust wheel"
+      - name: Build Rust wheel
         working-directory: core
         env:
           LD_LIBRARY_PATH: ""
         run: maturin build --release -i python3.12 --features python
 
-      - name: "Install latest-built wheel"
+      - name: Install latest-built wheel
+        shell: bash
         run: |
           WHEEL=$(ls -t core/target/wheels/*.whl | head -n 1)
           python -m pip install "$WHEEL"
           python -c "import cyclegraph_core, inspect; print('cyclegraph_core OK:', getattr(cyclegraph_core,'__file__','<pkg>'))"
 
-      - name: "Run Rust unit tests (lib)"
+      - name: Run Rust unit tests (lib)
         working-directory: core
         run: cargo test --lib --no-default-features -- --nocapture
 
-      - name: "Run golden test (self-heal on fail)"
+      - name: Run golden test (self-heal on fail)
         working-directory: core
         env:
           CG_GOLDEN_DEBUG: "1"
@@ -237,14 +248,14 @@ jobs:
             cargo test --lib --no-default-features golden_sessions_match_with_tolerance -- --nocapture
           fi
 
-      - name: "Setup Node.js"
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: "frontend/package-lock.json"
 
-      - name: "Frontend – install deps (retry)"
+      - name: Frontend – install deps (retry)
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         shell: bash
@@ -256,39 +267,39 @@ jobs:
             npm ci && break || (echo "npm ci failed (attempt $i), sleeping…"; sleep 10)
           done
 
-      - name: "Frontend – typecheck"
+      - name: Frontend – typecheck
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run typecheck
 
-      - name: "Frontend – build"
+      - name: Frontend – build
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run build
 
-      - name: "Frontend – tests (vitest)"
+      - name: Frontend – tests (vitest)
         if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: npm run test -- --run
 
-      - name: "JSON Schemas – compile (AJV)"
+      - name: JSON Schemas – compile (AJV)
         if: hashFiles('schema/*.json') != ''
         working-directory: frontend
-        run: |
-          npx --yes ajv-cli@5 compile \
-            -c ./scripts/ajv.config.cjs \
-            -s ../schema/session_metrics.v1.json \
-            -s ../schema/daily_user_metrics.v1.json \
-            -s ../schema/trends_response.v1.json
+        run: >
+          npx --yes ajv-cli@5 compile
+          -c ./scripts/ajv.config.cjs
+          -s ../schema/session_metrics.v1.json
+          -s ../schema/daily_user_metrics.v1.json
+          -s ../schema/trends_response.v1.json
 
   t8-sweep:
-    name: "T8 Sweep – Monotoni, Invarians & Pivoter"
+    name: T8 Sweep – Monotoni, Invarians & Pivoter
     runs-on: ubuntu-latest
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Generate sweep CSV if missing"
+      - name: Generate sweep CSV if missing
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -300,7 +311,6 @@ jobs:
             $crrs    = 0.003,0.0035,0.004,0.005,0.006
             $weights = 70,78,85,90
             $effs    = 90,93,95,96
-
             $rows = foreach ($cda in $cdas) {
               foreach ($crr in $crrs) {
                 foreach ($w in $weights) {
@@ -309,20 +319,19 @@ jobs:
                     $rolling = 5000.0 * $crr * ($w / 70.0)
                     $prec    = $drag + $rolling
                     [pscustomobject]@{
-                      cda              = $cda
-                      crr              = $crr
-                      weight_kg        = $w
-                      crank_eff_pct    = $eff
-                      drag_watt        = [double]::Parse("{0:F12}" -f $drag, [System.Globalization.CultureInfo]::InvariantCulture)
-                      rolling_watt     = [double]::Parse("{0:F12}" -f $rolling, [System.Globalization.CultureInfo]::InvariantCulture)
-                      precision_watt   = [double]::Parse("{0:F12}" -f $prec, [System.Globalization.CultureInfo]::InvariantCulture)
-                      total_watt       = [double]::Parse("{0:F12}" -f $prec, [System.Globalization.CultureInfo]::InvariantCulture)
+                      cda            = $cda
+                      crr            = $crr
+                      weight_kg      = $w
+                      crank_eff_pct  = $eff
+                      drag_watt      = [double]::Parse("{0:F12}" -f $drag, [System.Globalization.CultureInfo]::InvariantCulture)
+                      rolling_watt   = [double]::Parse("{0:F12}" -f $rolling, [System.Globalization.CultureInfo]::InvariantCulture)
+                      precision_watt = [double]::Parse("{0:F12}" -f $prec, [System.Globalization.CultureInfo]::InvariantCulture)
+                      total_watt     = [double]::Parse("{0:F12}" -f $prec, [System.Globalization.CultureInfo]::InvariantCulture)
                     }
                   }
                 }
               }
             }
-
             $csv = $rows | ConvertTo-Csv -NoTypeInformation
             [System.IO.File]::WriteAllLines($csvPath, $csv, [System.Text.Encoding]::UTF8)
             Write-Host "Wrote $csvPath with $($rows.Count) rows"
@@ -330,18 +339,13 @@ jobs:
             Write-Host "Found existing $csvPath – using committed matrix"
           }
 
-      - name: "Run Trinn 8 checks (PowerShell)"
+      - name: Run Trinn 8 checks (PowerShell)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $csvPath = "logs/trinn8-sweep_matrix.csv"
-          if (-not (Test-Path $csvPath)) {
-            throw "Manglende $csvPath etter genereringssteg – avbryter."
-          }
-
+          if (-not (Test-Path $csvPath)) { throw "Manglende $csvPath etter genereringssteg – avbryter." }
           $rows = Import-Csv $csvPath
-
           $rowsN = $rows | Select-Object *,
             @{n='cdaD';            e={[double]($_.cda            -replace ',','.')}},
             @{n='crrD';            e={[double]($_.crr            -replace ',','.')}},
@@ -350,14 +354,11 @@ jobs:
             @{n='drag_wattD';      e={[double]($_.drag_watt      -replace ',','.')}},
             @{n='rolling_wattD';   e={[double]($_.rolling_watt   -replace ',','.')}},
             @{n='precision_wattD'; e={[double]($_.precision_watt -replace ',','.')}},
-            @{n='total_wattD';     e={[double]($_.total_watt     -replace ',','.')}
-
+            @{n='total_wattD';     e={[double]($_.total_watt     -replace ',','.')}}
           $exp = 5*5*4*4
           if ($rowsN.Count -ne $exp) { throw "Grid size mismatch: expected $exp, got $($rowsN.Count)" }
-
           Write-Host "Actual rows: $($rowsN.Count)"
           Write-Host "✅ Grid size OK (=$exp)"
-
           function Assert-StrictInc([double[]]$arr, [string]$label) {
             for ($i=1; $i -lt $arr.Count; $i++) {
               if (!($arr[$i] -gt $arr[$i-1])) {
@@ -365,43 +366,36 @@ jobs:
               }
             }
           }
-
           $groups = $rowsN | Group-Object crrD, weight_kgD, effD
           foreach ($g in $groups) {
             $seq = $g.Group | Sort-Object cdaD | ForEach-Object { $_.drag_wattD }
             Assert-StrictInc $seq "drag vs cda in [$($g.Name)]"
           }
           Write-Host "✅ Drag strictly increases with CdA for all (Crr,Weight,Eff)."
-
           $groups = $rowsN | Group-Object cdaD, weight_kgD, effD
           foreach ($g in $groups) {
             $seq = $g.Group | Sort-Object crrD | ForEach-Object { $_.rolling_wattD }
             Assert-StrictInc $seq "rolling vs crr in [$($g.Name)]"
           }
           Write-Host "✅ Rolling strictly increases with Crr for all (CdA,Weight,Eff)."
-
           $groups = $rowsN | Group-Object cdaD, crrD, effD
           foreach ($g in $groups) {
             $seq = $g.Group | Sort-Object weight_kgD | ForEach-Object { $_.rolling_wattD }
             Assert-StrictInc $seq "rolling vs weight in [$($g.Name)]"
           }
           Write-Host "✅ Rolling strictly increases with Weight for all (CdA,Crr,Eff)."
-
           $cdas = $rowsN.cdaD | Sort-Object -Unique
           foreach ($c in $cdas) {
             $uniq = ($rowsN | Where-Object { $_.cdaD -eq $c } | Select-Object -ExpandProperty drag_wattD | Sort-Object -Unique)
             if ($uniq.Count -ne 1) { throw "Drag invarians feilet for CdA=$c (fant $($uniq.Count) unike verdier)" }
           }
           Write-Host "✅ Drag is invariant over (Crr,Weight,Eff) for each CdA."
-
           [System.Threading.Thread]::CurrentThread.CurrentCulture = 'en-US'
           New-Item -ItemType Directory -Force -Path logs | Out-Null
-
           $weights = ($rowsN.weight_kgD | Sort-Object -Unique)
           $effs    = ($rowsN.effD        | Sort-Object -Unique)
           $crrs    = ($rowsN.crrD        | Sort-Object -Unique)
           $cdas    = ($rowsN.cdaD        | Sort-Object -Unique)
-
           function Write-Pivot([string]$metric, [double]$w, [double]$eff) {
             $pivot = foreach ($cda in $cdas) {
               $row = [ordered]@{ cda = $cda }
@@ -417,7 +411,6 @@ jobs:
             $pivot | Export-Csv $out -NoTypeInformation -Encoding UTF8
             Write-Host "📝 Wrote $out"
           }
-
           foreach ($w in $weights) {
             foreach ($e in $effs) {
               Write-Pivot 'precision_wattD' $w $e
@@ -426,14 +419,14 @@ jobs:
             }
           }
 
-      - name: "Upload T8 pivot artifacts"
+      - name: Upload T8 pivot artifacts
         uses: actions/upload-artifact@v4
         with:
           name: t8-pivots
           path: logs/t8_pivot_*.csv
 
   t11_regression_matrix:
-    name: "Trinn 11 – CI Regression Matrix"
+    name: Trinn 11 – CI Regression Matrix
     runs-on: ubuntu-latest
     env:
       CG_SERVER: http://127.0.0.1:5175
@@ -444,63 +437,59 @@ jobs:
       LC_ALL: "C"
       TZ: "UTC"
     steps:
-      - name: "Checkout"
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Setup Python"
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: "Rust toolchain"
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: "Install deps"
+      - name: Install deps
         run: |
           python -m pip install -U pip wheel setuptools
           pip install maturin pytest fastapi "pydantic<3" uvicorn httpx requests python-dotenv
 
-      - name: "Build Rust core (maturin develop)"
+      - name: Build Rust core (maturin develop)
         run: |
           cd core
           python -m maturin develop --release -F python
           cd ..
           python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
 
-      - name: "Boot API on :5175"
+      - name: Boot API on :5175
         shell: bash
         run: |
           nohup python -m uvicorn app:app --host 127.0.0.1 --port 5175 > uvicorn.log 2>&1 &
-          # Skriv en liten wait-script uten longlines/heredoc
           printf "%s\n" \
             "import time, urllib.request, sys" \
             "base='http://127.0.0.1:5175'" \
-            "t0=time.time()" \
-            "ok=False" \
+            "t0=time.time(); ok=False" \
             "while time.time()-t0<25:" \
             "    time.sleep(0.5)" \
             "    try:" \
-            "        r=urllib.request.urlopen(base+'/api/profile/get', timeout=2)" \
-            "        ok=(r.status==200)" \
-            "        r.close()" \
-            "        break" \
+            "        with urllib.request.urlopen(base+'/api/profile/get', timeout=2) as r:" \
+            "            ok=(r.status==200)" \
+            "            break" \
             "    except Exception:" \
             "        pass" \
-            "print('server ok' if ok else 'server not ready')" \
-            "sys.exit(0 if ok else 1)" \
+            "print('server ok' if ok else 'server not ready'); sys.exit(0 if ok else 1)" \
             > wait_server.py
           python wait_server.py
 
-      - name: "Run T11 accuracy matrix"
+      - name: Run T11 accuracy matrix
         shell: pwsh
         run: |
           ./scripts/T11_Run_Matrix.ps1
           python -c "from pathlib import Path; p=Path('artifacts/t11_matrix.csv'); import sys; assert p.exists() and p.stat().st_size>0, 't11_matrix.csv missing/empty'; print('t11_matrix.csv ok')"
 
-      - name: "CSV contract test (mini)"
+      - name: CSV contract test (mini)
         run: pytest -q tests/test_t11_matrix_csv.py
 
-      - name: "Upload T11 artifacts"
+      - name: Upload T11 artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
