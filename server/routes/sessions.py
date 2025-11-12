@@ -17,6 +17,19 @@ from typing import Any, Dict, Tuple, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
+
+# Trinn 15 helpers (robust import + trygg fallback)
+try:
+    from server.analysis.calibration15 import (
+        compute_estimated_error_and_hint,
+        append_benchmark_candidate,
+    )
+except Exception:
+    def compute_estimated_error_and_hint(profile, weather):
+        return [15.0, 17.0], "unknown", 0
+    def append_benchmark_candidate(**kwargs):
+        return False
+
 # Primær import med trygg fallback (brukes i standardstien)
 try:
     from cli.rust_bindings import rs_power_json  # ✅ primær
@@ -328,6 +341,14 @@ def _wx_fp(wx: Dict[str, Any]) -> str:
     except Exception:
         return ""
 
+# --- Trinn 15 hjelper ---
+def _body_has_device_watts(samples) -> bool:
+    if not isinstance(samples, list):
+        return False
+    for s in samples:
+        if isinstance(s, dict) and ("device_watts" in s) and (s.get("device_watts") is not None):
+            return True
+    return False
 
 def _nominal_metrics(profile: dict) -> dict:
     # (ikke brukt til beregning i kontrakt; beholdt for ev. tester)
@@ -897,6 +918,44 @@ async def analyze_session(
                     metrics.setdefault("calibrated", False)
                     metrics.setdefault("calibration_status", "fallback")
 
+                # --- Trinn 15: heuristisk presisjonsindikator + benchmark-logg (best-effort) ---
+                try:
+                    # profile_used / weather for heuristikk
+                    profile_used = (metrics.get("profile_used") or resp.get("profile_used") or {}) if isinstance(metrics, dict) else {}
+                    wx_used = (metrics.get("weather_used") or resp.get("weather_used") or {})
+                    est_range, hint, completeness = compute_estimated_error_and_hint(profile_used or {}, wx_used or {})
+
+                    # speil inn i metrics (ikke gate)
+                    metrics["estimated_error_pct_range"] = est_range
+                    metrics["precision_quality_hint"] = hint
+
+                    # benchmark-kandidat (append-only)
+                    try:
+                        # samle topp-data for logging
+                        resp_obj = resp if isinstance(resp, dict) else {}
+                        profile_version = resp_obj.get("profile_version") \
+                            or (profile_used.get("profile_version") if isinstance(profile_used, dict) else "") \
+                            or ""
+                        samples_in = (body.get("samples") if isinstance(body, dict) else None) or []
+                        has_device = _body_has_device_watts(samples_in)
+                        calib_mae = metrics.get("calibration_mae")
+
+                        ok = append_benchmark_candidate(
+                            ride_id=sid,
+                            profile_version=profile_version,
+                            calibration_mae=calib_mae,
+                            estimated_error_pct_range=est_range if isinstance(est_range, list) else [None, None],
+                            profile_completeness=completeness,
+                            has_device_data=has_device,
+                            hint=hint,
+                        )
+                        print(f"[SVR][T15] benchmark_append ok={ok}", flush=True)
+                    except Exception as _e:
+                        # Logging må ALDRI knekke analyze
+                        print(f"[SVR][T15] benchmark_append failed: {_e!r}", flush=True)
+                except Exception as e:
+                    print(f"[SVR][T15] heuristic failed: {e!r}", flush=True)
+
                 resp["metrics"] = metrics
                 resp["weather_applied"] = weather_applied
             except Exception:
@@ -984,6 +1043,44 @@ async def analyze_session(
                     metrics.setdefault("calibration_mae", None)
                     metrics.setdefault("calibrated", False)
                     metrics.setdefault("calibration_status", "fallback")
+
+                # --- Trinn 15: heuristisk presisjonsindikator + benchmark-logg (best-effort) ---
+                try:
+                    # profile_used / weather for heuristikk
+                    profile_used = (metrics.get("profile_used") or resp.get("profile_used") or {}) if isinstance(metrics, dict) else {}
+                    wx_used = (metrics.get("weather_used") or resp.get("weather_used") or {})
+                    est_range, hint, completeness = compute_estimated_error_and_hint(profile_used or {}, wx_used or {})
+
+                    # speil inn i metrics (ikke gate)
+                    metrics["estimated_error_pct_range"] = est_range
+                    metrics["precision_quality_hint"] = hint
+
+                    # benchmark-kandidat (append-only)
+                    try:
+                        # samle topp-data for logging
+                        resp_obj = resp if isinstance(resp, dict) else {}
+                        profile_version = resp_obj.get("profile_version") \
+                            or (profile_used.get("profile_version") if isinstance(profile_used, dict) else "") \
+                            or ""
+                        samples_in = (body.get("samples") if isinstance(body, dict) else None) or []
+                        has_device = _body_has_device_watts(samples_in)
+                        calib_mae = metrics.get("calibration_mae")
+
+                        ok = append_benchmark_candidate(
+                            ride_id=sid,
+                            profile_version=profile_version,
+                            calibration_mae=calib_mae,
+                            estimated_error_pct_range=est_range if isinstance(est_range, list) else [None, None],
+                            profile_completeness=completeness,
+                            has_device_data=has_device,
+                            hint=hint,
+                        )
+                        print(f"[SVR][T15] benchmark_append ok={ok}", flush=True)
+                    except Exception as _e:
+                        # Logging må ALDRI knekke analyze
+                        print(f"[SVR][T15] benchmark_append failed: {_e!r}", flush=True)
+                except Exception as e:
+                    print(f"[SVR][T15] heuristic failed: {e!r}", flush=True)
 
                 resp["metrics"] = metrics
                 resp["weather_applied"] = weather_applied
@@ -1146,6 +1243,15 @@ async def analyze_session(
         weather_applied=False,  # fallback: behandle som uten vær
         profile_used=profile_used,  # inkluderer profile_version og totalvekt
     )
+
+    # --- Trinn 15: Heuristisk presisjonsindikator for fallback ---
+    try:
+        est_range, hint, completeness = compute_estimated_error_and_hint(profile_used, wx_used or {})
+        fallback_metrics["estimated_error_pct_range"] = est_range
+        fallback_metrics["precision_quality_hint"] = hint
+        print(f"[SVR][T15] (fallback) → est_range={est_range} hint={hint}")
+    except Exception as e:
+        print(f"[SVR][T15] (fallback) compute_estimated_error_and_hint failed: {e}")
 
     resp = {
         "source": "fallback_py",

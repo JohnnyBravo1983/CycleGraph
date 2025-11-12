@@ -135,13 +135,37 @@ def _coalesce_session_record(rid: str, result_obj: Dict[str, Any]) -> Dict[str, 
     # Best-effort device
     device = profile_used.get("device") or result_obj.get("device") or "strava"
 
-    # Sørg for at METRIC_KEYS finnes (None hvis ikke)
+    # Sørg for at METRIC_KEYS finnes (None hvis ikke) + Patch 4: utvidet pick-liste og spesialhåndtering
     m: Dict[str, Any] = {}
-    for k in REQUIRED_METRIC_KEYS:
-        m[k] = _round6(metrics.get(k)) if isinstance(metrics, dict) else None
+    pick = [
+        "precision_watt",
+        "drag_watt",
+        "rolling_watt",
+        "total_watt",
+        "calibration_mae",
+        "estimated_error_pct_range",
+        "precision_quality_hint",
+    ]
+    for k in pick:
+        if not isinstance(metrics, dict):
+            m[k] = None
+            continue
+        val = metrics.get(k)
+        if k == "estimated_error_pct_range":
+            # behold som liste [lo, hi] – rund komponenter
+            if isinstance(val, (list, tuple)) and len(val) == 2:
+                try:
+                    lo = float(val[0]); hi = float(val[1])
+                    m[k] = [round(lo, 6), round(hi, 6)]
+                except Exception:
+                    m[k] = val
+            else:
+                m[k] = val
+        else:
+            m[k] = _round6(val)
 
     # weather_source i metrics speiler toppnivå
-    m["weather_source"] = top_weather_source or metrics.get("weather_source") or ""
+    m["weather_source"] = top_weather_source or (metrics.get("weather_source") if isinstance(metrics, dict) else "") or ""
 
     # Forward-kompatibel record
     rec: Dict[str, Any] = {
@@ -180,7 +204,6 @@ def _copy_tr9_pivots(latest_root: Path, out_root: Path) -> int:
 
 def main(argv: list[str]) -> int:
     # 1) Bestem output-root
-        # 1) Bestem output-root
     out_arg = None
     frozen_flag = False
     for i, a in enumerate(argv):
@@ -193,7 +216,6 @@ def main(argv: list[str]) -> int:
     base = Path(out_arg) if out_arg else Path("export")
     export_root = base / datestr
     export_root.mkdir(parents=True, exist_ok=True)
-
 
     # 2) Samle resultater (ride-level)
     results = _gather_results()

@@ -1,14 +1,14 @@
 {
-  "ts_utc": "2025-11-12T15:06:35.720002+00:00",
+  "ts_utc": "2025-11-12T18:22:19.857203+00:00",
   "frozen_weather_hint": true,
   "counts": {
     "sessions": 10
   },
   "sha256": {
     "final14_manifest.json": "0a4216e39f92e8065fa8408b750ee92c0931821d6379d6c641b5d1665e016b3b",
-    "manifest.json": "8ca0e467e1ed4ac19e47bf5f81f4a6861002e132feb545d230abede35b71d8ab",
-    "profile_versions.jsonl": "ec4a6e1db0499e7db6955fd5f144e9e5c0b26fb6ff6c43a75906a460782f1feb",
-    "sessions.jsonl": "435b5adaf75956210df49bd44a94b741cee06127af46e06534403aac4ed6c21e",
+    "manifest.json": "c199577921881976d51a54c4eae9f27f00a59996174dc06c178d56d0b401def4",
+    "profile_versions.jsonl": "485a38a9ad1c205626985d732fa7eea91293e295fe254f8f6d5f07e2982c2e09",
+    "sessions.jsonl": "c93bbc93c6da62c19e104c29c657cae506c08c2c09896e3c632481e2dc18c974",
     "sessions_tmp.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "t11_matrix.csv": "640d42411600cf4df5708d8a0fc370d92bbd0efb74d58d0cb4c8d2b8d12e2995",
     "trend_summary.csv": "ddecbaeaadee9f66b2059b4df8487a829d36a3aec037c0c2ae4f96b4e8003f25",

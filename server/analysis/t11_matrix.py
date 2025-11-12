@@ -29,7 +29,8 @@ OUT_CSV = ART_DIR / "t11_matrix.csv"
 
 REQUIRED_COLS = [
     "git_sha","profile_version","weather_source","ride_id",
-    "precision_watt","drag_watt","rolling_watt","total_watt","calibration_mae"
+    "precision_watt","drag_watt","rolling_watt","total_watt","calibration_mae",
+    "estimated_error_pct_min","estimated_error_pct_max","precision_quality_hint",
 ]
 
 # Treff ALLE underkataloger i actual10; vi forsøker rekkefølge: session → result → repo-rot → generisk
@@ -299,6 +300,9 @@ def _placeholder_row(git_sha: str, profile_version: str, ride_id: str) -> dict:
         "rolling_watt": 0.0,
         "total_watt": 0.0,
         "calibration_mae": "",
+        "estimated_error_pct_min": "",
+        "estimated_error_pct_max": "",
+        "precision_quality_hint": "",
     }
 
 def main() -> int:
@@ -308,7 +312,7 @@ def main() -> int:
     _ensure_server(url_base)
     git_sha = _git_sha()
     meta = _get_profile_meta(url_base)
-    profile_version = meta["profile_version"]
+    server_profile_version = meta["profile_version"]
     base_profile = meta["profile"]
 
     out: List[Dict[str, Any]] = []
@@ -325,13 +329,17 @@ def main() -> int:
     for ride_id in required_rides:
         resp = _analyze_one(url_base, ride_id, base_profile, frozen=(wx_mode == "frozen"))
         if not resp:
-            out.append(_placeholder_row(git_sha, profile_version, ride_id))
+            out.append(_placeholder_row(git_sha, server_profile_version, ride_id))
             continue
 
         metrics = resp.get("metrics", {}) or {}
-        row = {
+
+        # Best effort profilversjon: resp -> metrics -> server-meta
+        row_profile_version = resp.get("profile_version") or metrics.get("profile_version") or server_profile_version
+
+        row: Dict[str, Any] = {
             "git_sha": git_sha,
-            "profile_version": profile_version,
+            "profile_version": row_profile_version,
             "weather_source": metrics.get("weather_source", "none"),
             "ride_id": ride_id,
             "precision_watt": float(metrics.get("precision_watt", 0.0)) if metrics.get("precision_watt") is not None else 0.0,
@@ -339,11 +347,31 @@ def main() -> int:
             "rolling_watt": float(metrics.get("rolling_watt", 0.0)) if metrics.get("rolling_watt") is not None else 0.0,
             "total_watt": float(metrics.get("total_watt", 0.0)) if metrics.get("total_watt") is not None else 0.0,
             "calibration_mae": metrics.get("calibration_mae", ""),
+            "estimated_error_pct_min": "",
+            "estimated_error_pct_max": "",
+            "precision_quality_hint": metrics.get("precision_quality_hint", ""),
         }
+
+        # Pakker ut range → to kolonner
+        rng = metrics.get("estimated_error_pct_range")
+        if isinstance(rng, (list, tuple)) and len(rng) == 2:
+            try:
+                row["estimated_error_pct_min"] = float(rng[0])
+            except Exception:
+                row["estimated_error_pct_min"] = ""
+            try:
+                row["estimated_error_pct_max"] = float(rng[1])
+            except Exception:
+                row["estimated_error_pct_max"] = ""
+
         out.append(row)
 
     # Skriv CSV uansett, med nøyaktig samme header som testen forventer
-    header = ["git_sha","profile_version","weather_source","ride_id","precision_watt","drag_watt","rolling_watt","total_watt","calibration_mae"]
+    header = [
+        "git_sha","profile_version","weather_source","ride_id",
+        "precision_watt","drag_watt","rolling_watt","total_watt","calibration_mae",
+        "estimated_error_pct_min","estimated_error_pct_max","precision_quality_hint",
+    ]
     ART_DIR.mkdir(parents=True, exist_ok=True)
     with (ART_DIR / "t11_matrix.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=header)
