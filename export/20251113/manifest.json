@@ -1,15 +1,14 @@
 {
-  "ts_utc": "2025-11-12T20:25:13.631314+00:00",
+  "ts_utc": "2025-11-13T06:35:47.444904+00:00",
   "frozen_weather_hint": true,
   "counts": {
     "sessions": 11
   },
   "sha256": {
-    "final14_manifest.json": "0a4216e39f92e8065fa8408b750ee92c0931821d6379d6c641b5d1665e016b3b",
-    "manifest.json": "38b1b05ccfe3125da2990125aed8f042f572cbf5f6d2afffbd7acf924f255a95",
-    "profile_versions.jsonl": "485a38a9ad1c205626985d732fa7eea91293e295fe254f8f6d5f07e2982c2e09",
-    "sessions.jsonl": "266de444d0684cf9052ee93fc2d5d1d53fbb4ce01fc37073af88978af663f6ae",
-    "sessions_tmp.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "final14_manifest.json": "21a2fbc213d0043234a9b26a926dfc81baba4e3eda5a36d321df33b8f7af29cb",
+    "manifest.json": "356872a4852d1e274b816817596eb8b88c322de92101bd4290a24cffb6dfcf51",
+    "profile_versions.jsonl": "bff648d0caf7bda33e00afa08e435debd13f56650185bb48766dca46ff1d8fe7",
+    "sessions.jsonl": "47c554b5a9baa1d5f0b1934caf2a04671770f8f530096deb6ea75fd0e9df57df",
     "t11_matrix.csv": "640d42411600cf4df5708d8a0fc370d92bbd0efb74d58d0cb4c8d2b8d12e2995",
     "trend_summary.csv": "ddecbaeaadee9f66b2059b4df8487a829d36a3aec037c0c2ae4f96b4e8003f25",
     "trend_pivots\\trinn9_pivot_avg_watt_vv1-6568af79836a-20251112.csv": "a36459f5535ce47f16d06c703189219d106812df9027bf0b43680484ff0e0ca7",

@@ -601,12 +601,140 @@ datetime.utcnow() → bytt til datetime.now(datetime.UTC) (samme notat som Tr11)
 
 Hvis enkelte miløer skriver result_*.json til uvanlige stier, vil _gather_results() likevel fange disse (sikrer portabilitet).
 
-📎 Lagt inn Forward-Compatibility Schema for Copilot/CI/QA.
+🧩 Backend Stability & Contract — Trinn 15 (Heuristic Precision & Benchmark Logging)
+
+Dato: 12. nov 2025
+Ansvarlig: CycleGraph Backend
+Versjon: v1-a0c54a9e-20251112
+
+🎯 Formål
+
+Trinn 15 avslutter backend-MVP for CycleGraph.
+Målet var å tilføre selvforklarende presisjonsindikatorer og benchmark-logging uten å endre eksisterende kontrakter eller bryte determinisme.
+Resultatet er at frontend nå kan vise:
+
+usikkerhets­intervall for «Precision Watt» (vises som ±% eller PW CI)
+
+heuristisk kvalitets­hint (normal | windy | wet)
+
+underliggende profile completeness (grunnlaget for nøyaktighets-måleren i profilskjemaet)
+
+🧠 Nye funksjoner
+1. Heuristisk presisjonsberegning
+
+Implementert i server/analysis/calibration15.py.
+
+def compute_estimated_error_and_hint(profile, weather) -> ([lo, hi], hint, completeness)
+
+Input	Output	Typisk verdi
+profile_used (dict)	estimated_error_pct_range → [14.0, 16.0]	±15 % default
+weather_used (dict)	precision_quality_hint → "normal" / "windy" / "wet"	"normal" ved stabile forhold
+—	profile_completeness → 0–100 %	17 % for ufullstendig profil → brukes i frontend-meter
+
+Heuristikken gir et raskt estimat på usikkerhet uten ekstra CPU-kostnad, og ligger nå direkte i metrics-blokken i analyze-responsen.
+
+2. Benchmark-logging (JSONL)
+
+Ny modul append_benchmark_candidate() skriver én linje per ride til
+logs/benchmark_candidates.jsonl kun når:
+
+has_device_data == True (= device_watts tilstede)
+
+precision_quality_hint == "normal"
+
+Eksempel-record:
+
+{"ride_id":"local-mini",
+ "profile_version":"v1-a0c54a9e-20251112",
+ "calibration_mae":null,
+ "estimated_error_pct_range":[14.0,16.0],
+ "profile_completeness":17,
+ "has_device_data":true,
+ "hint":"normal"}
+
+
+Dette danner grunnlaget for Trend-/Benchmark-visninger i frontend (Sprint 15 mål 2 og 3).
+
+🔗 Endringer i server/routes/sessions.py
+Område	Endring	Formål
+Trinn 6 → Trinn 15	Lagt inn heuristisk kalkulasjon etter kalibrering	Gir estimated_error_pct_range og precision_quality_hint i metrics
+Import guard	Try/Except-import for calibration15	Hindrer analyze-feil hvis modul mangler
+Observability	Best-effort logging → aldri bryter analyze()	Stabilitet
+Benchmark append	Kalles etter kontraktsikring	Skaper append-logg uten påvirkning på CI
+📦 Oppdatert kontrakt (analyze API)
+"metrics": {
+  "precision_watt": 262.6,
+  "drag_watt": 31.4,
+  "rolling_watt": 26.9,
+  "total_watt": 250.8,
+  "calibration_mae": null,
+  "calibrated": false,
+  "calibration_status": "not_enough_samples",
+  "estimated_error_pct_range": [14.0, 16.0],
+  "precision_quality_hint": "normal",
+  "weather_used": {...},
+  "weather_meta": {...},
+  "weather_fp": "7d5ce6…",
+  "profile_used": {...}
+}
+
+Frontend-bruk
+UI-element	Kildefelt	Kommentar
+PW CI (%)	estimated_error_pct_range	Vises som “± range” i Session Card
+Precision Quality Hint	precision_quality_hint	Vises som “Normal / Vind / Våt” badge
+Profile Accuracy Meter	beregnet fra profile_completeness	Frontend kan bruke verdien til å styre meter-grafikken
+⚙️ Ytelse og kompatibilitet
+
+Ingen nye blocking-kall – alt skjer synkront i eksisterende analyze-pipeline.
+
+pytest og CI-checks passerte uendret.
+
+Backward-kompatibelt med alle tidligere kontrakter.
+
+Ingen påvirkning på caching-system eller observability.
+
+JSON-output = deterministisk (sorterte keys, utf-8, newline \n).
+
+🔍 Verifisering (11.–12. nov)
+Test	Resultat
+Normal (2 m/s) → hint=normal	✅ [14.0, 16.0]
+Vind (5.5 m/s) → hint=windy	✅ [14.0, 16.0]
+JSONL append ved normal + device	✅ Fil opprettet
+No device → ingen append	✅
+Restart/server state	✅ Ingen regresjon
+🧭 Implikasjoner for Sprint 15 Frontend
+
+precision_quality_hint og estimated_error_pct_range kan vises direkte i:
+
+Session Card (PW ± CI % og hint-badge)
+
+ProfileAccuracyMeter (MVP heuristikk)
+
+benchmark_candidates.jsonl gir datagrunnlag for “trend / accuracy-learning”.
+
+Alle verdier er validerte og kan trygt serialiseres til UI via api.ts.
+
+✅ Status
+Komponent	Status
+calibration15.py	✅ Stabil, deterministisk
+analyze_session	✅ Integrert, fallback-sikker
+Logging/Observability	✅ Verifierte append-operasjoner
+Kontrakts-stabilitet	✅ Uendret
+End-to-End Test	✅ Bestått
+🔒 Oppsummering
+
+Backend MVP ferdigstilt og frosset 12. nov 2025.
+Heuristisk presisjonsvurdering og benchmark-logging er nå integrert uten regresjon.
+Grensesnittet mot frontend er stabilt og kan benyttes i Sprint 15 for live Session Cards, Trend, og Profile Accuracy Meter.
+
+
+
 
 
 🧭 Forward-Compatibility Schema (for Copilot context)
 
-(oppdatert t.o.m. Trinn 6)
+
+
 
 Purpose:
 Fast, maskinlesbart referansepunkt for backend-kontrakten etter Trinn 6.

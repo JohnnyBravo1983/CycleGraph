@@ -254,9 +254,43 @@ def main(argv: list[str]) -> int:
     with (export_root / "manifest.json").open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2, separators=(",", ": "))
 
+    # -------------------------------------------------------------
+    # 🟩 T14 – Final Lock manifest (final14_manifest.json)
+    # -------------------------------------------------------------
+
+    # Git SHA (robust)
+    try:
+        sha = (
+            check_output(["git", "rev-parse", "HEAD"])
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:
+        sha = "unknown"
+
+    # SHA256 av T11 CSV (bruk eksisterende manifest)
+    t11_csv_key = "t11_matrix.csv"
+    t11_sha = manifest["sha256"].get(t11_csv_key, "")
+
+    final_meta = {
+        "git_sha": sha,
+        "weather_mode": "frozen",
+        "sessions_count": len(lines),
+        "t11_matrix_sha256": t11_sha,
+        "export_dir": export_root.name,
+        "export_ts": datetime.now(timezone.utc).isoformat(),
+    }
+
+    final14_path = export_root / "final14_manifest.json"
+    with final14_path.open("w", encoding="utf-8") as f:
+        json.dump(final_meta, f, ensure_ascii=False, indent=2)
+
+    print(f"[T14] Final14 manifest skrevet -> {final14_path}")
+
     # 7) Kort utskrift for CI/PS-skript
     print(f"[EXPORT13] wrote: {sessions_jsonl} ({len(lines)} lines)")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

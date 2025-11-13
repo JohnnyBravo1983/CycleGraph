@@ -13,7 +13,7 @@
       "tire_width_mm": 28,
       "tire_quality": "performance",
       "device": "strava",
-      "profile_version": "v1-a0c54a9e-20251113"
+      "profile_version": "v1-a0c54a9e-20251112"
     },
     "rolling_watt": 0.0,
     "total_watt": 0.0,
@@ -43,7 +43,7 @@
     "weather_source": "neutral"
   },
   "weather_source": "open-meteo",
-  "profile_version": "v1-a0c54a9e-20251113",
+  "profile_version": "v1-a0c54a9e-20251112",
   "profile_used": {
     "rider_weight_kg": 83.0,
     "bike_weight_kg": 8.0,
@@ -53,6 +53,6 @@
     "tire_width_mm": 28,
     "tire_quality": "performance",
     "device": "strava",
-    "profile_version": "v1-a0c54a9e-20251113"
+    "profile_version": "v1-a0c54a9e-20251112"
   }
 }
