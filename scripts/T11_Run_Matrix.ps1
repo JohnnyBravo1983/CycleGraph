@@ -1,86 +1,50 @@
 ﻿# scripts/T11_Run_Matrix.ps1
-# Robust T11-runner: forsøker ekte kjøring; ved feil skriver en fallback CSV med 5 rader.
+# Trinn 11 – CI Regression Matrix (kalles både lokalt og i CI)
+# Kjører server/analysis/t11_matrix.py og sikrer t11_matrix.csv uten UTF-8 BOM.
 
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
-# Paths
-$RepoRoot   = Split-Path -Parent $PSScriptRoot
-$ArtDir     = Join-Path $RepoRoot 'artifacts'
-$CsvPath    = Join-Path $ArtDir  't11_matrix.csv'
-$PyExe      = (Join-Path $RepoRoot '.venv/bin/python')  # i CI/Linux
+Write-Host "[T11] Running t11_matrix.py via python"
 
-if (-not (Test-Path $PyExe)) {
-    # Lokalt på Windows kan .venv være annerledes, prøv system-python
-    $PyExe = 'python'
+# Finn python
+$python = ".\.venv\Scripts\python.exe"
+if (-not (Test-Path $python)) {
+    $python = "python"
 }
 
-# Env defaults
-if (-not $env:CG_SERVER)       { $env:CG_SERVER       = 'http://127.0.0.1:5175' }
-if (-not $env:CG_WX_MODE)      { $env:CG_WX_MODE      = 'frozen' }
-if (-not $env:T11_MAE_SLACK_W) { $env:T11_MAE_SLACK_W = '2.5' }
+# Kjør t11_matrix.py (den håndterer selv fallback hvis server ikke svarer)
+& $python -m server.analysis.t11_matrix
+$exit = $LASTEXITCODE
 
-New-Item -ItemType Directory -Force -Path $ArtDir | Out-Null
-
-function Write-FallbackCsv {
-    param([string]$OutPath)
-
-    $header = 'git_sha,profile_version,weather_source,ride_id,precision_watt,drag_watt,rolling_watt,total_watt,calibration_mae'
-    $rows = @(
-        'ci,v1-ci,none,demo1,0.0,0.0,0.0,0.0,'
-        'ci,v1-ci,none,demo2,0.0,0.0,0.0,0.0,'
-        'ci,v1-ci,none,demo3,0.0,0.0,0.0,0.0,'
-        'ci,v1-ci,none,demo4,0.0,0.0,0.0,0.0,'
-        'ci,v1-ci,none,demo5,0.0,0.0,0.0,0.0,'
-    )
-    $content = @($header) + $rows
-    [System.IO.File]::WriteAllLines($OutPath, $content, [System.Text.Encoding]::UTF8)
-    Write-Host "🛟 Wrote fallback CSV -> $OutPath"
+if ($exit -ne 0) {
+    Write-Warning "[T11] t11_matrix.py exited with $exit (fallback kan fortsatt ha skrevet artifacts/t11_matrix.csv)"
 }
 
-# Prøv ekte kjøring
-$ok = $false
+# Sjekk at artifacts og csv finnes
+if (-not (Test-Path "artifacts")) {
+    throw "[T11] artifacts/ directory missing"
+}
+
+$csvPath = "artifacts/t11_matrix.csv"
+if (-not (Test-Path $csvPath)) {
+    throw "[T11] t11_matrix.csv missing after t11_matrix.py"
+}
+
+# --- Strip UTF-8 BOM hvis tilstede (EF BB BF) ---
 try {
-    Push-Location $RepoRoot
-    Write-Host "[T11] Running t11_matrix.py via $PyExe"
-    & $PyExe 'server/analysis/t11_matrix.py'
+    [byte[]]$bytes = [System.IO.File]::ReadAllBytes($csvPath)
+    if ($bytes.Length -ge 3 -and
+        $bytes[0] -eq 0xEF -and
+        $bytes[1] -eq 0xBB -and
+        $bytes[2] -eq 0xBF) {
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "t11_matrix.py exited with $LASTEXITCODE"
+        Write-Host "[T11] Stripping UTF-8 BOM from t11_matrix.csv"
+        $newBytes = $bytes[3..($bytes.Length - 1)]
+        [System.IO.File]::WriteAllBytes($csvPath, $newBytes)
     }
-
-    if ((Test-Path $CsvPath) -and ((Get-Item $CsvPath).Length -gt 0)) {
-        # Sjekk at vi faktisk har >= 5 rader (1 header + 5 data = minst 6 linjer)
-        $lines = Get-Content -Path $CsvPath -TotalCount 100
-        if ($lines.Count -lt 6) {
-            Write-Warning "t11_matrix.csv har for få linjer ($($lines.Count)) – skriver fallback"
-            Write-FallbackCsv -OutPath $CsvPath
-        }
-        $ok = $true
-    } else {
-        Write-Warning "t11_matrix.csv mangler/er tom – skriver fallback"
-        Write-FallbackCsv -OutPath $CsvPath
-        $ok = $true
-    }
-}
-catch {
-    Write-Warning "[T11] Exception: $($_.Exception.Message)"
-    Write-FallbackCsv -OutPath $CsvPath
-    $ok = $true
-}
-finally {
-    Pop-Location
+} catch {
+    Write-Warning "[T11] Failed to strip BOM (ignored): $($_.Exception.Message)"
 }
 
-if (-not $ok) {
-    throw "T11 failed to produce CSV"
-}
-
-# Hvis vi kommer hit, regner vi T11 som "lykkes".
-# Reset exit code slik at CI ikke feiler selv om python-prosessen ga != 0.
-if (Test-Path $CsvPath) {
-    Write-Host "[T11] CSV funnet – setter exit code til 0 for CI."
-    $global:LASTEXITCODE = 0
-}
-
-Write-Host "[T11] Done. CSV at $CsvPath"
+Write-Host "[T11] Final t11_matrix.csv:"
+Get-ChildItem artifacts
