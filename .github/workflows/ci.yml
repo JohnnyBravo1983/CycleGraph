@@ -349,16 +349,18 @@ jobs:
           if (-not (Test-Path $csvPath)) { throw "Manglende $csvPath etter genereringssteg – avbryter." }
           $rows = Import-Csv $csvPath
           $rowsN = $rows | Select-Object *,
-            @{n='cdaD';            e={[double]($_.cda            -replace ',','.')}},
-            @{n='crrD';            e={[double]($_.crr            -replace ',','.')}},
-            @{n='weight_kgD';      e={[double]($_.weight_kg      -replace ',','.')}},
-            @{n='effD';            e={[double]($_.crank_eff_pct  -replace ',','.')}},
-            @{n='drag_wattD';      e={[double]($_.drag_watt      -replace ',','.')}},
-            @{n='rolling_wattD';   e={[double]($_.rolling_watt   -replace ',','.')}},
-            @{n='precision_wattD'; e={[double]($_.precision_watt -replace ',','.')}},
-            @{n='total_wattD';     e={[double]($_.total_watt     -replace ',','.')}}
+            @{n='cdaD';            e={[double]($_.cda            -replace ',','.')}} ,
+            @{n='crrD';            e={[double]($_.crr            -replace ',','.')}} ,
+            @{n='weight_kgD';      e={[double]($_.weight_kg      -replace ',','.')}} ,
+            @{n='effD';            e={[double]($_.crank_eff_pct  -replace ',','.')}} ,
+            @{n='drag_wattD';      e={[double]($_.drag_watt      -replace ',','.')}} ,
+            @{n='rolling_wattD';   e={[double]($_.rolling_watt   -replace ',','.')}} ,
+            @{n='precision_wattD'; e={[double]($_.precision_watt -replace ',','.')}} ,
+            @{n='total_wattD';     e={[double]($_.total_watt     -replace ',','.')}} 
+
           $exp = 5*5*4*4
           if ($rowsN.Count -ne $exp) { throw "Grid size mismatch: expected $exp, got $($rowsN.Count)" }
+
           function Assert-StrictInc([double[]]$arr, [string]$label) {
             for ($i=1; $i -lt $arr.Count; $i++) {
               if (!($arr[$i] -gt $arr[$i-1])) {
@@ -366,32 +368,39 @@ jobs:
               }
             }
           }
+
           $groups = $rowsN | Group-Object crrD, weight_kgD, effD
           foreach ($g in $groups) {
             $seq = $g.Group | Sort-Object cdaD | ForEach-Object { $_.drag_wattD }
             Assert-StrictInc $seq "drag vs cda in [$($g.Name)]"
           }
+
           $groups = $rowsN | Group-Object cdaD, weight_kgD, effD
           foreach ($g in $groups) {
             $seq = $g.Group | Sort-Object crrD | ForEach-Object { $_.rolling_wattD }
             Assert-StrictInc $seq "rolling vs crr in [$($g.Name)]"
           }
+
           $groups = $rowsN | Group-Object cdaD, crrD, effD
           foreach ($g in $groups) {
             $seq = $g.Group | Sort-Object weight_kgD | ForEach-Object { $_.rolling_wattD }
             Assert-StrictInc $seq "rolling vs weight in [$($g.Name)]"
           }
+
           $cdas = $rowsN.cdaD | Sort-Object -Unique
           foreach ($c in $cdas) {
             $uniq = ($rowsN | Where-Object { $_.cdaD -eq $c } | Select-Object -ExpandProperty drag_wattD | Sort-Object -Unique)
             if ($uniq.Count -ne 1) { throw "Drag invarians feilet for CdA=$c (fant $($uniq.Count) unike verdier)" }
           }
+
           [System.Threading.Thread]::CurrentThread.CurrentCulture = 'en-US'
           New-Item -ItemType Directory -Force -Path logs | Out-Null
+
           $weights = ($rowsN.weight_kgD | Sort-Object -Unique)
           $effs    = ($rowsN.effD        | Sort-Object -Unique)
           $crrs    = ($rowsN.crrD        | Sort-Object -Unique)
           $cdas    = ($rowsN.cdaD        | Sort-Object -Unique)
+
           function Write-Pivot([string]$metric, [double]$w, [double]$eff) {
             $pivot = foreach ($cda in $cdas) {
               $row = [ordered]@{ cda = $cda }
@@ -407,6 +416,7 @@ jobs:
             $pivot | Export-Csv $out -NoTypeInformation -Encoding UTF8
             Write-Host "Wrote $out"
           }
+
           foreach ($w in $weights) {
             foreach ($e in $effs) {
               Write-Pivot 'precision_wattD' $w $e
@@ -463,8 +473,12 @@ jobs:
           cd ..
           $GITHUB_WORKSPACE/.venv/bin/python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
 
+
+      # ----------------------------
+      # 🔧 FIXED → shell: pwsh
+      # ----------------------------
       - name: T14 Final Sweep & Lock
-        shell: powershell
+        shell: pwsh
         run: |
           # --- Determinisme ---
           $env:CG_SERVER         = "http://127.0.0.1:5175"
@@ -473,10 +487,10 @@ jobs:
           $env:LC_ALL            = "C"
           $env:PYTHONHASHSEED    = "0"
 
-          # --- Start Uvicorn i bakgrunnen (Windows PowerShell 5) ---
+          # --- Start Uvicorn i bakgrunnen ---
           $job = Start-Job -ScriptBlock { python -m uvicorn app:app --host 127.0.0.1 --port 5175 }
 
-          # Poll til API svarer (maks ~25s)
+          # Poll server
           $ok = $false
           1..50 | ForEach-Object {
             try {
@@ -493,22 +507,24 @@ jobs:
           }
 
           # --- T11: Regression Matrix (rask baseline uten vær) ---
-          # Sikre deterministisk og rask kjøring for T11
           $env:CG_T11_NO_WEATHER = "1"
           scripts/T11_Run_Matrix.ps1
 
-          # --- T14: Final Sweep (frozen weather) + Export + Verify ---
-          # T14 skal bruke vær (frossent); nullstill no_weather-flagget
+          # --- T14: Final Sweep (frozen weather) ---
           $env:CG_T11_NO_WEATHER = ""
           scripts/T14_Final_Sweep.ps1 -Server $env:CG_SERVER
 
-          # --- Rydd opp i bakgrunnsjobb ---
+          # --- Kill UVicorn job ---
           Stop-Job $job -Force | Out-Null
           Receive-Job $job -Keep | Out-Null
 
+      # ----------------------------
+      # 🔧 FIXED → shell: pwsh
+      # ----------------------------
       - name: PyTest
-        shell: powershell
+        shell: pwsh
         run: pytest -q
+
 
       - name: Ensure T11 CSV exists (fallback if missing)
         shell: bash

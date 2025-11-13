@@ -1,13 +1,13 @@
 {
-  "ts_utc": "2025-11-13T06:35:47.444904+00:00",
+  "ts_utc": "2025-11-13T06:47:54.526854+00:00",
   "frozen_weather_hint": true,
   "counts": {
     "sessions": 11
   },
   "sha256": {
-    "final14_manifest.json": "21a2fbc213d0043234a9b26a926dfc81baba4e3eda5a36d321df33b8f7af29cb",
-    "manifest.json": "356872a4852d1e274b816817596eb8b88c322de92101bd4290a24cffb6dfcf51",
-    "profile_versions.jsonl": "bff648d0caf7bda33e00afa08e435debd13f56650185bb48766dca46ff1d8fe7",
+    "final14_manifest.json": "3947373c5b74d1e71ec315345ac0e2900fe437e9d54f6e226b376c6ddb6b698e",
+    "manifest.json": "e21b5e0c32f78a28dd784df2335dfc8c6a661b12dc3209e118eedd0eb6f8eba8",
+    "profile_versions.jsonl": "6732c1186788e05bcf2492aeefa3b7a8faffe3558d1f6a5942b4ceb369f72081",
     "sessions.jsonl": "47c554b5a9baa1d5f0b1934caf2a04671770f8f530096deb6ea75fd0e9df57df",
     "t11_matrix.csv": "640d42411600cf4df5708d8a0fc370d92bbd0efb74d58d0cb4c8d2b8d12e2995",
     "trend_summary.csv": "ddecbaeaadee9f66b2059b4df8487a829d36a3aec037c0c2ae4f96b4e8003f25",
