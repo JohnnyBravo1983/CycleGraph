@@ -432,7 +432,7 @@ jobs:
           path: logs/t8_pivot_*.csv
 
   # --------------------------------------------------------
-  # T11 – CI Regression Matrix (ny, ryddegjort jobb)
+  # T11 – CI Regression Matrix (med egen venv)
   # --------------------------------------------------------
   t11_regression_matrix:
     name: Trinn 11 – CI Regression Matrix
@@ -448,12 +448,27 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Python deps
+      # EGEN VENV + DEPS
+      - name: Create venv and install deps (explicit paths)
         shell: bash
         run: |
-          python -m pip install -U pip
-          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
-          python -m pip install maturin
+          python -m venv .venv
+          VENV="$GITHUB_WORKSPACE/.venv"
+          "$VENV/bin/python" -m pip install -U pip
+          "$VENV/bin/python" -m pip install maturin pytest
+          if [ -f requirements.txt ]; then "$VENV/bin/python" -m pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then "$VENV/bin/python" -m pip install -r requirements-dev.txt; fi
+          "$VENV/bin/python" -m pip install --exists-action=i \
+            click \
+            "fastapi>=0.110" \
+            "fastapi[testclient]" \
+            pydantic \
+            httpx \
+            requests \
+            python-dotenv
+          echo "VIRTUAL_ENV=$VENV" >> "$GITHUB_ENV"
+          echo "$VENV/bin" >> "$GITHUB_PATH"
+          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -462,8 +477,9 @@ jobs:
         shell: bash
         run: |
           cd core
-          python -m maturin develop --features python
+          $GITHUB_WORKSPACE/.venv/bin/python -m maturin develop --features python
           cd ..
+          $GITHUB_WORKSPACE/.venv/bin/python -c "import cyclegraph_core as cg; print('T11: import ok:', hasattr(cg, 'compute_power_with_wind'))"
 
       - name: Provide test tokens/state
         shell: bash
@@ -473,7 +489,7 @@ jobs:
           cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
 
       # -----------------------------
-      # START SERVER
+      # START SERVER (venv-python på PATH)
       # -----------------------------
       - name: Start Uvicorn server
         shell: pwsh
@@ -551,8 +567,10 @@ jobs:
           }
 
       # -----------------------------
-      # FINAL PYTEST
+      # FINAL PYTEST (bruker samme venv)
       # -----------------------------
       - name: PyTest
         shell: pwsh
-        run: pytest -q
+        run: |
+          pytest -q
+  
