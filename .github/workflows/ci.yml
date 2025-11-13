@@ -432,7 +432,7 @@ jobs:
           path: logs/t8_pivot_*.csv
 
   # --------------------------------------------------------
-  # T11 – CI Regression Matrix (med safe Stop-Job uten -Force)
+  # T11 – CI Regression Matrix (ny, ryddegjort jobb)
   # --------------------------------------------------------
   t11_regression_matrix:
     name: Trinn 11 – CI Regression Matrix
@@ -440,33 +440,40 @@ jobs:
     needs: py-tests
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.12
+          python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install Python deps
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          python -m pip install maturin
 
-      - name: Install Rust dependencies
-        run: |
-          rustup default stable
-          rustup update
-          sudo apt-get install -y libssl-dev pkg-config
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build core
+      - name: Build & install Rust core (PyO3)
+        shell: bash
         run: |
           cd core
-          cargo build --release
-          cargo test
+          python -m maturin develop --features python
           cd ..
 
+      - name: Provide test tokens/state
+        shell: bash
+        run: |
+          cp cli/tokens_example.py cli/tokens.py
+          mkdir -p state
+          cp state/last_import.sample.json state/last_import.json || echo "{}" > state/last_import.json
+
       # -----------------------------
-      # 1) Start server (pwsh)
+      # START SERVER
       # -----------------------------
       - name: Start Uvicorn server
         shell: pwsh
@@ -480,9 +487,8 @@ jobs:
             python -m uvicorn app:app --host 127.0.0.1 --port 5175
           }
 
-          $max = 40
           $ready = $false
-          for ($i = 0; $i -lt $max; $i++) {
+          for ($i = 0; $i -lt 60; $i++) {
             try {
               Invoke-WebRequest "http://127.0.0.1:5175/api/profile/get" -UseBasicParsing | Out-Null
               $ready = $true
@@ -492,8 +498,8 @@ jobs:
             }
           }
 
-          if (!$ready) {
-            Write-Host "Server did not start!"
+          if (-not $ready) {
+            Write-Host "[CI] Server did not start."
             Receive-Job $job -Keep | Write-Host
             throw "server startup failure"
           }
@@ -501,17 +507,22 @@ jobs:
           Set-Content -Path server_job.id -Value $job.Id
 
       # -----------------------------
-      # 2) T11 regression matrix
+      # TRINN 11 RUN
       # -----------------------------
       - name: Run T11 Regression Matrix
         shell: pwsh
         run: |
           $env:CG_T11_NO_WEATHER = "1"
           scripts/T11_Run_Matrix.ps1
-          Get-ChildItem artifacts
+
+          if (-not (Test-Path "artifacts/t11_matrix.csv")) {
+            throw "[CI] t11_matrix.csv not generated."
+          }
+
+          Write-Host "[CI] Verified t11_matrix.csv exists."
 
       # -----------------------------
-      # 3) T14 sweep + export
+      # TRINN 14 SWEEP
       # -----------------------------
       - name: Run T14 Final Sweep/Export
         shell: pwsh
@@ -520,29 +531,27 @@ jobs:
           scripts/T14_Final_Sweep.ps1
 
       # -----------------------------
-      # 4) Stop server (uten -Force, med try/catch)
+      # STOP SERVER (SAFE)
       # -----------------------------
       - name: Stop server
         shell: pwsh
         run: |
           $id = Get-Content server_job.id
 
-          # Stop job WITHOUT -Force (not supported on PowerShell Core)
           try {
-              Stop-Job -Id $id  | Out-Null
+            Stop-Job -Id $id | Out-Null
           } catch {
-              Write-Host "[CI] Stop-Job warning (ignored): $($_.Exception.Message)"
+            Write-Host "[CI] Stop-Job warning (ignored): $($_.Exception.Message)"
           }
 
-          # Receive job output (safe)
           try {
-              Receive-Job -Id $id -Keep | Out-Null
+            Receive-Job -Id $id -Keep | Out-Null
           } catch {
-              Write-Host "[CI] Receive-Job warning (ignored): $($_.Exception.Message)"
+            Write-Host "[CI] Receive-Job warning (ignored): $($_.Exception.Message)"
           }
 
       # -----------------------------
-      # 5) Pytest
+      # FINAL PYTEST
       # -----------------------------
       - name: PyTest
         shell: pwsh
