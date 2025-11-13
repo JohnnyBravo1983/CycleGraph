@@ -432,7 +432,7 @@ jobs:
           path: logs/t8_pivot_*.csv
 
   # --------------------------------------------------------
-  # ✅ NY T11 – Patch B (erstatter hele gamle T11)
+  # T11 – CI Regression Matrix (med safe Stop-Job uten -Force)
   # --------------------------------------------------------
   t11_regression_matrix:
     name: Trinn 11 – CI Regression Matrix
@@ -520,14 +520,26 @@ jobs:
           scripts/T14_Final_Sweep.ps1
 
       # -----------------------------
-      # 4) Stop server
+      # 4) Stop server (uten -Force, med try/catch)
       # -----------------------------
       - name: Stop server
         shell: pwsh
         run: |
           $id = Get-Content server_job.id
-          Stop-Job -Id $id -Force | Out-Null
-          Receive-Job -Id $id -Keep | Out-Null
+
+          # Stop job WITHOUT -Force (not supported on PowerShell Core)
+          try {
+              Stop-Job -Id $id  | Out-Null
+          } catch {
+              Write-Host "[CI] Stop-Job warning (ignored): $($_.Exception.Message)"
+          }
+
+          # Receive job output (safe)
+          try {
+              Receive-Job -Id $id -Keep | Out-Null
+          } catch {
+              Write-Host "[CI] Receive-Job warning (ignored): $($_.Exception.Message)"
+          }
 
       # -----------------------------
       # 5) Pytest
