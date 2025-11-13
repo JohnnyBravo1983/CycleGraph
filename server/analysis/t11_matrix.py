@@ -52,17 +52,25 @@ def _git_sha() -> str:
     except Exception:
         return os.environ.get("GIT_SHA", "unknown")
 
-def _ensure_server(url_base: str, timeout_s: float = 15.0):
-    t0 = time.time()
-    while time.time() - t0 < timeout_s:
-        try:
-            r = httpx.get(f"{url_base}/api/profile/get", timeout=2)
-            if r.status_code == 200:
-                return
-        except Exception:
-            pass
-        time.sleep(0.5)
-    raise RuntimeError(f"Server not responding at {url_base}")
+def _ensure_server(url_base: str) -> bool:
+    """Returner True hvis serveren svarer OK, ellers False (ingen exceptions)."""
+    health_url = f"{url_base.rstrip('/')}/health"
+    print(f"[T11] Checking server health at {health_url} ...")
+
+    try:
+        resp = httpx.get(health_url, timeout=2.0)
+    except Exception as e:
+        print(f"[T11] WARNING: server not responding at {url_base}: {e}")
+        return False
+
+    if resp.status_code != 200:
+        print(f"[T11] WARNING: server unhealthy at {url_base} (status={resp.status_code})")
+        return False
+
+    print("[T11] Server OK.")
+    return True
+
+
 
 def _get_profile_meta(url_base: str) -> Dict[str, Any]:
     r = httpx.get(f"{url_base}/api/profile/get", timeout=10)
@@ -309,7 +317,13 @@ def main() -> int:
     url_base = os.environ.get("CG_SERVER", "http://127.0.0.1:5175")
     wx_mode = os.environ.get("CG_WX_MODE", "real")  # "real" | "frozen"
 
-    _ensure_server(url_base)
+    # Myk server-sjekk: ingen traceback, bare pen logg + exit code 1
+    if not _ensure_server(url_base):
+        # Viktig: vi returnerer 1 slik at T11_Run_Matrix.ps1 fortsatt
+        # kan plukke det opp og skrive fallback-CSV.
+        print("[T11] Server check failed – returning 1 for wrapper fallback.")
+        return 1
+
     git_sha = _git_sha()
     meta = _get_profile_meta(url_base)
     server_profile_version = meta["profile_version"]
@@ -327,7 +341,12 @@ def main() -> int:
     ]
 
     for ride_id in required_rides:
-        resp = _analyze_one(url_base, ride_id, base_profile, frozen=(wx_mode == "frozen"))
+        resp = _analyze_one(
+            url_base,
+            ride_id,
+            base_profile,
+            frozen=(wx_mode == "frozen"),
+        )
         if not resp:
             out.append(_placeholder_row(git_sha, server_profile_version, ride_id))
             continue
@@ -335,7 +354,11 @@ def main() -> int:
         metrics = resp.get("metrics", {}) or {}
 
         # Best effort profilversjon: resp -> metrics -> server-meta
-        row_profile_version = resp.get("profile_version") or metrics.get("profile_version") or server_profile_version
+        row_profile_version = (
+            resp.get("profile_version")
+            or metrics.get("profile_version")
+            or server_profile_version
+        )
 
         row: Dict[str, Any] = {
             "git_sha": git_sha,
@@ -381,6 +404,7 @@ def main() -> int:
 
     print(f"[T11] wrote {len(out)} rows to artifacts/t11_matrix.csv")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
