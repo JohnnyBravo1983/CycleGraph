@@ -431,140 +431,107 @@ jobs:
           name: t8-pivots
           path: logs/t8_pivot_*.csv
 
+  # --------------------------------------------------------
+  # ✅ NY T11 – Patch B (erstatter hele gamle T11)
+  # --------------------------------------------------------
   t11_regression_matrix:
     name: Trinn 11 – CI Regression Matrix
     runs-on: ubuntu-latest
-    env:
-      CG_SERVER: http://127.0.0.1:5175
-      CG_WX_MODE: frozen
-      T11_MAE_SLACK_W: "2.5"
-      PYTHONHASHSEED: "0"
-      LANG: "C"
-      LC_ALL: "C"
-      TZ: "UTC"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    needs: py-tests
 
-      - name: Setup Python
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: 3.12
 
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Create venv and base deps (explicit paths)
-        shell: bash
+      - name: Install dependencies
         run: |
-          python -m venv .venv
-          VENV="$GITHUB_WORKSPACE/.venv"
-          "$VENV/bin/python" -m pip install -U pip wheel setuptools maturin
-          "$VENV/bin/python" -m pip install pytest fastapi "pydantic<3" uvicorn httpx requests python-dotenv
-          echo "VIRTUAL_ENV=$VENV" >> "$GITHUB_ENV"
-          echo "$VENV/bin" >> "$GITHUB_PATH"
-          echo "PYO3_PYTHON=$VENV/bin/python" >> "$GITHUB_ENV"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Build Rust core (maturin develop)
-        shell: bash
+      - name: Install Rust dependencies
+        run: |
+          rustup default stable
+          rustup update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build core
         run: |
           cd core
-          $GITHUB_WORKSPACE/.venv/bin/python -m maturin develop --release -F python
+          cargo build --release
+          cargo test
           cd ..
-          $GITHUB_WORKSPACE/.venv/bin/python -c "import cyclegraph_core as cg; print('core ok:', cg.__file__)"
 
-
-      # ----------------------------
-      # 🔧 FIXED → shell: pwsh
-      # ----------------------------
-      - name: T14 Final Sweep & Lock
+      # -----------------------------
+      # 1) Start server (pwsh)
+      # -----------------------------
+      - name: Start Uvicorn server
         shell: pwsh
         run: |
-          # --- Determinisme ---
-          $env:CG_SERVER         = "http://127.0.0.1:5175"
-          $env:TZ                = "UTC"
-          $env:LANG              = "C"
-          $env:LC_ALL            = "C"
-          $env:PYTHONHASHSEED    = "0"
+          $env:TZ = "UTC"
+          $env:LANG = "C"
+          $env:LC_ALL = "C"
+          $env:PYTHONHASHSEED = "0"
 
-          # --- Start Uvicorn i bakgrunnen ---
-          $job = Start-Job -ScriptBlock { python -m uvicorn app:app --host 127.0.0.1 --port 5175 }
+          $job = Start-Job -ScriptBlock {
+            python -m uvicorn app:app --host 127.0.0.1 --port 5175
+          }
 
-          # Poll server
-          $ok = $false
-          1..50 | ForEach-Object {
+          $max = 40
+          $ready = $false
+          for ($i = 0; $i -lt $max; $i++) {
             try {
-              Invoke-WebRequest "$env:CG_SERVER/api/profile/get" -UseBasicParsing -TimeoutSec 2 | Out-Null
-              $ok = $true
+              Invoke-WebRequest "http://127.0.0.1:5175/api/profile/get" -UseBasicParsing | Out-Null
+              $ready = $true
               break
-            } catch {}
-            Start-Sleep -Milliseconds 500
-          }
-          if (-not $ok) {
-            Write-Host "Server not up. Uvicorn output follows:"
-            Receive-Job $job -Keep | Out-String | Write-Host
-            throw "Server failed to start"
+            } catch {
+              Start-Sleep -Milliseconds 500
+            }
           }
 
-          # --- T11: Regression Matrix (rask baseline uten vær) ---
+          if (!$ready) {
+            Write-Host "Server did not start!"
+            Receive-Job $job -Keep | Write-Host
+            throw "server startup failure"
+          }
+
+          Set-Content -Path server_job.id -Value $job.Id
+
+      # -----------------------------
+      # 2) T11 regression matrix
+      # -----------------------------
+      - name: Run T11 Regression Matrix
+        shell: pwsh
+        run: |
           $env:CG_T11_NO_WEATHER = "1"
           scripts/T11_Run_Matrix.ps1
+          Get-ChildItem artifacts
 
-          # --- T14: Final Sweep (frozen weather) ---
+      # -----------------------------
+      # 3) T14 sweep + export
+      # -----------------------------
+      - name: Run T14 Final Sweep/Export
+        shell: pwsh
+        run: |
           $env:CG_T11_NO_WEATHER = ""
-          scripts/T14_Final_Sweep.ps1 -Server $env:CG_SERVER
+          scripts/T14_Final_Sweep.ps1
 
-          # --- Kill UVicorn job ---
-          Stop-Job $job -Force | Out-Null
-          Receive-Job $job -Keep | Out-Null
+      # -----------------------------
+      # 4) Stop server
+      # -----------------------------
+      - name: Stop server
+        shell: pwsh
+        run: |
+          $id = Get-Content server_job.id
+          Stop-Job -Id $id -Force | Out-Null
+          Receive-Job -Id $id -Keep | Out-Null
 
-      # ----------------------------
-      # 🔧 FIXED → shell: pwsh
-      # ----------------------------
+      # -----------------------------
+      # 5) Pytest
+      # -----------------------------
       - name: PyTest
         shell: pwsh
         run: pytest -q
-
-
-      - name: Ensure T11 CSV exists (fallback if missing)
-        shell: bash
-        run: |
-          set -e
-          mkdir -p artifacts
-          if [ ! -s artifacts/t11_matrix.csv ]; then
-            printf '%s\n' \
-              'git_sha,profile_version,weather_source,ride_id,precision_watt,drag_watt,rolling_watt,total_watt,calibration_mae' \
-              'ci,v1-ci,none,demo1,0.0,0.0,0.0,0.0,' \
-              'ci,v1-ci,none,demo2,0.0,0.0,0.0,0.0,' \
-              'ci,v1-ci,none,demo3,0.0,0.0,0.0,0.0,' \
-              'ci,v1-ci,none,demo4,0.0,0.0,0.0,0.0,' \
-              'ci,v1-ci,none,demo5,0.0,0.0,0.0,0.0,' \
-              > artifacts/t11_matrix.csv
-            echo "Wrote fallback CSV"
-          fi
-          LINES=$(wc -l < artifacts/t11_matrix.csv)
-          if [ "$LINES" -lt 6 ]; then
-            echo "Too few rows in t11_matrix.csv"
-            exit 1
-          fi
-          head -n 10 artifacts/t11_matrix.csv || true
-
-      - name: CSV contract test (mini)
-        shell: bash
-        run: $GITHUB_WORKSPACE/.venv/bin/pytest -q tests/test_t11_matrix_csv.py
-
-      - name: Print uvicorn log on failure
-        if: failure()
-        shell: bash
-        run: |
-          echo "---- uvicorn.log (tail) ----"
-          tail -n 200 uvicorn.log || true
-
-      - name: Upload T11 artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: t11-artifacts
-          path: |
-            artifacts/t11_matrix.csv
-            uvicorn.log
