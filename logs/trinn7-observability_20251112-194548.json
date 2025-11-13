@@ -1,0 +1,92 @@
+{
+  "calibrated": false,
+  "metrics": {
+    "drag_watt": 31.420423124999992,
+    "gravity_watt": 192.43300843307665,
+    "precision_watt": 262.6220597780907,
+    "profile_used": {
+      "rider_weight_kg": 83.0,
+      "bike_weight_kg": 8.0,
+      "weight_kg": 91.0,
+      "total_weight_kg": 91.0,
+      "bike_type": "road",
+      "tire_width_mm": 28,
+      "tire_quality": "performance",
+      "device": "strava",
+      "profile_version": "v1-a0c54a9e-20251112"
+    },
+    "rolling_watt": 26.950635529999996,
+    "total_watt": 250.80406708807664,
+    "weather_used": {
+      "wind_ms": 2.0,
+      "wind_dir_deg": 0.0,
+      "air_temp_c": 8.0,
+      "air_pressure_hpa": 1012.0,
+      "dir_is_from": true,
+      "meta": {
+        "injected_client": true,
+        "reduce_factor": null,
+        "windspeed_10m_ms": null
+      }
+    },
+    "weather_meta": {
+      "provider": "open-meteo/era5",
+      "lat_used": null,
+      "lon_used": null,
+      "ts_hour": null,
+      "height": "10m->2m",
+      "unit_wind": "m/s",
+      "cache_key": null
+    },
+    "weather_fp": "7d5ce6640eb01bb898c7c363b8dab9b064227631",
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_enough_samples",
+    "estimated_error_pct_range": [
+      14.0,
+      16.0
+    ],
+    "precision_quality_hint": "normal",
+    "weather_applied": true,
+    "weather_source": "open-meteo/era5"
+  },
+  "source": "rust_1arg",
+  "v_rel": [
+    9.5,
+    9.6
+  ],
+  "watts": [
+    188.84873836166688,
+    250.80406708807664
+  ],
+  "weather_applied": true,
+  "wind_rel": [
+    -2.0,
+    -2.0
+  ],
+  "repr_kind": "object_v3",
+  "debug": {
+    "reason": "ok",
+    "force_recompute": true,
+    "persist_ignored": true,
+    "ignored_persist": true,
+    "used_fallback": false,
+    "weather_source": "historical",
+    "estimat_cfg_used": {
+      "force": true
+    }
+  },
+  "weather_source": "open-meteo/era5",
+  "profile_version": "v1-a0c54a9e-20251112",
+  "profile_used": {
+    "rider_weight_kg": 83.0,
+    "bike_weight_kg": 8.0,
+    "weight_kg": 91.0,
+    "total_weight_kg": 91.0,
+    "bike_type": "road",
+    "tire_width_mm": 28,
+    "tire_quality": "performance",
+    "device": "strava",
+    "profile_version": "v1-a0c54a9e-20251112"
+  }
+}

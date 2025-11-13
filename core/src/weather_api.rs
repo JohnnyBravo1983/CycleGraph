@@ -82,13 +82,22 @@ impl WeatherProvider for OpenMeteoClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_openmeteo_fetch() {
+        // GitHub Actions har ikke nett → hopp over
+        if std::env::var("CI").is_ok() {
+            eprintln!("Skipping OpenMeteo fetch test in CI (no network)");
+            return;
+        }
+
         // Oslo sentrum
         let client = OpenMeteoClient::new();
         let result = client.get_weather_for_session(Utc::now(), 59.91, 10.75, 60);
+
         assert!(result.is_some(), "OpenMeteo returned None");
         let w = result.unwrap();
+
         assert!(w.temperature_c > -40.0 && w.temperature_c < 50.0);
     }
 }

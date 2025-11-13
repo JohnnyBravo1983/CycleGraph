@@ -1082,9 +1082,22 @@ src/lib/i18n.ts  // liten util + hook
 **Mål:** Polish + release hygiene etter S15.
 **Omfang:** Release notes, README (Quick Start + Troubleshooting + Scripts), E2E-script (import→analyze→publish), telemetri labels/timing, UI-feiltekster, sitemap/robots/canonical.
 **DoD:** `/docs/launch-playbook.md`, demo-flyt testet end-to-end, alt grønt i CI.
+ Etter 5o ekte Rides 
+Future
+🧭 Sprint 17 – Målt presisjon & benchmark-aggregat
+Mål: Erstatte heuristisk estimert presisjon med faktisk målt feilmargin basert på innsamlede benchmark-rides.
 
+Krav: Minst 50 rides med device_watts og precision_quality_hint == "normal" per profiltype.
 
+Leveranser:
 
+Beregning av measured_error_pct per profile_version
+
+UI viser “Målt presisjon: 96 % (±3 W)” i stedet for estimert intervall
+
+Eksport og trendfiler inkluderer målt presisjon
+
+Validering av heuristisk modell mot faktiske a
 
 git add .
 git commit -m "Lock S13–S15 frontlog: DoT, trends, PW E2E + Bike Setup, i18n migration"

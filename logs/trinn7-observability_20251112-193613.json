@@ -1,0 +1,94 @@
+{
+  "calibrated": false,
+  "metrics": {
+    "drag_watt": 31.420423124999992,
+    "gravity_watt": 188.36079702057663,
+    "precision_watt": 256.8073837964153,
+    "profile_used": {
+      "rider_weight_kg": 78.0,
+      "bike_weight_kg": 8.0,
+      "weight_kg": 86.0,
+      "total_weight_kg": 86.0,
+      "cda": 0.3,
+      "crr": 0.004,
+      "crank_eff_pct": 95.5,
+      "device": "strava",
+      "notes": "Trinn5 default; rediger fritt.",
+      "profile_version": "v1-883d8daf-20251112"
+    },
+    "rolling_watt": 25.469831380000002,
+    "total_watt": 245.25105152557663,
+    "weather_used": {
+      "wind_ms": 2.0,
+      "wind_dir_deg": 0.0,
+      "air_temp_c": 8.0,
+      "air_pressure_hpa": 1012.0,
+      "dir_is_from": true,
+      "meta": {
+        "injected_client": true,
+        "reduce_factor": null,
+        "windspeed_10m_ms": null
+      }
+    },
+    "weather_meta": {
+      "provider": "open-meteo/era5",
+      "lat_used": null,
+      "lon_used": null,
+      "ts_hour": null,
+      "height": "10m->2m",
+      "unit_wind": "m/s",
+      "cache_key": null
+    },
+    "weather_fp": "7d5ce6640eb01bb898c7c363b8dab9b064227631",
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_enough_samples",
+    "estimated_error_pct_range": [
+      14.0,
+      16.0
+    ],
+    "precision_quality_hint": "normal",
+    "weather_applied": true,
+    "weather_source": "open-meteo/era5"
+  },
+  "source": "rust_1arg",
+  "v_rel": [
+    9.5,
+    9.6
+  ],
+  "watts": [
+    183.33249773666688,
+    245.25105152557663
+  ],
+  "weather_applied": true,
+  "wind_rel": [
+    -2.0,
+    -2.0
+  ],
+  "repr_kind": "object_v3",
+  "debug": {
+    "reason": "ok",
+    "force_recompute": true,
+    "persist_ignored": true,
+    "ignored_persist": true,
+    "used_fallback": false,
+    "weather_source": "historical",
+    "estimat_cfg_used": {
+      "force": true
+    }
+  },
+  "weather_source": "open-meteo/era5",
+  "profile_version": "v1-883d8daf-20251112",
+  "profile_used": {
+    "rider_weight_kg": 78.0,
+    "bike_weight_kg": 8.0,
+    "weight_kg": 86.0,
+    "total_weight_kg": 86.0,
+    "cda": 0.3,
+    "crr": 0.004,
+    "crank_eff_pct": 95.5,
+    "device": "strava",
+    "notes": "Trinn5 default; rediger fritt.",
+    "profile_version": "v1-883d8daf-20251112"
+  }
+}

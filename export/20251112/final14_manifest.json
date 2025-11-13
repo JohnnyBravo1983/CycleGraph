@@ -1,0 +1,27 @@
+{
+  "date": "20251112",
+  "now_utc": "2025-11-12T14:51:18.113270+00:00",
+  "paths": {
+    "sessions_jsonl": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\export\\20251112\\sessions.jsonl",
+    "t11_matrix_csv": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\export\\20251112\\t11_matrix.csv"
+  },
+  "sha256": {
+    "sessions_jsonl": "e3f8476c03d337774d16dc46b21a40155b9961b2b0314230d6eb4bae21fd10fe",
+    "t11_matrix_csv": "640d42411600cf4df5708d8a0fc370d92bbd0efb74d58d0cb4c8d2b8d12e2995"
+  },
+  "verify": {
+    "t11_rows": 5,
+    "sessions_rows": 9,
+    "intersection_count": 5,
+    "non_null_metrics": true,
+    "profile_version_mirrored": true,
+    "weather_source_mirrored": true,
+    "intersection_ids": [
+      "16127771071",
+      "16127771072",
+      "16127771073",
+      "16127771074",
+      "16127771075"
+    ]
+  }
+}
