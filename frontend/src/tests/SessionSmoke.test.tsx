@@ -1,3 +1,4 @@
+// frontend/src/tests/SessionSmoke.test.tsx
 import "@testing-library/jest-dom/vitest";
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -10,6 +11,12 @@ type StoreState = {
   loading: boolean;
   error: string | null;
   fetchSession: (id: string) => void;
+
+  // Trinn 2: analyze-state som SessionView forventer
+  analyzeResult: unknown;
+  analyzeLoading: boolean;
+  analyzeError: string | null;
+  analyzeSession: (id: string) => Promise<void>;
 };
 
 const storeState: StoreState = {
@@ -17,6 +24,11 @@ const storeState: StoreState = {
   loading: false,
   error: null,
   fetchSession: vi.fn(),
+
+  analyzeResult: null,
+  analyzeLoading: false,
+  analyzeError: null,
+  analyzeSession: vi.fn(async () => {}),
 };
 
 // Viktig: mock-path må matche importen brukt i SessionView (../state/sessionStore)
@@ -79,6 +91,11 @@ beforeEach(() => {
   storeState.loading = false;
   storeState.error = null;
   storeState.fetchSession = vi.fn();
+
+  storeState.analyzeResult = null;
+  storeState.analyzeLoading = false;
+  storeState.analyzeError = null;
+  storeState.analyzeSession = vi.fn(async () => {});
 });
 
 afterEach(() => {
@@ -113,7 +130,6 @@ describe("SessionView smoke", () => {
     storeState.session = null;
     storeState.error = "HTTP 404 Not Found";
     let utils = renderAt("/session/ERR404");
-    // Sjekk selve alert-elementet for å unngå dupliserte tekster
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getAllByText(/Ingen data å vise/).length).toBeGreaterThan(0);
     utils.unmount();
@@ -144,7 +160,6 @@ describe("SessionView smoke", () => {
       status: "LIMITED",
     };
     const utils = renderAt("/session/NODATA");
-    // Scope til denne renderen (unngå overlapp fra andre renders)
     expect(utils.queryByTestId("analysis-panel")).toBeNull();
   });
 });

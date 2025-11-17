@@ -17,13 +17,13 @@ function readViteEnv(): Record<string, string | undefined> {
  */
 export function getBackendBase(): string {
   const viteEnv = readViteEnv();
-  const mode = (viteEnv.MODE ?? process.env?.NODE_ENV ?? "development").toLowerCase();
+  const mode = (viteEnv.MODE ?? "development").toLowerCase();
   const useMock = (viteEnv.VITE_USE_MOCK ?? "").toLowerCase() === "true";
   const backend = viteEnv.VITE_BACKEND_URL;
 
-  if (useMock) return "";              // mock => same-origin (/api...)
+  if (useMock) return ""; // mock => same-origin (/api...)
   if (mode !== "production") return ""; // dev/test => same-origin (/api...)
-  return backend ?? "";                 // prod => bruk eksplisitt backend hvis satt
+  return backend ?? ""; // prod => bruk eksplisitt backend hvis satt
 }
 
 /**
@@ -32,13 +32,16 @@ export function getBackendBase(): string {
  */
 function normalizeApiUrl(input: string): string {
   const viteEnv = readViteEnv();
-  const mode = (viteEnv.MODE ?? process.env?.NODE_ENV ?? "development").toLowerCase();
+  const mode = (viteEnv.MODE ?? "development").toLowerCase();
   const useMock = (viteEnv.VITE_USE_MOCK ?? "").toLowerCase() === "true";
 
   // Kun i mock eller ikke-produksjon tvinger vi same-origin
   if (useMock || mode !== "production") {
     try {
-      const url = new URL(input, typeof window !== "undefined" ? window.location.href : "http://localhost");
+      const url = new URL(
+        input,
+        typeof window !== "undefined" ? window.location.href : "http://localhost"
+      );
       if (url.pathname.startsWith("/api")) {
         return `${url.pathname}${url.search}${url.hash}`;
       }
@@ -70,35 +73,76 @@ function isAbortError(err: unknown): boolean {
 }
 
 /**
- * Sentralt JSON-fetch helper.
- * - Returnerer `undefined` ved abort (stille fallback, ingen logging).
+ * Sentralt fetch-helper for JSON eller tekst (CSV/annet).
+ *
+ * - Bruker normalizeApiUrl for dev/mock same-origin.
+ * - Alltid credentials: 'include' (backend-kontrakt i Sprint 15).
+ * - 10s timeout via AbortController.
+ * - Returnerer:
+ *    - `T` (parsed JSON eller tekst) ved suksess
+ *    - `undefined` ved AbortError (timeout eller ekstern abort)
  * - Kaster på andre feil og non-2xx statuskoder.
  */
 export async function fetchJSON<T = unknown>(
   input: string,
-  init?: RequestInit & { signal?: AbortSignal }
+  init: RequestInit & { signal?: AbortSignal } = {}
 ): Promise<T | undefined> {
   const normalized = normalizeApiUrl(input);
 
+  const controller = new AbortController();
+  const timeoutMs = 10000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  const { signal, ...restInit } = init;
+
+  // Hvis caller gir egen signal, koble den til vår controller
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timeoutId);
+      return undefined;
+    }
+    signal.addEventListener(
+      "abort",
+      () => {
+        controller.abort();
+      },
+      { once: true }
+    );
+  }
+
   try {
     const res = await fetch(normalized, {
-      ...init,
+      ...restInit,
+      credentials: "include",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
+        ...(restInit.headers ?? {}),
       },
     });
+
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`HTTP ${res.status} ${res.statusText} – ${text}`);
     }
 
-    const data: T = (await res.json()) as T;
-    return data;
+    const contentType = res.headers.get("content-type") || "";
+
+    // JSON → parse & return
+    if (contentType.includes("application/json")) {
+      return (await res.json()) as T;
+    }
+
+    // Ellers returnerer vi tekst (CSV/raw) som T
+    const text = await res.text();
+    return text as unknown as T;
   } catch (err) {
+    clearTimeout(timeoutId);
+
     if (isAbortError(err)) {
-      // Stille fallback ved avbrutt fetch
+      // Stille fallback ved avbrutt fetch (inkl. timeout)
       return undefined;
     }
     throw err;
@@ -115,8 +159,7 @@ export type TrendsMode = "live" | "mock";
  * - hvis mode er udefinert → styres av USE_LIVE_TRENDS
  */
 function buildTrendsUrl(sessionId: string, mode?: TrendsMode): string {
-  const effective: TrendsMode =
-    mode ?? (USE_LIVE_TRENDS ? "live" : "mock");
+  const effective: TrendsMode = mode ?? (USE_LIVE_TRENDS ? "live" : "mock");
 
   if (effective === "live") {
     const base = getBackendBase(); // tom streng i dev/mock → same-origin

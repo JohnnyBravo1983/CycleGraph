@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
+import type { ComponentProps } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
@@ -7,19 +8,18 @@ import { guessSampleLength, isShortSession } from "../lib/guards";
 import { mockSessionShort } from "../mocks/mockSession";
 import ErrorBanner from "../components/ErrorBanner";
 import AnalysisPanel from "../components/AnalysisPanel";
+import { mapAnalyzeToCard } from "../lib/mapAnalyzeToCard";
+import type { Profile, AnalyzeResponse } from "../lib/schema";
 
 import CalibrationGuide from "../components/CalibrationGuide";
-// ── Trinn 6 additions (lim inn under eksisterende imports) ───────────────────
-// ── Trinn 6 additions (lim inn under eksisterende imports) ───────────────────
-// Imports under skal taees i bruk i trinn 7 
-//import type { SessionMetricsDoc, SessionMetricsView } from "../types/SessionMetrics";
-//import { isSessionMetricsDoc, toSessionMetricsView } from "../types/SessionMetrics";
-//import { getSessionMetricsById } from "../mocks/sessionApi";
 // Lazy-load grafen (Performance boost)
 const TrendsChart = React.lazy(() => import("../components/TrendsChart"));
 
 // NEW: helpers for HR-only & modal
 import { isHROnly as isHROnlyHelper, shouldShowCalibrationModal } from "../lib/state";
+
+// Bruk nøyaktig typen som SessionCard forventer på `session`-propen
+type SessionForCard = ComponentProps<typeof SessionCard>["session"];
 
 /** ENV toggle: les VITE_USE_LIVE_TRENDS (string/boolean) */
 function readUseLiveTrends(): boolean {
@@ -112,45 +112,6 @@ function renderScalarOrList(
   return v ?? "–";
 }
 
-function hasWattsValue(w: SessionReport["watts"]): boolean {
-  if (typeof w === "number") return Number.isFinite(w);
-  if (Array.isArray(w)) return w.some((x) => Number.isFinite(x as number));
-  return false;
-}
-
-function wattsPreview(w: SessionReport["watts"]): string {
-  if (typeof w === "number" && Number.isFinite(w)) return `${Math.round(w)} W`;
-  if (Array.isArray(w) && w.length > 0) {
-    const slice = w.slice(0, 10);
-    const body = slice.map((x) => (Number.isFinite(x as number) ? x : "NaN")).join(", ");
-    const tail = w.length > 10 ? ", …" : "";
-    return `[${body}${tail}]`;
-  }
-  return "—";
-}
-
-/** ---- DEV-sanity helpers (no-any) -------------------------------------- */
-type PrecisionFields = {
-  precision_watt?: unknown;
-  precision_watt_ci?: unknown;
-};
-
-function getDevPrecisionCounts(
-  s: SessionReport
-): { pw: number; ci: number } | null {
-  const pf: PrecisionFields = (s as unknown) as PrecisionFields;
-
-  const pwArr = Array.isArray(pf.precision_watt)
-    ? (pf.precision_watt as unknown[])
-    : null;
-  if (!pwArr) return null;
-
-  const ciArr = Array.isArray(pf.precision_watt_ci)
-    ? (pf.precision_watt_ci as unknown[])
-    : [];
-
-  return { pw: pwArr.length, ci: ciArr.length };
-}
 /** ----------------------------------------------------------------------- */
 
 function classifyErrorMessage(raw: string): string {
@@ -221,11 +182,59 @@ function getBackendSource(): "mock" | "api" {
   const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
   return env.VITE_BACKEND_MODE === "mock" ? "mock" : "api";
 }
+
+function buildProfileFromAnalyze(ar: AnalyzeResponse): Profile {
+  const used = ar.profile_used;
+
+  return {
+    rider_weight_kg: used.weight_kg,
+    bike_weight_kg: 0, // TODO: kan justeres når vi har eksplisitt fordeling
+    bike_type: used.bike_type,
+    tire_width_mm: used.tire_width_mm,
+    tire_quality: used.tire_quality,
+    bike_name: null,
+    cda: used.cda,
+    crank_efficiency: used.crank_efficiency, // låst til 96% ifølge schema.ts
+    profile_version: ar.profile_version,
+    publish_to_strava: false,
+  };
+}
 /** ──────────────────────────────────────────────────────────────────────── */
 
 type LocalFixture = SessionReport & {
   precision_watt_ci?: { lower?: number[]; upper?: number[] };
 };
+
+function normalizeLegacy(s: SessionReport): SessionForCard {
+  // Konverter watts til riktig format for SessionCard
+  let normalizedWatts: number[] | null = null;
+
+  if (Array.isArray(s.watts)) {
+    normalizedWatts = s.watts;
+  } else if (typeof s.watts === "number") {
+    normalizedWatts = [s.watts];
+  } else {
+    normalizedWatts = null;
+  }
+
+  // Behold eksakt samme runtime-struktur, men gå via `unknown` for å slippe TS2352
+  return {
+    ...s,
+    watts: normalizedWatts,
+    sources: Array.isArray(s.sources) ? s.sources : [],
+    precision_quality_hint: null,
+    estimated_error_pct_range: null,
+    precision_watt_ci: s.precision_watt_ci ?? null,
+    CdA: null,
+    crr_used: null,
+    rider_weight: null,
+    bike_weight: null,
+    tire_width: null,
+    bike_type: null,
+    // publish_state fjernes her - SessionReport har ikke det
+    publish_time: undefined,
+  } as unknown as SessionForCard;
+}
 
 export default function SessionView() {
   useDevFetchApiRewrite();
@@ -235,7 +244,7 @@ export default function SessionView() {
   const id = useMemo(() => params.id ?? "mock", [params.id]);
 
   const { session, loading, error, fetchSession } = useSessionStore();
-
+  const { analyzeResult, analyzeSession, saveProfileAndReanalyze } = useSessionStore();
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [shortSession, setShortSession] = useState<boolean>(false);
 
@@ -247,6 +256,12 @@ export default function SessionView() {
     if (id === "mock-short" || id === "mock-2h") return;
     fetchSession(id);
   }, [id, fetchSession]);
+
+  // Kjør analyze for alle ekte API-økter (ikke mock)
+  useEffect(() => {
+    if (id === "mock" || id === "mock-2h" || id === "mock-short") return;
+    analyzeSession(id);
+  }, [id, analyzeSession]);
 
   useEffect(() => {
     if (id !== "mock-2h") {
@@ -285,9 +300,6 @@ export default function SessionView() {
     setSampleCount(n);
     setShortSession(isShortSession(n, 30) || s.reason === "short_session");
   }, [effectiveSession]);
-
-  const devCounts =
-    import.meta.env.DEV && effectiveSession ? getDevPrecisionCounts(effectiveSession) : null;
 
   const loadingNow = id === "mock-2h" ? local2hLoading : loading;
   const effectiveError = id === "mock-2h" ? local2hError : error;
@@ -365,6 +377,22 @@ export default function SessionView() {
     [hrArr, wattsArr, status]
   );
 
+  const sessionId = useMemo(
+    () =>
+      (getStrKey(effectiveSession, "id") ??
+        getNestedStr(effectiveSession, "session", "id")) || id,
+    [effectiveSession, id]
+  );
+
+  const derivedProfile = useMemo<Profile | null>(() => {
+    if (!analyzeResult) return null;
+    try {
+      return buildProfileFromAnalyze(analyzeResult as AnalyzeResponse);
+    } catch {
+      return null;
+    }
+  }, [analyzeResult]);
+
   const panelSeries = useMemo(
     () => ({
       t: tArr,
@@ -374,15 +402,22 @@ export default function SessionView() {
       source: backendSource,
       calibrated,
       status,
+      profile_cda: analyzeResult?.profile_used?.cda ?? null,
+      profile_crr: analyzeResult?.profile_used?.crr ?? null,
+      profile_crank_efficiency: analyzeResult?.profile_used?.crank_efficiency ?? null,
+      profile_version: analyzeResult?.profile_version ?? null,
     }),
-    [tArr, wattsArr, hrArr, ciLower, ciUpper, backendSource, calibrated, status]
-  );
-
-  const sessionId = useMemo(
-    () =>
-      (getStrKey(effectiveSession, "id") ??
-        getNestedStr(effectiveSession, "session", "id")) || id,
-    [effectiveSession, id]
+    [
+      tArr,
+      wattsArr,
+      hrArr,
+      ciLower,
+      ciUpper,
+      backendSource,
+      calibrated,
+      status,
+      analyzeResult,
+    ]
   );
 
   const mode: string = useMemo(
@@ -461,33 +496,62 @@ export default function SessionView() {
     setShowCalibration(false);
   }
 
- /** Props-normalisering til SessionCard (unngå typekollisjon) */
-type SessionCardProps = React.ComponentProps<typeof SessionCard>;
-const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
-  if (!effectiveSession) return null;
+  // Velg data for kortet: analyzeResult → fallback til legacy session
+  const sessionForCard = useMemo(
+    () => {
+      if (analyzeResult) {
+        const mapped = mapAnalyzeToCard(analyzeResult);
 
-  // Lag en kopi og fjern precision_watt_ci uten å binde en ubrukt variabel
-  const base = { ...(effectiveSession as SessionReport) };
-  delete (base as unknown as { precision_watt_ci?: unknown }).precision_watt_ci;
+        console.log("[SESSION VIEW] analyzeResult → mapped", { analyzeResult, mapped });
 
-  const watts =
-    Array.isArray(effectiveSession.watts)
-      ? effectiveSession.watts
-      : typeof effectiveSession.watts === "number"
-      ? [effectiveSession.watts]
-      : null;
+        if (!mapped) return null;
 
-  const sources = Array.isArray(effectiveSession.sources)
-    ? effectiveSession.sources
-    : undefined;
+        // Konverter watts for analyzeResult også
+        let normalizedWatts: number[] | null = null;
 
-  return {
-    ...base,
-    watts,
-    sources,
-  } as SessionCardProps["session"];
-}, [effectiveSession]);
+        if (Array.isArray(mapped.watts)) {
+          normalizedWatts = mapped.watts;
+        } else if (typeof mapped.watts === "number") {
+          normalizedWatts = [mapped.watts];
+        } else {
+          normalizedWatts = null;
+        }
 
+        return {
+          ...mapped,
+          watts: normalizedWatts,
+          sources: Array.isArray(mapped.sources) ? mapped.sources : [],
+          precision_quality_hint: mapped.precision_quality_hint ?? null,
+          estimated_error_pct_range: mapped.estimated_error_pct_range ?? null,
+          precision_watt_ci: mapped.precision_watt_ci ?? null,
+          CdA: mapped.CdA ?? null,
+          crr_used: mapped.crr_used ?? null,
+          rider_weight: mapped.rider_weight ?? null,
+          bike_weight: mapped.bike_weight ?? null,
+          tire_width: mapped.tire_width ?? null,
+          bike_type: mapped.bike_type ?? null,
+          // Midlertidig: vis badge som "published" for alle økter
+          publish_state: "published",
+        };
+      }
+
+      if (session) {
+        const normalized = normalizeLegacy(session);
+
+        console.log("[SESSION VIEW] legacy session → normalized", { session, normalized });
+
+        return {
+          ...normalized,
+          // Midlertidig: vis badge som "published" for alle økter
+          publish_state: "published",
+        };
+      }
+
+      console.log("[SESSION VIEW] sessionForCard = null (ingen analyzeResult, ingen session)");
+      return null;
+    },
+    [analyzeResult, session]
+  ) as unknown as SessionForCard | null;
 
   return (
     <div className="page">
@@ -496,36 +560,73 @@ const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Økt</h1>
         </div>
-        <button
-          onClick={() => id !== "mock-short" && id !== "mock-2h" && fetchSession(id)}
-          className={`btn ${id === "mock-short" || id === "mock-2h" ? "opacity-60 cursor-not-allowed" : ""}`}
-          disabled={id === "mock-short" || id === "mock-2h"}
-          title={
-            id === "mock-short"
-              ? "Dev-visning bruker lokal mock (kort)"
-              : id === "mock-2h"
-              ? "Dev-visning bruker lokal 2h-fixture"
-              : "Hent på nytt"
-          }
-        >
-          Oppdater
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => id !== "mock-short" && id !== "mock-2h" && fetchSession(id)}
+            className={`btn ${
+              id === "mock-short" || id === "mock-2h" ? "opacity-60 cursor-not-allowed" : ""
+            }`}
+            disabled={id === "mock-short" || id === "mock-2h"}
+            title={
+              id === "mock-short"
+                ? "Dev-visning bruker lokal mock (kort)"
+                : id === "mock-2h"
+                ? "Dev-visning bruker lokal 2h-fixture"
+                : "Hent på nytt"
+            }
+          >
+            Oppdater
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            disabled={
+              !derivedProfile ||
+              id === "mock" ||
+              id === "mock-short" ||
+              id === "mock-2h"
+            }
+            onClick={() => {
+              if (!derivedProfile) return;
+              saveProfileAndReanalyze(sessionId, derivedProfile);
+            }}
+            title={
+              derivedProfile
+                ? "Lagre profil og kjør analysen på nytt med oppdatert profil."
+                : "Profil er ikke tilgjengelig ennå."
+            }
+          >
+            Lagre profil
+          </button>
+        </div>
       </div>
 
       {/* Navigasjon */}
       <nav className="text-sm text-slate-600 mb-2">
         <span>Velg datasett: </span>
-        <Link className="underline" to="/session/mock">Eksempel – Outdoor</Link>
+        <Link className="underline" to="/session/mock">
+          Eksempel – Outdoor
+        </Link>
         <span> · </span>
-        <Link className="underline" to="/session/mock-short">Eksempel – Indoor (kort)</Link>
+        <Link className="underline" to="/session/mock-short">
+          Eksempel – Indoor (kort)
+        </Link>
         <span> · </span>
-        <Link className="underline" to="/session/mock-2h">Eksempel – 2h (stor)</Link>
+        <Link className="underline" to="/session/mock-2h">
+          Eksempel – 2h (stor)
+        </Link>
         <span> · </span>
-        <Link className="underline" to={`/session/${encodeURIComponent("ABC123")}`}>Live fra API</Link>
+        <Link className="underline" to={`/session/${encodeURIComponent("local-mini")}`}>
+          Live: local-mini (backend)
+        </Link>
         {import.meta.env.DEV && (
           <>
             <span> · </span>
-            <button className="underline text-emerald-700" onClick={() => setShowCalibration(true)}>
+            <button
+              className="underline text-emerald-700"
+              onClick={() => setShowCalibration(true)}
+            >
               Åpne kalibrering
             </button>
           </>
@@ -540,11 +641,14 @@ const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
 
       {hasError && (
         <div className="mb-3">
-          <ErrorBanner message={friendlyMessage} onRetry={() => id !== "mock-2h" && fetchSession(id)} />
+          <ErrorBanner
+            message={friendlyMessage}
+            onRetry={() => id !== "mock-2h" && fetchSession(id)}
+          />
         </div>
       )}
 
-      {effectiveSession && sessionForCard && (
+      {sessionForCard && (
         <div className="grid gap-4">
           <SessionCard session={sessionForCard} />
 
@@ -554,7 +658,11 @@ const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
           <div className="card">
             <div className="k">Trender</div>
             <div className="mt-2">
-              <React.Suspense fallback={<div className="p-4 text-sm text-slate-500">Laster graf …</div>}>
+              <React.Suspense
+                fallback={
+                  <div className="p-4 text-sm text-slate-500">Laster graf …</div>
+                }
+              >
                 <TrendsChart
                   key={sessionId}
                   sessionId={sessionId}
@@ -568,49 +676,52 @@ const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
             </div>
           </div>
 
-          {devCounts && (
-            <div className="mt-0 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-slate-800 text-xs">
-              <span className="mr-2 rounded bg-slate-200 px-2 py-0.5 font-mono">DEV</span>
-              <span className="mr-4">PW samples: {devCounts.pw}</span>
-              <span>CI: {devCounts.ci}</span>
-            </div>
-          )}
-
           {shortSession && (
             <div className="mt-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
               <div className="font-medium">Kort økt – viser begrenset visning</div>
-              <div className="text-sm opacity-80">Samples: {sampleCount} (krever ≥ 30 for full analyse)</div>
+              <div className="text-sm opacity-80">
+                Samples: {sampleCount} (krever ≥ 30 for full analyse)
+              </div>
             </div>
           )}
 
-          <div className="card">
-            <div className="k">schema_version</div>
-            <div className="mono">{effectiveSession.schema_version}</div>
-          </div>
+          {/* Vis disse detaljene bare hvis effectiveSession er tilgjengelig */}
+          {effectiveSession && (
+            <>
+              <div className="card">
+                <div className="k">schema_version</div>
+                <div className="mono">{effectiveSession.schema_version}</div>
+              </div>
 
-          <div className="card">
-            <div className="k">watt-data</div>
-            {hasWattsValue(effectiveSession.watts) ? (
-              <div className="mono text-sm break-words">{wattsPreview(effectiveSession.watts)}</div>
-            ) : (
-              <div className="italic text-gray-600">HR-only: ingen watt i denne økten</div>
-            )}
-          </div>
+              <div className="card">
+                <div className="k">watt-data</div>
+                <div className="mono text-sm break-words">
+                  {Array.isArray(effectiveSession.watts) 
+                    ? `[${effectiveSession.watts.slice(0, 10).join(", ")}${effectiveSession.watts.length > 10 ? ", …" : ""}]`
+                    : effectiveSession.watts ?? "—"}
+                </div>
+              </div>
 
-          <div className="card grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <div className="k">wind_rel</div>
-              <div className="mono text-sm break-words">{renderScalarOrList(effectiveSession.wind_rel)}</div>
-            </div>
-            <div>
-              <div className="k">v_rel</div>
-              <div className="mono text-sm break-words">{renderScalarOrList(effectiveSession.v_rel)}</div>
-            </div>
-          </div>
+              <div className="card grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="k">wind_rel</div>
+                  <div className="mono text-sm break-words">
+                    {renderScalarOrList(effectiveSession.wind_rel)}
+                  </div>
+                </div>
+                <div>
+                  <div className="k">v_rel</div>
+                  <div className="mono text-sm break-words">
+                    {renderScalarOrList(effectiveSession.v_rel)}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {!effectiveSession && !loadingNow && !hasError && (
+      {!effectiveSession && !sessionForCard && !loadingNow && !hasError && (
         <div className="card">Ingen data å vise.</div>
       )}
 

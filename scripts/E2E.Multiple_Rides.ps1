@@ -3,13 +3,53 @@
 # =====================================================================
 # - Kun ASCII-tegn (ingen em-dash, ingen greske symboler)
 # - Heading beregnes fra lat/lon, sender weather_hint (midpoint + hour)
-# - STRAVA_ACCESS_TOKEN må være satt i miljøet (ev. .env load)
+# - STRAVA_ACCESS_TOKEN må være satt i miljøet (ev. via .env + refresh)
 # =====================================================================
 
 $ErrorActionPreference = "Stop"
 
-# --- 1) Basis ---
-$Base = "http://127.0.0.1:5175/api"   # inkluderer /api-prefiks
+# --- 0) Last .env og refreshe Strava-token (samme mønster som BasicE2E_3Rides.ps1) ---
+
+$envPath = Join-Path (Resolve-Path ".") ".env"
+if (Test-Path $envPath) {
+    Get-Content $envPath | ForEach-Object {
+        $l = $_.Trim()
+        if ($l -and -not $l.StartsWith("#")) {
+            $i = $l.IndexOf("=")
+            if ($i -gt 0) {
+                $k = $l.Substring(0, $i).Trim()
+                $v = $l.Substring($i + 1).Trim().Trim('"').Trim("'")
+                Set-Item -Path env:$k -Value $v -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+# Prøv å refreshe token hvis vi har STRAVA_REFRESH_TOKEN
+if ($env:STRAVA_REFRESH_TOKEN) {
+    try {
+        $tok = Invoke-RestMethod -Method POST -Uri "https://www.strava.com/oauth/token" -Body @{
+            client_id     = $env:STRAVA_CLIENT_ID
+            client_secret = $env:STRAVA_CLIENT_SECRET
+            grant_type    = "refresh_token"
+            refresh_token = $env:STRAVA_REFRESH_TOKEN
+        }
+        $env:STRAVA_ACCESS_TOKEN     = $tok.access_token
+        $env:STRAVA_REFRESH_TOKEN    = $tok.refresh_token
+        $env:STRAVA_TOKEN_EXPIRES_AT = [string]$tok.expires_at
+        "Ny access_token mottatt. Utløper @ $($tok.expires_at) (epoch)."
+    } catch {
+        "ADVARSEL: Klarte ikke å refreshe token -> $($_.Exception.Message)"
+    }
+}
+
+if (-not $env:STRAVA_ACCESS_TOKEN) {
+    throw "Mangler STRAVA_ACCESS_TOKEN i miljøet. Sjekk .env eller Strava-oppsett."
+}
+
+# --- 1) Basis-konfig ---
+
+$Base = "http://127.0.0.1:5175/api"  # inkluderer /api-prefiks
 $ForceRecompute = $true
 $DebugLevel     = 1   # 0/1
 
@@ -23,6 +63,7 @@ $TestWeather = @{
 }
 
 # --- 2) Aktiviteter som skal analyseres ---
+
 $Ids = @(
   16311219004,  # baseline test
   16279854313,
@@ -32,11 +73,17 @@ $Ids = @(
   16342459294,  # ny økt
   16381383185,
   16396031026,
-  16405483541
+  16405483541,
+  16454599112,
+  16473718378
 )
 
-# --- 2.1 Hjelpere (grader<->radianer + bearing) ---
-function To-Rad([double]$deg) { [Math]::PI * $deg / 180.0 }
+# --- 2.1 Hjelpere (grader <-> radianer + bearing) ---
+
+function To-Rad([double]$deg) {
+    [Math]::PI * $deg / 180.0
+}
+
 function Bearing-Deg([double]$lat1, [double]$lon1, [double]$lat2, [double]$lon2) {
     $r1  = To-Rad $lat1
     $r2  = To-Rad $lat2
@@ -49,6 +96,7 @@ function Bearing-Deg([double]$lat1, [double]$lon1, [double]$lat2, [double]$lon2)
 }
 
 # --- 3) Strava helpers ---
+
 function Get-StravaStreams([long]$Id) {
     $h = @{ Authorization = "Bearer $($env:STRAVA_ACCESS_TOKEN)" }
     # NB: inkluder heartrate for HR i payload
@@ -56,17 +104,20 @@ function Get-StravaStreams([long]$Id) {
     $u = "https://www.strava.com/api/v3/activities/$Id/streams?keys=$keys&key_by_type=true"
     Invoke-RestMethod -Method GET -Headers $h -Uri $u
 }
+
 function Get-StravaActivity([long]$Id) {
     $h = @{ Authorization = "Bearer $($env:STRAVA_ACCESS_TOKEN)" }
     Invoke-RestMethod -Method GET -Headers $h -Uri "https://www.strava.com/api/v3/activities/$Id"
 }
 
 # --- 4) Profil (HARDKODET for test) ---
+
 $Cda = 0.30
 $Crr = 0.004
 $Wkg = 111.0
 
 # --- 4.1 Formatering/verifikasjon av vær fra respons ---
+
 function Format-WeatherUsed($metrics) {
     try {
         $meta = $metrics.weather_meta
@@ -74,10 +125,10 @@ function Format-WeatherUsed($metrics) {
         $fp   = $metrics.weather_fp
 
         if ($null -ne $meta -and $null -ne $wx) {
-            $lat = if ($meta.lat_used -ne $null) { [Math]::Round([double]$meta.lat_used,5) } else { "<na>" }
-            $lon = if ($meta.lon_used -ne $null) { [Math]::Round([double]$meta.lon_used,5) } else { "<na>" }
+            $lat = if ($meta.lat_used -ne $null) { [Math]::Round([double]$meta.lat_used, 5) } else { "<na>" }
+            $lon = if ($meta.lon_used -ne $null) { [Math]::Round([double]$meta.lon_used, 5) } else { "<na>" }
             $hr  = if ($meta.ts_hour -ne $null)  { [string]$meta.ts_hour } else { "<na>" }
-            $fp8 = if ($fp) { $fp.Substring(0, [Math]::Min(8,$fp.Length)) } else { "--------" }
+            $fp8 = if ($fp) { $fp.Substring(0, [Math]::Min(8, $fp.Length)) } else { "--------" }
             $t   = $wx.air_temp_c
             $p   = $wx.air_pressure_hpa
             $wms = $wx.wind_ms
@@ -91,14 +142,15 @@ function Format-WeatherUsed($metrics) {
 }
 
 # --- 5) Bygg payload m/ heading_deg + LAT/LON + ABSOLUTT TID (+ valgfri weather) ---
+
 function Build-SessionPayload(
     $S,
     [double]$CdaLocal,
     [double]$CrrLocal,
     [double]$WLocal,
-    [bool]$IncludeWeather=$false,
-    $WeatherObj=$null,
-    [string]$StartISO=$null
+    [bool]$IncludeWeather = $false,
+    $WeatherObj = $null,
+    [string]$StartISO = $null
 ) {
     $t  = @($S.time.data)
     $v  = @($S.velocity_smooth.data)
@@ -110,11 +162,11 @@ function Build-SessionPayload(
         $h = @($S.heartrate.data)
     }
 
-    $tc=$t.Count; $vc=$v.Count; $ac=$a.Count
-    $lc=($ll | ForEach-Object { $_ }) | Measure-Object | Select-Object -ExpandProperty Count
+    $tc = $t.Count; $vc = $v.Count; $ac = $a.Count
+    $lc = ($ll | ForEach-Object { $_ }) | Measure-Object | Select-Object -ExpandProperty Count
     if (-not $lc) { $lc = 0 }
 
-    $n_baseline = [Math]::Min([Math]::Min($tc,$vc), $ac)
+    $n_baseline = [Math]::Min([Math]::Min($tc, $vc), $ac)
     $n = if ($lc -gt 0) { [Math]::Min($n_baseline, $lc) } else { $n_baseline }
     if ($n -le 0) { throw "Streams mangler data (time/velocity/altitude)" }
 
@@ -122,13 +174,13 @@ function Build-SessionPayload(
     $headings = $null
     if ($lc -gt 1) {
         $headings = New-Object 'System.Collections.Generic.List[double]'
-        for ($i=0; $i -lt $n; $i++) {
-            if ($i -lt ($n-1) -and $ll[$i] -ne $null -and $ll[$i+1] -ne $null) {
+        for ($i = 0; $i -lt $n; $i++) {
+            if ($i -lt ($n - 1) -and $ll[$i] -ne $null -and $ll[$i + 1] -ne $null) {
                 $lat1 = [double]$ll[$i][0];   $lon1 = [double]$ll[$i][1]
-                $lat2 = [double]$ll[$i+1][0]; $lon2 = [double]$ll[$i+1][1]
+                $lat2 = [double]$ll[$i + 1][0]; $lon2 = [double]$ll[$i + 1][1]
                 $hdg = Bearing-Deg $lat1 $lon1 $lat2 $lon2
             } elseif ($i -gt 0) {
-                $hdg = $headings[$i-1]
+                $hdg = $headings[$i - 1]
             } else {
                 $hdg = 0.0
             }
@@ -145,7 +197,9 @@ function Build-SessionPayload(
     if ($StartISO) {
         try {
             $t0 = [DateTimeOffset]::Parse($StartISO).ToUnixTimeSeconds()
-        } catch { $t0 = $null }
+        } catch {
+            $t0 = $null
+        }
     }
 
     # samples (med lat/lon + ev. t_abs + hr)
@@ -153,7 +207,7 @@ function Build-SessionPayload(
     $latSum = 0.0; $lonSum = 0.0; $llCount = 0
     $speedStop = 0.5
 
-    for ($i=0; $i -lt $n; $i++) {
+    for ($i = 0; $i -lt $n; $i++) {
         $obj = @{
             t          = [double]$t[$i]
             v_ms       = [double]$v[$i]
@@ -162,7 +216,7 @@ function Build-SessionPayload(
         }
 
         if ($g.Count -gt $i -and $null -ne $g[$i]) {
-            try { $obj.grade=[double]$g[$i] } catch {}
+            try { $obj.grade = [double]$g[$i] } catch {}
         }
         if ($headings -and $headings.Count -gt $i) {
             $obj.heading_deg = [double]$headings[$i]
@@ -192,7 +246,7 @@ function Build-SessionPayload(
     }
     if ($t0 -ne $null -and $n -gt 0) {
         # velg midt-sample som representativ tid
-        $midIdx = [int][Math]::Floor(($n-1)/2)
+        $midIdx = [int][Math]::Floor(($n - 1) / 2)
         $tAbsMid = [double]($t0 + [double]$t[$midIdx])
         # rund til nærmeste hele time (sekunder)
         $hour = [int][Math]::Round($tAbsMid / 3600.0) * 3600
@@ -201,7 +255,7 @@ function Build-SessionPayload(
 
     $payload = @{
         samples = $samples
-        profile = @{ cda=$CdaLocal; crr=$CrrLocal; weight_kg=$WLocal; calibrated=$false }
+        profile = @{ cda = $CdaLocal; crr = $CrrLocal; weight_kg = $WLocal; calibrated = $false }
     }
 
     # Send et hint til serveren
@@ -226,15 +280,19 @@ function Build-SessionPayload(
 }
 
 # --- 6) Analyze API call ---
+
 function Analyze-Session($Payload) {
     $json = ($Payload | ConvertTo-Json -Depth 14 -Compress)
     $qs = "?force_recompute=$($ForceRecompute.ToString().ToLower())&debug=$DebugLevel"
+    $uri = "$Base/sessions/local-mini/analyze$qs"
+    "AnalyzeUri = $uri"
     Invoke-RestMethod -Method POST `
-        -Uri "$Base/sessions/local-mini/analyze$qs" `
+        -Uri $uri `
         -ContentType "application/json" -Body $json
 }
 
 # --- 7) Preflight: verifiser at vi faktisk får latlng og (helst) HR fra Strava ---
+
 Write-Host "=== Preflight: sjekker latlng/hr på første ID ==="
 try {
     $pf = Get-StravaStreams $Ids[0]
@@ -255,7 +313,11 @@ try {
 }
 
 # --- 8) Kjør for hver aktivitet ---
-$out = "_debug"; if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
+
+$out = "_debug"
+if (-not (Test-Path $out)) {
+    New-Item -ItemType Directory -Path $out | Out-Null
+}
 $summary = New-Object 'System.Collections.Generic.List[object]'
 
 foreach ($id in $Ids) {
@@ -274,13 +336,13 @@ foreach ($id in $Ids) {
         ($payload | ConvertTo-Json -Depth 14) | Set-Content (Join-Path $out "session_$id.json") -Encoding utf8
 
         if ($payload.ContainsKey("weather")) {
-            $w=$payload.weather
-            Write-Host ("[WX] payload weather (TEST) -> T={0} C  P={1} hPa  wind_ms={2}  dir={3} deg" -f $w.air_temp_c,$w.air_pressure_hpa,$w.wind_ms,$w.wind_dir_deg) -ForegroundColor Cyan
+            $w = $payload.weather
+            Write-Host ("[WX] payload weather (TEST) -> T={0} C  P={1} hPa  wind_ms={2}  dir={3} deg" -f $w.air_temp_c, $w.air_pressure_hpa, $w.wind_ms, $w.wind_dir_deg) -ForegroundColor Cyan
         } else {
             if ($payload.weather_hint) {
                 $wh = $payload.weather_hint
                 $lat = $wh.lat_deg; $lon = $wh.lon_deg; $hr = $wh.ts_hour
-                Write-Host ("[WX~hint] hour={0} lat={1} lon={2}" -f $hr, ([Math]::Round($lat,5)), ([Math]::Round($lon,5))) -ForegroundColor DarkCyan
+                Write-Host ("[WX~hint] hour={0} lat={1} lon={2}" -f $hr, ([Math]::Round($lat, 5)), ([Math]::Round($lon, 5))) -ForegroundColor DarkCyan
             } else {
                 Write-Host "[WX] payload weather -> <none> (server henter selv)" -ForegroundColor DarkCyan
             }
@@ -301,24 +363,26 @@ foreach ($id in $Ids) {
             Write-Host "[WX?] server eksponerte ikke weather_meta/weather_used - kan ikke verifisere time/posisjon" -ForegroundColor Yellow
         }
 
-        $P=[double]$m.precision_watt
-        $D=[double]$m.drag_watt
-        $R=[double]$m.rolling_watt
-        $avg=[double]$act.average_watts
-        $dev=$act.device_watts
+        $P = [double]$m.precision_watt
+        $D = [double]$m.drag_watt
+        $R = [double]$m.rolling_watt
+        $avg = [double]$act.average_watts
+        $dev = $act.device_watts
 
-        $diff=$null; $pct=$null
-        if ($avg -gt 0) { $diff=$P-$avg; $pct=100.0*$diff/$avg }
+        $diff = $null; $pct = $null
+        if ($avg -gt 0) { $diff = $P - $avg; $pct = 100.0 * $diff / $avg }
 
-        $dragPct=($(if($P){100*$D/$P}else{0}))
-        $rollPct=($(if($P){100*$R/$P}else{0}))
+        $dragPct = ($(if ($P) { 100 * $D / $P } else { 0 }))
+        $rollPct = ($(if ($P) { 100 * $R / $P } else { 0 }))
         $ratioTxt = if ($pct -ne $null) {
-            ("Delta={0:+0.0} W ({1:+0.0} %) vs Strava{2}" -f $diff,$pct,($(if($dev){" (device)"}else{" (est)"})))
-        } else { "Strava avg_watts n/a" }
+            ("Delta={0:+0.0} W ({1:+0.0} %) vs Strava{2}" -f $diff, $pct, ($(if ($dev) { " (device)" } else { " (est)" })))
+        } else {
+            "Strava avg_watts n/a"
+        }
 
         "{0} | src={1} uf={2} wa={3} | P={4:N1} D={5:N1} ({6,5:N1} %) R={7:N1} ({8,5:N1} %) | {9} | Profile: CdA={10}, Crr={11}, W={12}" -f `
-            $id,$res.source,$res.debug.used_fallback,$res.weather_applied,`
-            $P,$D,$dragPct,$R,$rollPct,$ratioTxt,$Cda,$Crr,$Wkg
+            $id, $res.source, $res.debug.used_fallback, $res.weather_applied, `
+            $P, $D, $dragPct, $R, $rollPct, $ratioTxt, $Cda, $Crr, $Wkg
 
         # --- Oppsummeringsrad ---
         $wxm = $m.weather_meta
@@ -331,16 +395,16 @@ foreach ($id in $Ids) {
             precision_watt  = [double]$P
             drag_pct        = [double]$dragPct
             rolling_pct     = [double]$rollPct
-            strava_avg_w    = $(if($avg -gt 0){[double]$avg}else{$null})
-            delta_w         = $(if($diff -ne $null){[double]$diff}else{$null})
-            delta_pct       = $(if($pct  -ne $null){[double]$pct }else{$null})
-            wx_hour         = $(if($wxm){$wxm.ts_hour}else{$payload.weather_hint.ts_hour})
-            wx_lat          = $(if($wxm){[double]$wxm.lat_used}else{$payload.weather_hint.lat_deg})
-            wx_lon          = $(if($wxm){[double]$wxm.lon_used}else{$payload.weather_hint.lon_deg})
-            wx_temp_c       = $(if($wxu){[double]$wxu.air_temp_c}else{$null})
-            wx_press_hpa    = $(if($wxu){[double]$wxu.air_pressure_hpa}else{$null})
-            wx_wind_ms      = $(if($wxu){[double]$wxu.wind_ms}else{$null})
-            wx_wind_dir     = $(if($wxu){[double]$wxu.wind_dir_deg}else{$null})
+            strava_avg_w    = $(if ($avg -gt 0) { [double]$avg } else { $null })
+            delta_w         = $(if ($diff -ne $null) { [double]$diff } else { $null })
+            delta_pct       = $(if ($pct  -ne $null) { [double]$pct } else { $null })
+            wx_hour         = $(if ($wxm) { $wxm.ts_hour } else { $payload.weather_hint.ts_hour })
+            wx_lat          = $(if ($wxm) { [double]$wxm.lat_used } else { $payload.weather_hint.lat_deg })
+            wx_lon          = $(if ($wxm) { [double]$wxm.lon_used } else { $payload.weather_hint.lon_deg })
+            wx_temp_c       = $(if ($wxu) { [double]$wxu.air_temp_c } else { $null })
+            wx_press_hpa    = $(if ($wxu) { [double]$wxu.air_pressure_hpa } else { $null })
+            wx_wind_ms      = $(if ($wxu) { [double]$wxu.wind_ms } else { $null })
+            wx_wind_dir     = $(if ($wxu) { [double]$wxu.wind_dir_deg } else { $null })
             wx_fp           = $m.weather_fp
         }
         $summary.Add($obj) | Out-Null
@@ -351,6 +415,7 @@ foreach ($id in $Ids) {
 }
 
 # --- 9) Eksporter oppsummering ---
+
 $csvPath = Join-Path $out "weather_summary.csv"
 $summary | Export-Csv -Path $csvPath -NoTypeInformation
 Write-Host ("[OK] Skrev oppsummering: {0}" -f $csvPath) -ForegroundColor Green

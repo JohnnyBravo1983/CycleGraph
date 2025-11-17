@@ -45,11 +45,13 @@ type SessionCore = SessionReport & {
 type SessionWithCalib = SessionCore & {
   calibration_reason?: string | null;
 
-  // Trinn 6 felter (alle valgfri – hentes fra session_metrics.*)
+  // Trinn 6 felter
   publish_state?: PublishState;
-  publish_time?: string; // ISO
+  publish_time?: string;
 
   precision_watt_ci?: PrecisionCI;
+  precision_quality_hint?: string | null;
+  estimated_error_pct_range?: [number, number] | null;
 
   crr_used?: number;
   CdA?: number;
@@ -57,7 +59,9 @@ type SessionWithCalib = SessionCore & {
   rider_weight?: number;
   bike_weight?: number;
   tire_width?: number;
-  bike_type?: string; // "road" | "tt" | ...
+  bike_type?: string;
+
+  sources?: string[]; // alltid undefined | string[], IKKE null
 };
 
 type Props = {
@@ -161,6 +165,45 @@ function IoBadge({ mode }: { mode?: Mode }) {
   );
 }
 
+/** Quality-chip basert på precision_quality_hint */
+function QualityChip({ hint }: { hint: string | null | undefined }) {
+  if (!hint) return null;
+
+  const tone =
+    hint.toLowerCase() === "high"
+      ? "bg-emerald-100 text-emerald-800"
+      : hint.toLowerCase() === "medium"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-red-100 text-red-800";
+
+  const label =
+    hint.toLowerCase() === "high"
+      ? "Høy nøyaktighet"
+      : hint.toLowerCase() === "medium"
+      ? "Middels nøyaktighet"
+      : "Lav nøyaktighet";
+
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>
+      {label}
+    </span>
+  );
+}
+
+/** CI-chip: viser ±%-intervall basert på estimated_error_pct_range */
+function CIChip({ range }: { range: [number, number] | null | undefined }) {
+  if (!range || !Array.isArray(range) || range.length !== 2) return null;
+
+  const [low, high] = range;
+  const fmt = (v: number) => `${(v * 100).toFixed(1)}%`;
+
+  return (
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-800">
+      CI: {fmt(low)} → {fmt(high)}
+    </span>
+  );
+}
+
 /** PW: støtter både session.precision_watt_value og ev. session.precision_watt */
 function displayPrecisionWatt(session: SessionWithCalib): string {
   const raw =
@@ -206,6 +249,12 @@ export default function SessionCard({ session, className }: Props) {
 
           {/* Ny: publish-state pill */}
           <StatusPill state={session.publish_state} />
+        </div>
+
+        {/* Trinn 2: Analyze-chips */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <QualityChip hint={session.precision_quality_hint} />
+          <CIChip range={session.estimated_error_pct_range} />
         </div>
 
         {/* Varsler */}

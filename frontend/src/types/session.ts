@@ -4,7 +4,7 @@
 // Type-definisjon for SessionReport – tåler HR-only (watts kan mangle/null)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type SessionMode = 'indoor' | 'outdoor';
+export type SessionMode = "indoor" | "outdoor";
 
 export type SessionReport = {
   schema_version: string; // SemVer
@@ -88,13 +88,13 @@ export type SessionReport = {
 // Hjelpetype for å plukke ut nøkkelmetrikker i UI (SessionCard m.m.)
 export type KeyMetrics = Pick<
   SessionReport,
-  | 'np'
-  | 'if_'
-  | 'vi'
-  | 'pa_hr'
-  | 'w_per_beat'
-  | 'cgs'
-  | 'precision_watt_value'
+  | "np"
+  | "if_"
+  | "vi"
+  | "pa_hr"
+  | "w_per_beat"
+  | "cgs"
+  | "precision_watt_value"
 >;
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -103,22 +103,22 @@ export type KeyMetrics = Pick<
    Alle nye felt er valgfrie for bakoverkompatibilitet.
 ──────────────────────────────────────────────────────────────────────────── */
 
-export type PublishState = 'none' | 'pending' | 'published' | 'failed';
+export type PublishState = "none" | "pending" | "published" | "failed";
 
 /** Match mot schema/session_metrics.v1.json */
 export interface SessionMetrics {
   user_id: string;
-  date: string;           // ISO-date (YYYY-MM-DD)
+  date: string; // ISO-date (YYYY-MM-DD)
   avg_watt: number;
   duration_min: number;
 
   // S14 – Bike Setup / fysikk
   bike_type?: string;
-  bike_weight?: number;   // kg
-  tire_width?: number;    // mm
-  tire_quality?: string;  // "Trening" | "Vanlig" | "Ritt" | fri tekst
+  bike_weight?: number; // kg
+  tire_width?: number; // mm
+  tire_quality?: string; // "Trening" | "Vanlig" | "Ritt" | fri tekst
   crr_used?: number;
-  rider_weight?: number;  // kg
+  rider_weight?: number; // kg
   bike_name?: string;
 
   // S14 – Precision Watt (aggregert/lagret per økt)
@@ -129,8 +129,32 @@ export interface SessionMetrics {
   publish_state?: PublishState;
   publish_hash?: string;
   published_to_strava?: boolean;
-  publish_time?: string;  // ISO date-time
+  publish_time?: string; // ISO date-time
 
   // Schema-versjon (v0.7.x)
   schema_version: string;
 }
+
+/** S15: SessionInfo – lettvekts-meta om økten til bruk i lister/oversikter */
+export type SessionInfo = {
+  /** Backend-session id – brukes både i API og i /session/:id (kan mangle i dagens backend) */
+  session_id: string;
+
+  /** Optional Strava ride id, hvis backend speiler dette */
+  ride_id?: string | null;
+
+  /** Menneskelig lesbar label/tittel hvis tilgjengelig */
+  label?: string | null;
+
+  /** Starttidspunkt for økten (ISO-string) */
+  started_at?: string | null;
+
+  /** Om økten var indoor/outdoor hvis kjent */
+  mode?: SessionMode | null;
+
+  /** Nytt: værkilde brukt i analysen (fra /sessions/list) */
+  weather_source?: string | null;
+
+  /** Nytt: hvilken profil-versjon som ble brukt */
+  profile_version?: string | null;
+};

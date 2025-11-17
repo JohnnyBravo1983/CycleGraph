@@ -1,6 +1,7 @@
 /**
  * series.ts
  * Downsampling/decimation for 1 Hz tidsserier (Power/HR) + enkle statistikker.
+ * Trend helpers – CSV → grafserier
  *
  * Hovedfunksjoner:
  *  - decimateSeries(data, maxPoints): number[]
@@ -9,6 +10,9 @@
  *
  *  - getSeriesStats(data): { min, max, avg }
  *      Raske statistikker for tooltip/akser/CI.
+ *
+ *  - Trend helpers for CSV → grafserier
+ *      mapSummaryCsvToSeries, mapPivotCsvToSeries, mapCsvToSeries
  *
  * Ekstra (anbefalt ved multi-serie):
  *  - lttbIndices(y, maxPoints): number[]
@@ -23,6 +27,27 @@
  *  - Non-finite (NaN/±Inf) erstattes med sist kjente gyldige verdi (fallback 0).
  *  - Hvis data.length <= maxPoints → returnerer kopi av data (ingen endring).
  */
+
+// ─────────────────────────────────────────────────────────────
+// Trend types – CSV → grafserier
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Generisk punkt brukt i TrendsChart.
+ * x:
+ *  - summary.csv  → Date (ISO-dato fra "date"-kolonnen)
+ *  - pivot.csv    → string (f.eks. "open_meteo" / "frozen")
+ * y:
+ *  - alltid en numerisk verdi (avg_watt, w_per_beat eller mean)
+ */
+export type TrendPoint = {
+  x: Date | string;
+  y: number;
+};
+
+// ─────────────────────────────────────────────────────────────
+// Series statistics and downsampling
+// ─────────────────────────────────────────────────────────────
 
 export function getSeriesStats(data: number[]): { min: number; max: number; avg: number } {
   let min = Number.POSITIVE_INFINITY;
@@ -169,4 +194,128 @@ export function decimateSeries(data: number[], maxPoints: number): number[] {
     }
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trend helpers – CSV → grafserier
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Hjelper: splitter header + data og håndterer tomme/ufullstendige CSV-er.
+ */
+function splitHeaderAndRows(rows: string[][]): {
+  header: string[] | null;
+  data: string[][];
+} {
+  if (!rows || rows.length === 0) {
+    return { header: null, data: [] };
+  }
+
+  const [header, ...data] = rows;
+  return {
+    header: header ?? null,
+    data: data ?? [],
+  };
+}
+
+/**
+ * Mapper trend/summary.csv → tidsserie.
+ *
+ * Forventet format (Tr9-locked):
+ *   date,session_id,avg_watt,avg_hr,w_per_beat,cda_used,crr_used
+ *
+ * @param rows   CSV-rows inkl. header
+ * @param metric "avg_watt" eller "w_per_beat"
+ */
+export function mapSummaryCsvToSeries(
+  rows: string[][],
+  metric: 'avg_watt' | 'w_per_beat',
+): TrendPoint[] {
+  const { header, data } = splitHeaderAndRows(rows);
+  if (!header || data.length === 0) {
+    return [];
+  }
+
+  const lower = header.map((h) => (h ?? '').toLowerCase().trim());
+  const dateIdx = lower.indexOf('date');
+  const valueIdx = lower.indexOf(metric);
+
+  if (dateIdx === -1 || valueIdx === -1) {
+    return [];
+  }
+
+  const points: TrendPoint[] = [];
+
+  for (const row of data) {
+    const dateStr = row[dateIdx];
+    const valStr = row[valueIdx];
+
+    if (!dateStr) continue;
+
+    const d = new Date(dateStr);
+    const v = Number(valStr);
+
+    if (!Number.isFinite(v) || Number.isNaN(v)) continue;
+
+    points.push({
+      x: d,
+      y: v,
+    });
+  }
+
+  return points;
+}
+
+/**
+ * Mapper trend/pivot/<metric>.csv → kategoriserie.
+ *
+ * Forventet format:
+ *   weather_source,mean,std,count
+ *
+ * Vi bruker:
+ *   x = weather_source (string)
+ *   y = mean (number)
+ */
+export function mapPivotCsvToSeries(rows: string[][]): TrendPoint[] {
+  const { header, data } = splitHeaderAndRows(rows);
+  if (!header || data.length === 0) {
+    return [];
+  }
+
+  const lower = header.map((h) => (h ?? '').toLowerCase().trim());
+  const weatherIdx = lower.indexOf('weather_source');
+  const meanIdx = lower.indexOf('mean');
+
+  if (weatherIdx === -1 || meanIdx === -1) {
+    return [];
+  }
+
+  const points: TrendPoint[] = [];
+
+  for (const row of data) {
+    const label = row[weatherIdx];
+    const valStr = row[meanIdx];
+
+    if (!label) continue;
+
+    const v = Number(valStr);
+    if (!Number.isFinite(v) || Number.isNaN(v)) continue;
+
+    points.push({
+      x: label,
+      y: v,
+    });
+  }
+
+  return points;
+}
+
+/**
+ * Backwards-/fallback-helper som brukes dersom vi bare trenger
+ * en enkel serie uten å bry oss om metrikkslaget.
+ *
+ * Default: bruker "avg_watt" på summary.csv.
+ */
+export function mapCsvToSeries(rows: string[][]): TrendPoint[] {
+  return mapSummaryCsvToSeries(rows, 'avg_watt');
 }

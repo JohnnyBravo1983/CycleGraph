@@ -1,7 +1,27 @@
 // frontend/src/lib/api.ts
-import type { SessionReport } from "../types/session";
+import type { SessionReport, SessionInfo } from "../types/session";
 import { mockSession } from "../mocks/mockSession";
-import { safeParseSession, ensureSemver } from "./schema";
+import {
+  safeParseSession,
+  ensureSemver,
+  type AnalyzeResponse,
+  type Profile,
+  type TrendSummary,
+  type TrendPivot,
+  type CsvRows,
+} from "./schema";
+import { fetchJSON } from "./fetchJSON";
+
+// frontend/src/lib/api.ts
+
+// Les Vite-ENV trygt uten å være bundet til ImportMetaEnv-typen
+function readViteEnv(): Record<string, string | undefined> {
+  return (
+    (typeof import.meta !== "undefined"
+      ? (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      : undefined) ?? {}
+  );
+}
 
 /** Result-typer beholdt som hos deg */
 type Ok = { ok: true; data: SessionReport; source: "mock" | "live" };
@@ -9,7 +29,7 @@ type Err = { ok: false; error: string; source?: "mock" | "live" };
 export type FetchSessionResult = Ok | Err;
 
 // Hent Vite-variabler (.env.local). Hvis BASE mangler → vi faller til mock-kilde.
-const BASE = import.meta.env.VITE_BACKEND_URL as string | undefined;
+const BASE = readViteEnv().VITE_BACKEND_URL;
 
 /** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
@@ -54,20 +74,24 @@ export async function fetchWithTimeout(
   }
 
   try {
-    const res = await fetch(input, { ...rest, signal: ac.signal });
+    const res = await fetch(input, {
+      ...rest,
+      signal: ac.signal,
+      credentials: rest.credentials ?? "include",
+    });
     return res;
- } catch (err: unknown) {
-  const isAbort =
-    typeof err === "object" &&
-    err !== null &&
-    "name" in err &&
-    (err as { name?: unknown }).name === "AbortError";
+  } catch (err: unknown) {
+    const isAbort =
+      typeof err === "object" &&
+      err !== null &&
+      "name" in err &&
+      (err as { name?: unknown }).name === "AbortError";
 
-  if (isAbort) {
-    throw new Error("Tidsavbrudd: forespørselen tok for lang tid.");
-  }
-  throw err instanceof Error ? err : new Error(String(err));
-} finally {
+    if (isAbort) {
+      throw new Error("Tidsavbrudd: forespørselen tok for lang tid.");
+    }
+    throw err instanceof Error ? err : new Error(String(err));
+  } finally {
     clearTimeout(timeoutId);
   }
 }
@@ -92,13 +116,13 @@ async function safeReadText(res: Response): Promise<string> {
   }
 }
 
-/** Bygg URL til analyze_session */
+/** Bygg URL til analyze_session (legacy) */
 function buildAnalyzeUrl(base: string, id: string): string {
   return `${base}/api/analyze_session?id=${encodeURIComponent(id)}`;
 }
 
 /**
- * Hent en session:
+ * Hent en session (legacy):
  * - id === "mock" eller BASE mangler → bruk mockSession (kilde: "mock")
  * - ellers → GET {BASE}/api/analyze_session?id={id} (kilde: "live")
  * Validerer alltid med Zod + semver.
@@ -142,7 +166,7 @@ export async function fetchSession(
       return { ok: true, data: parsed.data, source: "mock" };
     }
 
-    // LIVE
+    // LIVE (legacy analyze_session)
     const url = buildAnalyzeUrl(base, id);
     const resp = await fetchWithTimeout(url, {
       method: "GET",
@@ -210,4 +234,194 @@ export async function fetchSession(
       source: BASE ? ("live" as const) : ("mock" as const),
     };
   }
+}
+
+/* ------------------------------------------------------------------
+ * Sprint 15 – Nye API-funksjoner (analyze, profile, trend)
+ * Basert på Layer 1 MASTER SPEC.
+ * Alle bruker relative /api-URLer + fetchJSON (credentials: 'include').
+ * ------------------------------------------------------------------ */
+
+const API_ROOT = "/api";
+
+// Enkel CSV-parser: tekst → string[][]
+function parseCsv(text: string): CsvRows {
+  if (!text.trim()) return [];
+  return text
+    .trim()
+    .split("\n")
+    .map((line) => line.split(","));
+}
+
+/**
+ * analyze(sessionId)
+ * POST /api/sessions/{id}/analyze
+ * Returnerer AnalyzeResponse eller undefined ved AbortError.
+ */
+export async function analyze(
+  sessionId: string,
+  opts?: { signal?: AbortSignal }
+): Promise<AnalyzeResponse | undefined> {
+  const url = `${API_ROOT}/sessions/${encodeURIComponent(sessionId)}/analyze`;
+  const res = await fetchJSON<AnalyzeResponse>(url, {
+    method: "POST",
+    signal: opts?.signal,
+  });
+  return res;
+}
+
+/**
+ * getProfile()
+ * GET /api/profile
+ */
+export async function getProfile(
+  opts?: { signal?: AbortSignal }
+): Promise<Profile | undefined> {
+  const url = `${API_ROOT}/profile`;
+  const res = await fetchJSON<Profile>(url, {
+    method: "GET",
+    signal: opts?.signal,
+  });
+  return res;
+}
+
+/**
+ * setProfile(profile)
+ * PUT /api/profile
+ */
+export async function setProfile(
+  profile: Profile,
+  opts?: { signal?: AbortSignal }
+): Promise<Profile | undefined> {
+  const url = `${API_ROOT}/profile`;
+  const res = await fetchJSON<Profile>(url, {
+    method: "PUT",
+    signal: opts?.signal,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(profile),
+  });
+  return res;
+}
+
+/**
+ * getTrendSummary()
+ * GET /api/trend/summary.csv
+ * Tom / timeout → rows: [].
+ */
+export async function getTrendSummary(
+  opts?: { signal?: AbortSignal }
+): Promise<TrendSummary> {
+  const url = `${API_ROOT}/trend/summary.csv`;
+  const raw = await fetchJSON<string | unknown>(url, {
+    method: "GET",
+    signal: opts?.signal,
+  });
+
+  if (typeof raw === "string") {
+    return { rows: parseCsv(raw) };
+  }
+
+  // AbortError (undefined) eller tomt objekt → ingen rader
+  return { rows: [] };
+}
+
+/**
+ * getTrendPivot(metric, profileVersion)
+ * GET /api/trend/pivot/<metric>.csv?profile_version=<pv>
+ */
+export async function getTrendPivot(
+  metric: string,
+  profileVersion: number,
+  opts?: { signal?: AbortSignal }
+): Promise<TrendPivot> {
+  const qs = new URLSearchParams({
+    profile_version: String(profileVersion),
+  }).toString();
+  const url = `${API_ROOT}/trend/pivot/${encodeURIComponent(metric)}.csv?${qs}`;
+
+  const raw = await fetchJSON<string | unknown>(url, {
+    method: "GET",
+    signal: opts?.signal,
+  });
+
+  if (typeof raw === "string") {
+    return { rows: parseCsv(raw) };
+  }
+
+  return { rows: [] };
+}
+
+/**
+ * getSessionsList()
+ * GET /api/sessions/list
+ * Defensive: håndterer både ren liste og { value: [...] }-wrapper.
+ */
+export async function getSessionsList(
+  opts?: { signal?: AbortSignal }
+): Promise<SessionInfo[]> {
+  const url = `${API_ROOT}/sessions/list`;
+
+  const res = await fetchJSON<SessionInfo[] | { value?: unknown } | unknown>(url, {
+    method: "GET",
+    signal: opts?.signal,
+  });
+
+  // Case 1: backend sender ren liste
+  if (Array.isArray(res)) {
+    return res as SessionInfo[];
+  }
+
+  // Case 2: backend wrapper i { value: [...] }
+  if (
+    res &&
+    typeof res === "object" &&
+    Array.isArray((res as { value?: unknown }).value)
+  ) {
+    const raw = (res as { value: unknown[] }).value;
+
+    // Map til SessionInfo – tillat at session_id mangler inntil backend er helt på plass
+    const mapped: SessionInfo[] = raw.map((item) => {
+      const obj = item as Record<string, unknown>;
+
+      const session_id =
+        typeof obj.session_id === "string" ? obj.session_id : "";
+
+      const ride_id =
+        typeof obj.ride_id === "string" ? obj.ride_id : null;
+
+      const label =
+        typeof obj.label === "string" ? obj.label : null;
+
+      const started_at =
+        typeof obj.started_at === "string" ? obj.started_at : null;
+
+      const mode =
+        typeof obj.mode === "string" && (obj.mode === "indoor" || obj.mode === "outdoor")
+          ? (obj.mode as SessionInfo['mode'])
+          : null;
+
+      const weather_source =
+        typeof obj.weather_source === "string" ? obj.weather_source : null;
+
+      const profile_version =
+        typeof obj.profile_version === "string" ? obj.profile_version : null;
+
+      return {
+        session_id,
+        ride_id,
+        label,
+        started_at,
+        mode,
+        weather_source,
+        profile_version,
+      };
+    });
+
+    return mapped;
+  }
+
+  // Fallback: ingenting vi kjenner igjen
+  return [];
 }

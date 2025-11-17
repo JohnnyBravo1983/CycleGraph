@@ -18,9 +18,12 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Callable, List, Literal
+from pathlib import Path  # NY
 
 from fastapi import FastAPI, HTTPException, Response, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # NY
+from fastapi.responses import FileResponse  # NY
 from pydantic import BaseModel, Field
 
 from cyclegraph.weather_client import get_weather_for_session, WeatherError
@@ -33,6 +36,35 @@ API_HOST = os.getenv("CG_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("CG_API_PORT", "5179"))  # default 5179
 
 app = FastAPI(title="CycleGraph API", version="0.1.0")
+
+# =====================================================================
+# Frontend / SPA-konfig – pek mot Vite-build i frontend/dist
+# =====================================================================
+
+# app.py ligger i repo-root, så parent = repo-root
+ROOT_DIR = Path(__file__).resolve().parent
+
+FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
+INDEX_HTML = FRONTEND_DIST / "index.html"
+ASSETS_DIR = FRONTEND_DIST / "assets"
+
+print(f"[CycleGraph] FRONTEND_DIST = {FRONTEND_DIST}")
+print(f"[CycleGraph] INDEX_HTML    = {INDEX_HTML}")
+print(f"[CycleGraph] ASSETS_DIR    = {ASSETS_DIR}")
+
+# =====================================================================
+# Static files – Vite assets (/assets/*)
+# =====================================================================
+
+if ASSETS_DIR.is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=ASSETS_DIR),
+        name="assets",
+    )
+else:
+    # Ikke crash hvis dist ikke finnes – f.eks. i ren backend-test
+    print(f"[CycleGraph] Advarsel: ASSETS_DIR finnes ikke: {ASSETS_DIR}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -472,6 +504,48 @@ def _normalize_samples(samples: List[Sample]) -> List[dict]:
         out.append(item)
     return out
 
+# =====================================================================
+# SPA routes – serve Vite index.html på root og alle ikke-API paths
+# =====================================================================
+
+def _ensure_index_html() -> Path:
+    """
+    Hjelpefunksjon: verifiser at index.html finnes.
+    Kaster 500 hvis ikke, så vi ser feilen tydelig.
+    """
+    if not INDEX_HTML.is_file():
+        raise HTTPException(
+            status_code=500,
+            detail=f"frontend index.html ikke funnet: {INDEX_HTML}",
+        )
+    return INDEX_HTML
+
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend_root() -> FileResponse:
+    """
+    Root – serve SPA index.html.
+    """
+    index_file = _ensure_index_html()
+    return FileResponse(index_file)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend_spa(full_path: str) -> FileResponse:
+    """
+    Catch-all for SPA-routing.
+
+    Viktig:
+    - Hvis path starter med 'api/', skal denne IKKE håndtere requesten.
+      Da lar vi FastAPI sin normale 404/route-matching ta det.
+    """
+    # Ikke ta over API-ruter
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API path – ikke SPA-route")
+
+    index_file = _ensure_index_html()
+    return FileResponse(index_file)
+
 # -----------------------------------------------------------------------------
 # Oppstartshook
 # -----------------------------------------------------------------------------
@@ -532,7 +606,13 @@ def api_get_session(sid: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
-
+@app.post("/api/sessions/{sid}/analyze")
+def api_analyze_session(
+    sid: str,
+    body: Optional[AnalyzeRequest2] = Body(None),
+    force_recompute_q: Optional[bool] = Query(None, alias="force_recompute"),
+    x_cyclegraph_force: Optional[int] = Header(None),
+):
     """
     Støtter to datakilder:
     1) Inline timeserie (samples/records) dersom ANALYZE_ALLOW_INLINE=1

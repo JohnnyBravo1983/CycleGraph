@@ -1,5 +1,5 @@
-// frontend/src/App.tsx
 import { NavLink, Outlet } from "react-router-dom";
+import { isLandingPreviewEnabled } from "./config/featureFlags";
 
 export default function App() {
   return (
@@ -17,6 +17,16 @@ export default function App() {
             >
               Home
             </NavLink>
+
+            <NavLink
+              to="/sessions"
+              className={({ isActive }) =>
+                `px-3 py-1.5 rounded-2xl border ${isActive ? "shadow" : ""}`
+              }
+            >
+              Økter
+            </NavLink>
+
             <NavLink
               to="/session/mock"
               className={({ isActive }) =>
@@ -25,6 +35,19 @@ export default function App() {
             >
               Session
             </NavLink>
+
+            {isLandingPreviewEnabled && (
+              <NavLink
+                to="/landing"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded-2xl border ${
+                    isActive ? "shadow bg-black text-white" : ""
+                  }`
+                }
+              >
+                Landing (preview)
+              </NavLink>
+            )}
           </nav>
         </div>
       </header>

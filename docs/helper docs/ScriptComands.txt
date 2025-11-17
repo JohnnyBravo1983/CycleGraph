@@ -16,3 +16,8 @@ Viktige Comands
 
 # venv kommando
 .venv\Scripts\Activate.ps1
+
+http://localhost:5173/session/local-mini
+
+
+ taskkill /F /IM node.exe

@@ -13,6 +13,12 @@ export type PanelSeries = {
   source?: "API" | "Mock" | string;
   calibrated?: boolean; // kan mangle i eldre schema
   status?: "FULL" | "HR-only" | "LIMITED" | string;
+
+  // Trinn 4: profilverdier brukt i analysen
+  profile_cda?: number | null;
+  profile_crr?: number | null;
+  profile_crank_efficiency?: number | null;
+  profile_version?: number | null;
 };
 
 export interface AnalysisPanelProps {
@@ -240,6 +246,41 @@ export default function AnalysisPanel({ series, useLiveTrends: useLiveTrendsProp
             CI-bånd (PW)
             <span className="ml-1 opacity-70">{hasCI ? "Tilgjengelig" : "Mangler"}</span>
           </label>
+        </div>
+      </div>
+
+      {/* Trinn 4: profilverdier brukt i denne analysen */}
+      <div className="px-4 pt-2 pb-1 text-xs text-slate-600">
+        <div className="flex flex-wrap gap-4">
+          {series.profile_cda != null && (
+            <div>
+              <span className="font-medium">CdA</span>{" "}
+              <span className="font-mono">{series.profile_cda.toFixed(3)}</span>
+            </div>
+          )}
+          {series.profile_crr != null && (
+            <div>
+              <span className="font-medium">Crr</span>{" "}
+              <span className="font-mono">{series.profile_crr.toFixed(4)}</span>
+            </div>
+          )}
+          {series.profile_crank_efficiency != null && (
+            <div>
+              <span className="font-medium">Crank efficiency</span>{" "}
+              <span className="font-mono">
+                {(series.profile_crank_efficiency * 100).toFixed(1)} %
+              </span>{" "}
+              <span className="text-[0.65rem] uppercase tracking-wide text-slate-500">
+                locked
+              </span>
+            </div>
+          )}
+          {series.profile_version != null && (
+            <div>
+              <span className="font-medium">Profilversjon</span>{" "}
+              <span className="font-mono">{series.profile_version}</span>
+            </div>
+          )}
         </div>
       </div>
 

@@ -38,15 +38,17 @@ export const SessionZodSchema = z
     v_rel: NumOrNumListSchema,
   })
   // Ekstra defensivitet: hvis avg_hr finnes, må den være et endelig tall (ikke NaN/Infinity)
-  .superRefine((val, ctx) => {
-    if (typeof val.avg_hr === "number" && !Number.isFinite(val.avg_hr)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["avg_hr"],
-        message: "avg_hr må være et endelig tall.",
-      });
+    .superRefine(
+    (val: { avg_hr?: number | null }, ctx: z.RefinementCtx) => {
+      if (typeof val.avg_hr === "number" && !Number.isFinite(val.avg_hr)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["avg_hr"],
+          message: "avg_hr må være et endelig tall.",
+        });
+      }
     }
-  })
+  )
   .passthrough();
 
 /** Kaster ved feil; returnerer TS-typen din for videre bruk */
@@ -79,4 +81,102 @@ export function safeParseSession(
     res.error.message ||
     "Ugyldig session-schema.";
   return { ok: false, error: first };
+}
+
+/* ------------------------------------------------------------------
+ * Sprint 15 – Analyze / Profile / Trend kontrakt (frontend-typer)
+ * Basert på Layer 1 MASTER SPEC + backend stability-rapport.
+ * ------------------------------------------------------------------ */
+
+export interface AnalyzeProfileUsed {
+  cda: number;
+  crr: number;
+  crank_efficiency: number;
+  weight_kg: number;
+  bike_type: string;
+  tire_width_mm: number;
+  tire_quality: string;
+  profile_version: number;
+}
+
+export interface AnalyzeMetrics {
+  // Alltid tilstede – men verdier kan være null (backend-kontrakt)
+  precision_watt: number | null;
+  drag_watt: number | null;
+  rolling_watt: number | null;
+  total_watt: number | null;
+
+  calibration_mae: number | null;
+  calibrated: boolean | null;
+  calibration_status: string | null;
+
+  weather_used: boolean | null;
+  weather_meta: Record<string, unknown> | null;
+  weather_fp: string | null;
+
+  // Backend sender også profile_used inn her for tracing
+  profile_used: AnalyzeProfileUsed;
+
+  // Sprint 15-spesifikke felter
+  estimated_error_pct_range: [number, number] | null;
+  precision_quality_hint: string | null;
+  profile_completeness: number | null;
+}
+
+export type SampleTuple = [number, number, number];
+
+export interface AnalyzeResponse {
+  source: string;
+  weather_applied: boolean;
+  weather_source: string;
+  profile_version: number;
+
+  metrics: AnalyzeMetrics;
+  profile_used: AnalyzeProfileUsed;
+
+  samples: SampleTuple[];
+
+  publish?: {
+    time?: string | null;
+    status?: string | null;
+    strava_url?: string | null;
+  };
+}
+
+/**
+ * Profil-kontrakt for GET/PUT /profile.
+ * Frontend skal:
+ *  - Vise editable: rider_weight_kg, bike_weight_kg, bike_type, tire_width_mm,
+ *    tire_quality, bike_name, cda
+ *  - Vise ikke-editable: crank_efficiency (96%), profile_version
+ *  - Ha toggle: publish_to_strava
+ */
+export interface Profile {
+  rider_weight_kg: number;
+  bike_weight_kg: number;
+  bike_type: string;
+  tire_width_mm: number;
+  tire_quality: string;
+  bike_name?: string | null;
+  cda: number;
+
+  crank_efficiency: number; // låst til 96% nå
+  profile_version: number;
+
+  publish_to_strava?: boolean;
+}
+
+/**
+ * CSV-basert trendkontrakt.
+ * - summary.csv: kolonner date,session_id,avg_watt,avg_hr,w_per_beat,cda_used,crr_used
+ * - pivot/<metric>.csv: kolonner weather_source,mean,std,count
+ */
+export type CsvRows = string[][];
+
+export interface TrendSummary {
+  rows: CsvRows;
+}
+
+export interface TrendPivot {
+  rows: CsvRows;
 }
