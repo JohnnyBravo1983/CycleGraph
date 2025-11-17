@@ -12,8 +12,6 @@ import {
 } from "./schema";
 import { fetchJSON } from "./fetchJSON";
 
-// frontend/src/lib/api.ts
-
 // Les Vite-ENV trygt uten å være bundet til ImportMetaEnv-typen
 function readViteEnv(): Record<string, string | undefined> {
   return (
@@ -272,12 +270,12 @@ export async function analyze(
 
 /**
  * getProfile()
- * GET /api/profile
+ * GET /api/profile/get
  */
 export async function getProfile(
   opts?: { signal?: AbortSignal }
 ): Promise<Profile | undefined> {
-  const url = `${API_ROOT}/profile`;
+  const url = `${API_ROOT}/profile/get`;
   const res = await fetchJSON<Profile>(url, {
     method: "GET",
     signal: opts?.signal,
@@ -287,13 +285,13 @@ export async function getProfile(
 
 /**
  * setProfile(profile)
- * PUT /api/profile
+ * PUT /api/profile/save
  */
 export async function setProfile(
   profile: Profile,
   opts?: { signal?: AbortSignal }
 ): Promise<Profile | undefined> {
-  const url = `${API_ROOT}/profile`;
+  const url = `${API_ROOT}/profile/save`;
   const res = await fetchJSON<Profile>(url, {
     method: "PUT",
     signal: opts?.signal,
@@ -363,7 +361,9 @@ export async function getSessionsList(
 ): Promise<SessionInfo[]> {
   const url = `${API_ROOT}/sessions/list`;
 
-  const res = await fetchJSON<SessionInfo[] | { value?: unknown } | unknown>(url, {
+  const res = await fetchJSON<
+    SessionInfo[] | { value?: unknown } | unknown
+  >(url, {
     method: "GET",
     signal: opts?.signal,
   });
@@ -398,15 +398,18 @@ export async function getSessionsList(
         typeof obj.started_at === "string" ? obj.started_at : null;
 
       const mode =
-        typeof obj.mode === "string" && (obj.mode === "indoor" || obj.mode === "outdoor")
-          ? (obj.mode as SessionInfo['mode'])
+        typeof obj.mode === "string" &&
+        (obj.mode === "indoor" || obj.mode === "outdoor")
+          ? (obj.mode as SessionInfo["mode"])
           : null;
 
       const weather_source =
         typeof obj.weather_source === "string" ? obj.weather_source : null;
 
       const profile_version =
-        typeof obj.profile_version === "string" ? obj.profile_version : null;
+        typeof obj.profile_version === "string"
+          ? obj.profile_version
+          : null;
 
       return {
         session_id,
