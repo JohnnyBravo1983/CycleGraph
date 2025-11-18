@@ -34,9 +34,15 @@ type SessionCore = SessionReport & {
   precision_watt_value?: number | null;
   precision_watt?: number | number[] | null;
 
-  // årsak / metadata
-  reason?: string | null;
-  sources?: string[];
+  // --- Trinn 7: observability-felt fra analyzeResult ---
+  drag_watt?: number | null;
+  rolling_watt?: number | null;
+  total_watt?: number | null;
+  calibration_mae?: number | null;
+
+  weather_source?: string | null;
+  profile_version?: number | null;
+  // profile_used kan være et objekt i AnalyzeResponse – vi holder oss til versjon i kortet
 
   // rå strømmer
   watts: number[] | null;
@@ -195,11 +201,11 @@ function CIChip({ range }: { range: [number, number] | null | undefined }) {
   if (!range || !Array.isArray(range) || range.length !== 2) return null;
 
   const [low, high] = range;
-  const fmt = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const fmtPct = (v: number) => `${(v * 100).toFixed(1)}%`;
 
   return (
     <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-800">
-      CI: {fmt(low)} → {fmt(high)}
+      CI: {fmtPct(low)} → {fmtPct(high)}
     </span>
   );
 }
@@ -251,7 +257,7 @@ export default function SessionCard({ session, className }: Props) {
           <StatusPill state={session.publish_state} />
         </div>
 
-        {/* Trinn 2: Analyze-chips */}
+        {/* Analyze-chips */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <QualityChip hint={session.precision_quality_hint} />
           <CIChip range={session.estimated_error_pct_range} />
@@ -318,6 +324,68 @@ export default function SessionCard({ session, className }: Props) {
             value={session.publish_time ? new Date(session.publish_time).toLocaleString() : "—"}
           />
         </div>
+
+        {/* --- Trinn 7: Observability-blokk (kun ekstra felter) --- */}
+        {(
+          session.drag_watt != null ||
+          session.rolling_watt != null ||
+          session.total_watt != null ||
+          session.calibration_mae != null ||
+          session.weather_source != null ||
+          session.profile_version != null
+        ) && (
+          <>
+            <section className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3 text-sm">
+              <div>
+                <div className="text-gray-500">Drag</div>
+                <div className="font-semibold">
+                  {session.drag_watt != null ? `${session.drag_watt.toFixed(0)} W` : "–"}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-gray-500">Rolling</div>
+                <div className="font-semibold">
+                  {session.rolling_watt != null ? `${session.rolling_watt.toFixed(0)} W` : "–"}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-gray-500">Total</div>
+                <div className="font-semibold">
+                  {session.total_watt != null ? `${session.total_watt.toFixed(0)} W` : "–"}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-gray-500">Kalibrering (MAE)</div>
+                <div className="font-semibold">
+                  {session.calibration_mae != null ? `${session.calibration_mae.toFixed(1)} W` : "–"}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-gray-500">Værkilde</div>
+                <div className="font-semibold">
+                  {session.weather_source ?? "–"}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-gray-500">Profilversjon</div>
+                <div className="font-semibold">
+                  {session.profile_version != null ? `v${session.profile_version}` : "–"}
+                </div>
+              </div>
+            </section>
+
+            {session.precision_quality_hint && (
+              <div className="mt-3 inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+                PW-kvalitet: {session.precision_quality_hint}
+              </div>
+            )}
+          </>
+        )}
 
         {/* Bunn-info (eksisterende) */}
         <div className="mt-4 text-xs text-slate-500">

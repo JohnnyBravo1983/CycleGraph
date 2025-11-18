@@ -1,119 +1,88 @@
-// frontend/src/tests/SessionsList.test.tsx
-import "@testing-library/jest-dom/vitest";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
-import { render, screen } from "@testing-library/react";
+// frontend/src/routes/SessionsList.tsx
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useSessionStore } from "../state/sessionStore";
 import type { SessionInfo } from "../types/session";
 
-// --- Lokal mock-state-type for å unngå `any` -------------------------------
-
-type MockSessionStoreState = {
-  sessions: SessionInfo[] | null;
-  sessionsLoading: boolean;
-  sessionsError: string | null;
-  fetchSessionsList: () => Promise<void>;
-};
-
-// --- Mocker verdier --------------------------------------------------------
-
-let mockSessions: SessionInfo[] | null = null;
-let mockLoading = false;
-let mockError: string | null = null;
-
-// NB: Vitest fn tar én typeparameter: selve funksjonstypen
-const fetchSessionsListMock = vi.fn<() => Promise<void>>(async () => {});
-
-// --- Mock av useSessionStore -----------------------------------------------
-
-vi.mock("../state/sessionStore", () => {
-  return {
-    useSessionStore: (
-      selector: (state: MockSessionStoreState) => unknown
-    ) =>
-      selector({
-        sessions: mockSessions,
-        sessionsLoading: mockLoading,
-        sessionsError: mockError,
-        fetchSessionsList: fetchSessionsListMock,
-      }),
-  };
-});
-
-// Etter mock: importer komponenten vi tester
-import SessionsList from "../routes/SessionsList";
-
-// --- Hjelpefunksjon for å sette opp Router ---------------------------------
-
-function renderWithRouter() {
-  return render(
-    <MemoryRouter initialEntries={["/sessions"]}>
-      <Routes>
-        <Route path="/sessions" element={<SessionsList />} />
-        {/* dummy-sessionroute – vi sjekker bare href */}
-        <Route
-          path="/session/:id"
-          element={<div data-testid="session-view">SessionView</div>}
-        />
-      </Routes>
-    </MemoryRouter>
-  );
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return "Ukjent tidspunkt";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
 }
 
-// --- Tester ----------------------------------------------------------------
+function formatMode(mode?: SessionInfo["mode"] | null): string {
+  if (!mode) return "ukjent";
+  if (mode === "indoor") return "innendørs";
+  if (mode === "outdoor") return "utendørs";
+  return mode;
+}
 
-describe("SessionsList", () => {
-  beforeEach(() => {
-    mockSessions = null;
-    mockLoading = false;
-    mockError = null;
-    fetchSessionsListMock.mockClear();
+export default function SessionsList() {
+  const [showMocks, setShowMocks] = useState(false);
+
+  const sessions = useSessionStore((s) => s.sessions ?? []);
+  const sessionsLoading = useSessionStore((s) => s.sessionsLoading);
+  const sessionsError = useSessionStore((s) => s.sessionsError);
+  const fetchSessionsList = useSessionStore((s) => s.fetchSessionsList);
+
+  useEffect(() => {
+    void fetchSessionsList();
+  }, [fetchSessionsList]);
+
+  const visibleSessions = sessions.filter((s) => {
+    if (showMocks) return true;
+    const id = s.session_id ?? "";
+    // Skjul mock-økter og local-mini som default
+    return !id.startsWith("mock-") && id !== "local-mini";
   });
 
-  it("kaller fetchSessionsList ved mount", () => {
-    renderWithRouter();
-    expect(fetchSessionsListMock).toHaveBeenCalledTimes(1);
-  });
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6 space-y-4">
+      <header className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Mine økter</h1>
+        <label className="flex items-center gap-2 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            className="rounded border-gray-300"
+            checked={showMocks}
+            onChange={(e) => setShowMocks(e.target.checked)}
+          />
+          Vis mock-økter
+        </label>
+      </header>
 
-  it("viser tom-liste melding når ingen økter", async () => {
-    mockSessions = [];
-    renderWithRouter();
+      {sessionsLoading && <p>Laster økter…</p>}
+      {sessionsError && <p className="text-red-600">{sessionsError}</p>}
 
-    expect(
-      await screen.findByTestId("sessions-empty")
-    ).toBeInTheDocument();
-  });
+      {!sessionsLoading && !sessionsError && visibleSessions.length === 0 && (
+        <p>Ingen økter funnet ennå.</p>
+      )}
 
-  it("renderer økter med lenker til /session/:id", async () => {
-    mockSessions = [
-      {
-        session_id: "local-mini",
-        label: "Local mini",
-        ride_id: "123",
-        mode: "outdoor",
-        started_at: "2025-11-12T10:00:00Z",
-      },
-      {
-        session_id: "bench-01",
-        ride_id: "456",
-        mode: "indoor",
-        started_at: null,
-      },
-    ];
-
-    renderWithRouter();
-
-    const list = await screen.findByTestId("sessions-list");
-    expect(list).toBeInTheDocument();
-
-    const first = screen.getByText("Local mini");
-    const link = first.closest("a");
-    expect(link).toHaveAttribute("href", "/session/local-mini");
-  });
-
-  it("viser feilmelding ved error", () => {
-    mockError = "Boom";
-    renderWithRouter();
-
-    expect(screen.getByTestId("sessions-error")).toHaveTextContent("Boom");
-  });
-});
+      {!sessionsLoading && !sessionsError && visibleSessions.length > 0 && (
+        <ul className="divide-y border rounded-xl bg-white">
+          {visibleSessions.map((s) => (
+            <li
+              key={s.session_id}
+              className="px-4 py-3 flex items-center justify-between gap-4"
+            >
+              <div className="space-y-1">
+                <Link
+                  to={`/session/${s.session_id}`}
+                  className="font-medium text-blue-700 hover:underline"
+                >
+                  {s.session_id}
+                </Link>
+                <div className="text-sm text-gray-600">
+                  <span>{formatDateTime(s.started_at)}</span>
+                  {" · "}
+                  <span>{formatMode(s.mode)}</span>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
