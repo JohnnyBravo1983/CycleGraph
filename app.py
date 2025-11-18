@@ -22,8 +22,8 @@ from pathlib import Path  # NY
 
 from fastapi import FastAPI, HTTPException, Response, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # NY
-from fastapi.responses import FileResponse  # NY
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, PlainTextResponse  # NY: PlainTextResponse
 from pydantic import BaseModel, Field
 
 from cyclegraph.weather_client import get_weather_for_session, WeatherError
@@ -503,6 +503,36 @@ def _normalize_samples(samples: List[Sample]) -> List[dict]:
         }
         out.append(item)
     return out
+
+# =====================================================================
+# Enkle trend-endepunkter for frontend (Sprint 15)
+# =====================================================================
+
+@app.get("/api/trend/summary.csv", response_class=PlainTextResponse)
+def trend_summary_csv() -> str:
+    """
+    Minimal førsteversjon av trend-summary som CSV.
+
+    For nå:
+    - Returnerer kun header-rad.
+    - Frontend vil da tolke dette som "ingen trend-data", men det er
+      ekte API-respons (ikke 404), så vi kan slå av mock.
+    """
+    header = "session_id,date,avg_watt,w_per_beat\n"
+    return header
+
+
+@app.get("/api/trend/pivot/{metric}.csv", response_class=PlainTextResponse)
+def trend_pivot_csv(metric: str, profile_version: int = Query(0)) -> str:
+    """
+    Minimal førsteversjon av pivot-CSV.
+
+    For nå:
+    - Returnerer kun header-rad.
+    - Frontend vil sette hasPivot=false når det ikke finnes rader.
+    """
+    header = "metric,bin,value\n"
+    return header
 
 # =====================================================================
 # SPA routes – serve Vite index.html på root og alle ikke-API paths

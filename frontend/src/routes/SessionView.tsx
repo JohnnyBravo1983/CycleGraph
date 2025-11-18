@@ -10,6 +10,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import AnalysisPanel from "../components/AnalysisPanel";
 import { mapAnalyzeToCard } from "../lib/mapAnalyzeToCard";
 import type { Profile, AnalyzeResponse } from "../lib/schema";
+import { USE_LIVE_TRENDS } from "../lib/fetchJSON";
 
 import CalibrationGuide from "../components/CalibrationGuide";
 // Lazy-load grafen (Performance boost)
@@ -20,13 +21,6 @@ import { isHROnly as isHROnlyHelper, shouldShowCalibrationModal } from "../lib/s
 
 // Bruk nøyaktig typen som SessionCard forventer på `session`-propen
 type SessionForCard = ComponentProps<typeof SessionCard>["session"];
-
-/** ENV toggle: les VITE_USE_LIVE_TRENDS (string/boolean) */
-function readUseLiveTrends(): boolean {
-  const env = (import.meta as unknown as { env: Record<string, unknown> }).env;
-  const v = env?.VITE_USE_LIVE_TRENDS;
-  return v === true || v === "true";
-}
 
 /** DEV fetch-proxy guard (rewrite gamle stier → /api/...) */
 function useDevFetchApiRewrite() {
@@ -344,8 +338,8 @@ export default function SessionView() {
 
   const backendSource = useMemo(() => getBackendSource(), []);
 
-  /** Toggle – styr grafen av VITE_USE_LIVE_TRENDS */
-  const useLiveTrends = useMemo(() => readUseLiveTrends(), []);
+  /** Toggle – styr grafen av VITE_USE_LIVE_TRENDS (delt logikk med fetchJSON.ts) */
+  const useLiveTrends = USE_LIVE_TRENDS;
   const isMockForChart = !useLiveTrends;
   const sourceForChart = useLiveTrends ? "API" : "Mock";
 

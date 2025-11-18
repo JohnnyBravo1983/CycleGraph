@@ -168,20 +168,20 @@ export default function TrendsChart(props: TrendsChartProps) {
 
       const testEnv = isTestEnv();
       const liveActive = isLiveTrendsEnv();
-      const mockActive = isMock || (!testEnv && isMockEnv());
 
-      // I ikke-testmiljø: bruk mock når live ikke er aktiv eller mock er eksplisitt på.
-      if (!testEnv && (mockActive || !liveActive)) {
+      // mock er kun aktiv når live IKKE er aktiv
+      const mockActive = !liveActive && (isMock || (!testEnv && isMockEnv()));
+
+      // I ikke-testmiljø: bruk mock kun når mockActive er true
+      if (!testEnv && mockActive) {
         const now = Date.now();
         const pts: TrendPoint[] = Array.from({ length: 30 }).map((_, i) => {
           const ts = now - (30 - i) * 2 * 24 * 3600 * 1000;
           const hasPower = i % 7 !== 3;
-          const np = hasPower
-            ? Math.round(220 + Math.sin(i / 2) * 20 + (i % 5) * 2)
-            : null;
-          const pw = hasPower
-            ? Math.round(210 + Math.cos(i / 3) * 18 + (i % 3) * 3)
-            : null;
+
+          const np = hasPower ? 200 + i * 3 : null;
+          const pw = hasPower ? 200 + i * 2 : null;
+
           return {
             id: `mock-${i}`,
             timestamp: ts,
@@ -191,6 +191,7 @@ export default function TrendsChart(props: TrendsChartProps) {
             calibrated: i % 4 !== 0,
           };
         });
+
         if (!cancelled) {
           setState({ kind: "loaded", data: pts });
           setHasPivot(false);
