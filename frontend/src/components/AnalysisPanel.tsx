@@ -29,9 +29,14 @@ export interface AnalysisPanelProps {
 
 /** TRINN 6: Les toggle fra Vite-ENV (string/boolean) */
 function readUseLiveTrends(): boolean {
-  const env = (import.meta as unknown as { env: Record<string, unknown> }).env;
-  const v = env?.VITE_USE_LIVE_TRENDS;
-  return v === true || v === "true";
+  // Enkel feature-flag via Vite-env
+  const mode = import.meta.env.VITE_TRENDS_MODE;
+
+  if (mode === "mock") return false;
+  if (mode === "live") return true;
+
+  // 🔁 Default i Sprint 15: bruk LIVE når backend er på
+  return true;
 }
 
 function Badge({ kind }: { kind: "FULL" | "HR-only" | "LIMITED" | string }) {

@@ -281,14 +281,19 @@ function Build-SessionPayload(
 
 # --- 6) Analyze API call ---
 
-function Analyze-Session($Payload) {
+function Analyze-Session($SessionId, $Payload) {
     $json = ($Payload | ConvertTo-Json -Depth 14 -Compress)
     $qs = "?force_recompute=$($ForceRecompute.ToString().ToLower())&debug=$DebugLevel"
-    $uri = "$Base/sessions/local-mini/analyze$qs"
-    "AnalyzeUri = $uri"
-    Invoke-RestMethod -Method POST `
+
+    # Bruk faktisk sessionId fra Strava-runden
+    $uri = "$Base/sessions/$SessionId/analyze$qs"
+
+    Write-Host "[API] POST $uri"
+
+    return Invoke-RestMethod -Method POST `
         -Uri $uri `
-        -ContentType "application/json" -Body $json
+        -ContentType "application/json" `
+        -Body $json
 }
 
 # --- 7) Preflight: verifiser at vi faktisk får latlng og (helst) HR fra Strava ---
@@ -348,7 +353,7 @@ foreach ($id in $Ids) {
             }
         }
 
-        $res = Analyze-Session $payload
+        $res = Analyze-Session $id $payload
 
         # lagre respons for revisjon
         ($res | ConvertTo-Json -Depth 22) | Set-Content (Join-Path $out "result_$id.json") -Encoding utf8

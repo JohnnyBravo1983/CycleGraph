@@ -119,6 +119,78 @@ function buildAnalyzeUrl(base: string, id: string): string {
   return `${base}/api/analyze_session?id=${encodeURIComponent(id)}`;
 }
 
+// CSV header-normalisering for trend/summary.csv
+const TREND_SUMMARY_HEADER =
+  "session_id,date,avg_watt,w_per_beat,cgs,avg_hr,mode,profile_version,pw_quality,calibrated";
+
+export function normalizeSummaryCsv(path: string, raw: string): string {
+  if (!path.includes("summary.csv")) return raw;
+
+  console.log("[API] normalizeSummaryCsv aktiv", {
+    path,
+    sample: raw.slice(0, 80),
+  });
+
+  const trimmed = raw.replace(/\r\n/g, "\n").trim();
+  if (!trimmed) return trimmed;
+
+  // 1) Sørg for header
+  let withHeader: string;
+  if (trimmed.startsWith("session_id,")) {
+    withHeader = trimmed;
+  } else if (/^\d/.test(trimmed[0] ?? "")) {
+    // Første tegn er siffer → mangler header
+    withHeader = TREND_SUMMARY_HEADER + "\n" + trimmed;
+  } else {
+    withHeader = trimmed;
+  }
+
+  // 2) Fyll inn date-kolonnen basert på profile_version
+  const lines = withHeader.split("\n").filter((l) => l.length > 0);
+  if (lines.length <= 1) return withHeader;
+
+  const header = lines[0];
+  const rows = lines.slice(1);
+
+  const fixedRows = rows.map((line) => {
+    const cols = line.split(",");
+
+    // Vi forventer minst 10 kolonner i henhold til header
+    if (cols.length < 10) return line;
+
+    const dateCol = cols[1];
+    const profileVersion = cols[7];
+
+    // Hvis date mangler, prøv å hente YYYYMMDD fra profile_version
+    if ((!dateCol || dateCol === "") && profileVersion) {
+      const parts = profileVersion.split("-");
+      const tail = parts[parts.length - 1]; // f.eks. "20251119"
+
+      if (tail && tail.length === 8 && /^\d+$/.test(tail)) {
+        const yyyy = tail.slice(0, 4);
+        const mm = tail.slice(4, 6);
+        const dd = tail.slice(6, 8);
+        cols[1] = `${yyyy}-${mm}-${dd}`; // f.eks. 2025-11-19
+      }
+    }
+
+    return cols.join(",");
+  });
+
+  return [header, ...fixedRows].join("\n");
+}
+
+export async function fetchCsv(path: string): Promise<string> {
+  const res = await fetch(BASE + path);
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch CSV: ${res.status}`);
+  }
+
+  const raw = await res.text();
+  return normalizeSummaryCsv(path, raw);
+}
+
 /**
  * Hent en session (legacy):
  * - id === "mock" eller BASE mangler → bruk mockSession (kilde: "mock")

@@ -2329,7 +2329,8 @@
                         "grade":  0.6,
                         "moving":  true,
                         "altitude_m":  94.5
-                    },                    {
+                    },
+                    {
                         "v_ms":  8.067,
                         "t":  1091,
                         "grade":  0,

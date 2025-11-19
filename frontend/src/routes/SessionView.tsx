@@ -10,7 +10,6 @@ import ErrorBanner from "../components/ErrorBanner";
 import AnalysisPanel from "../components/AnalysisPanel";
 import { mapAnalyzeToCard } from "../lib/mapAnalyzeToCard";
 import type { Profile, AnalyzeResponse } from "../lib/schema";
-import { USE_LIVE_TRENDS } from "../lib/fetchJSON";
 
 import CalibrationGuide from "../components/CalibrationGuide";
 // Lazy-load grafen (Performance boost)
@@ -18,6 +17,17 @@ const TrendsChart = React.lazy(() => import("../components/TrendsChart"));
 
 // NEW: helpers for HR-only & modal
 import { isHROnly as isHROnlyHelper, shouldShowCalibrationModal } from "../lib/state";
+
+// --- Feature-flag for trend-modus (mock vs live) --------------------------
+const USE_LIVE_TRENDS: boolean = (() => {
+  const mode = import.meta.env.VITE_TRENDS_MODE;
+
+  if (mode === "mock") return false;
+  if (mode === "live") return true;
+
+  // 🔁 Default: LIVE (backend /api/trend/summary.csv er på plass nå)
+  return true;
+})();
 
 // Bruk nøyaktig typen som SessionCard forventer på `session`-propen
 type SessionForCard = ComponentProps<typeof SessionCard>["session"];
@@ -338,7 +348,7 @@ export default function SessionView() {
 
   const backendSource = useMemo(() => getBackendSource(), []);
 
-  /** Toggle – styr grafen av VITE_USE_LIVE_TRENDS (delt logikk med fetchJSON.ts) */
+  /** Toggle – styr grafen med VITE_TRENDS_MODE miljøvariabel */
   const useLiveTrends = USE_LIVE_TRENDS;
   const isMockForChart = !useLiveTrends;
   const sourceForChart = useLiveTrends ? "API" : "Mock";

@@ -16,6 +16,7 @@ import hashlib
 import inspect
 import json
 import sys
+import csv
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Callable, List, Literal
 from pathlib import Path  # NY
@@ -508,31 +509,128 @@ def _normalize_samples(samples: List[Sample]) -> List[dict]:
 # Enkle trend-endepunkter for frontend (Sprint 15)
 # =====================================================================
 
+TREND_CSV_PATH = Path("logs") / "trend_sessions.csv"
+
 @app.get("/api/trend/summary.csv", response_class=PlainTextResponse)
 def trend_summary_csv() -> str:
     """
-    Minimal førsteversjon av trend-summary som CSV.
+    Trend-summary som CSV basert på logs/trend_sessions.csv.
 
-    For nå:
-    - Returnerer kun header-rad.
-    - Frontend vil da tolke dette som "ingen trend-data", men det er
-      ekte API-respons (ikke 404), så vi kan slå av mock.
+    Format:
+      session_id,date,avg_watt,w_per_beat,cgs,avg_hr,mode,profile_version,pw_quality,calibrated
     """
-    header = "session_id,date,avg_watt,w_per_beat\n"
-    return header
+    header = [
+        "session_id",
+        "date",
+        "avg_watt",
+        "w_per_beat",
+        "cgs",
+        "avg_hr",
+        "mode",
+        "profile_version",
+        "pw_quality",
+        "calibrated",
+    ]
+
+    if not TREND_CSV_PATH.is_file():
+        # Ingen trend-data ennå – returner kun header
+        return ",".join(header) + "\n"
+
+    rows: list[list[str]] = []
+    try:
+        with TREND_CSV_PATH.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                rows.append([
+                    r.get("session_id", ""),
+                    r.get("date", ""),
+                    r.get("avg_watt", ""),
+                    r.get("w_per_beat", ""),
+                    r.get("cgs", ""),
+                    r.get("avg_hr", ""),
+                    r.get("mode", ""),
+                    r.get("profile_version", ""),
+                    r.get("pw_quality", ""),
+                    r.get("calibrated", ""),
+                ])
+    except Exception as e:
+        # Fallback: bare gi header
+        print(f"[SVR][TREND] trend_summary_csv failed: {e!r}", flush=True)
+        return ",".join(header) + "\n"
+
+    out_lines = [",".join(header)]
+    out_lines.extend([",".join(str(x) for x in row) for row in rows])
+    return "\n".join(out_lines) + "\n"
 
 
 @app.get("/api/trend/pivot/{metric}.csv", response_class=PlainTextResponse)
 def trend_pivot_csv(metric: str, profile_version: int = Query(0)) -> str:
     """
-    Minimal førsteversjon av pivot-CSV.
+    Enkel pivot-CSV basert på trend_sessions.csv.
 
     For nå:
-    - Returnerer kun header-rad.
-    - Frontend vil sette hasPivot=false når det ikke finnes rader.
+      - metric ∈ {"avg_watt","np","w_per_beat","cgs"}
+      - bin = dato (YYYY-MM-DD)
+      - value = gjennomsnitt for den metrikken den dagen (ev. filtrert på profile_version)
     """
-    header = "metric,bin,value\n"
-    return header
+    allowed = {"avg_watt", "np", "w_per_beat", "cgs"}
+    header = ["metric", "bin", "value"]
+
+    if metric not in allowed:
+        # Ukjent metric → tom struktur med header
+        return ",".join(header) + "\n"
+
+    if not TREND_CSV_PATH.is_file():
+        return ",".join(header) + "\n"
+
+    # Les data
+    import math
+    bins: dict[str, list[float]] = {}
+
+    try:
+        with TREND_CSV_PATH.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                if profile_version:
+                    pv = (r.get("profile_version") or "").strip()
+                    # profile_version i CSV er string; her kan du evt. bruke exakte likhetssjekk
+                    if not pv:
+                        continue
+                    # Enkel filtrering: vi antar at profile_version i query er et heltall 0/1/2...,
+                    # mens CSV har "v1-xxxx". Du kan tilpasse dette senere.
+                    # For nå: hvis profile_version != 0, filtrer ikke (eller legg inn egen regel).
+                # Hent date
+                date_str = (r.get("date") or "").strip()
+                if not date_str:
+                    continue
+
+                val_raw = r.get(metric) or ""
+                try:
+                    val = float(val_raw)
+                except Exception:
+                    continue
+
+                if math.isnan(val):
+                    continue
+
+                bins.setdefault(date_str, []).append(val)
+    except Exception as e:
+        print(f"[SVR][TREND] trend_pivot_csv failed: {e!r}", flush=True)
+        return ",".join(header) + "\n"
+
+    out_lines = [",".join(header)]
+    for b in sorted(bins.keys()):
+        vals = bins[b]
+        if not vals:
+            continue
+        avg_val = sum(vals) / len(vals)
+        out_lines.append(",".join([
+            metric,
+            b,
+            f"{avg_val:.3f}",
+        ]))
+
+    return "\n".join(out_lines) + "\n"
 
 # =====================================================================
 # SPA routes – serve Vite index.html på root og alle ikke-API paths

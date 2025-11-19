@@ -13,7 +13,7 @@ import csv
 import datetime
 import re
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional, List, Mapping
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
@@ -27,8 +27,7 @@ try:
 except Exception:
     def compute_estimated_error_and_hint(profile, weather):
         return [15.0, 17.0], "unknown", 0
-    def append_benchmark_candidate(**kwargs):
-        return False
+ 
 
 # Primær import med trygg fallback (brukes i standardstien)
 try:
@@ -234,6 +233,179 @@ def _write_observability(resp: dict) -> None:
         print(f"[SVR][OBS] wrote {csv_path} + {jpath}", flush=True)
     except Exception as e_csv:
         print(f"[SVR][OBS] CSV-write failed: {e_csv!r}", flush=True)
+
+# --- PATCH D: Trend metric filling -----------------------------
+def _append_trend_row(session_id: str, metrics: dict, samples: list, profile_version: str):
+    """
+    Skriv én rad til logs/trend_sessions.csv i et enkelt format
+    som matcher det frontend forventer for MVP.
+
+    Kolonner:
+    session_id,date,avg_watt,w_per_beat,cgs,avg_hr,mode,profile_version,pw_quality,calibrated
+    """
+
+    import csv
+    import datetime
+
+    log_path = Path("logs/trend_sessions.csv")
+    log_path.parent.mkdir(exist_ok=True)
+
+    # --- 1) avg_watt: ta noe fornuftig fra metrics ---
+    avg_watt = None
+    for key in ("total_watt", "precision_watt", "avg_watt"):
+        val = metrics.get(key)
+        if isinstance(val, (int, float)):
+            avg_watt = float(val)
+            break
+
+    # --- 2) avg_hr: bruk metrics hvis tilgjengelig ---
+    avg_hr = None
+    hr_val = metrics.get("avg_hr")
+    if isinstance(hr_val, (int, float)):
+        avg_hr = float(hr_val)
+
+    # --- 3) w_per_beat ---
+    w_per_beat = None
+    if avg_watt is not None and avg_hr is not None and avg_hr > 0:
+        w_per_beat = avg_watt / avg_hr
+
+    # --- 4) Placeholder-felt vi ikke har ennå ---
+    cgs = None          # kan fylles senere hvis du vil
+    mode = "default"    # evt. "profile" el.l. senere
+
+    # --- 5) pw_quality + calibrated ---
+    pw_quality = metrics.get("precision_quality_hint", "unknown")
+    calibrated = bool(metrics.get("calibrated", False))
+
+    # --- 6) Dato (YYYY-MM-DD) ---
+    # Prøv i denne rekkefølgen:
+    #  - metrics["timestamp"] (ISO)
+    #  - første samples[0]["t_abs"] (epoch-sekunder)
+    #  - ellers dagens dato (UTC)
+    session_date = None
+
+    ts = metrics.get("timestamp") or metrics.get("session_ts")
+    if isinstance(ts, str) and len(ts) >= 10:
+        # ISO-string, klipp til dato
+        session_date = ts[:10]
+
+    if not session_date:
+        try:
+            if samples and isinstance(samples[0], dict) and "t_abs" in samples[0]:
+                t_abs = samples[0]["t_abs"]
+                session_date = datetime.datetime.utcfromtimestamp(
+                    float(t_abs)
+                ).strftime("%Y-%m-%d")
+        except Exception:
+            session_date = None
+
+    if not session_date:
+        session_date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+    # --- 7) CSV-skriving ---
+    header = [
+        "session_id",
+        "date",
+        "avg_watt",
+        "w_per_beat",
+        "cgs",
+        "avg_hr",
+        "mode",
+        "profile_version",
+        "pw_quality",
+        "calibrated",
+    ]
+
+    write_header = not log_path.exists()
+
+    try:
+        with log_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(header)
+
+            writer.writerow([
+                session_id,
+                session_date,
+                avg_watt if avg_watt is not None else "",
+                w_per_beat if w_per_beat is not None else "",
+                cgs if cgs is not None else "",
+                avg_hr if avg_hr is not None else "",
+                mode,
+                profile_version,
+                pw_quality,
+                int(calibrated),
+            ])
+    except Exception as e:
+        print("[SVR][TREND] Failed to write trend row:", repr(e), flush=True)
+
+# --- Trinn A: Kalibreringsflagg for MVP (uten powermeter) ---
+def _derive_calibration_flags(
+    *,
+    calibration_mae: Optional[float],
+    estimated_error_pct_range: Optional[List[Optional[float]]],
+    profile_completeness: int,
+    has_device_data: bool,
+    hint: str,
+) -> Tuple[bool, str, str]:
+    """
+    Deriverer (calibrated, precision_quality_hint, calibration_status) ut fra
+    profilkvalitet + modellens egen feil-estimat.
+
+    NB: Dette er MVP-logikk uten powermeter. Senere kan vi utvide med ekte device-MAE.
+    """
+    # Default
+    calibrated = False
+    quality = "unknown"
+    status = "not_available"
+
+    comp = int(profile_completeness or 0)
+    rng = estimated_error_pct_range or [None, None]
+    lo, hi = None, None
+    try:
+        lo = float(rng[0]) if len(rng) > 0 and rng[0] is not None else None
+        hi = float(rng[1]) if len(rng) > 1 and rng[1] is not None else None
+    except Exception:
+        lo, hi = None, None
+
+    span = None
+    if lo is not None and hi is not None:
+        span = abs(hi - lo)
+
+    # Grov status på grunnlag av hint
+    if hint in ("weird", "too_short", "unstable"):
+        status = "unstable"
+    elif hint in ("normal", "ok", ""):
+        status = "ok"
+    else:
+        status = str(hint or "not_available")
+
+    # Kvalitetsnivå basert på profil + span
+    if span is None:
+        # Ingen estimert range
+        if comp >= 80:
+            quality = "ok"
+        elif comp >= 40:
+            quality = "poor"
+        else:
+            quality = "unknown"
+    else:
+        if comp >= 80 and span <= 15.0:
+            quality = "good"
+        elif comp >= 60 and span <= 25.0:
+            quality = "ok"
+        elif comp >= 40:
+            quality = "poor"
+        else:
+            quality = "unknown"
+
+    # "Calibrated" i MVP = god profil + ikke helt krise-range + ikke åpenbar "weird" hint
+    if comp >= 80 and (span is None or span <= 25.0) and status != "unstable":
+        calibrated = True
+    else:
+        calibrated = False
+
+    return calibrated, quality, status
 
 # --- Vær-hjelpere ---
 def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[float], Optional[float], Optional[int]]:
@@ -461,7 +633,7 @@ def _scrub_profile(profile_in: Dict[str, Any]) -> Dict[str, Any]:
             p["crr"] = p["Crr"]
         p.pop("Crr", None)
     if "weightKg" in p:
-        if "weight_kg" not in p or p.get("weight_kg") is None:
+        if "weight_kg" not in p or p.get("weight_kg") is not None:
             p["weight_kg"] = p["weightKg"]
         p.pop("weightKg", None)
 
@@ -925,9 +1097,21 @@ async def analyze_session(
                     wx_used = (metrics.get("weather_used") or resp.get("weather_used") or {})
                     est_range, hint, completeness = compute_estimated_error_and_hint(profile_used or {}, wx_used or {})
 
-                    # speil inn i metrics (ikke gate)
+                    # --- PATCH A: Kalibreringsflagg for MVP (uten powermeter) ---
+                    has_device = _body_has_device_watts(samples)
+                    calibrated, quality_hint, calib_status = _derive_calibration_flags(
+                        calibration_mae=metrics.get("calibration_mae"),
+                        estimated_error_pct_range=est_range if isinstance(est_range, list) else None,
+                        profile_completeness=completeness,
+                        has_device_data=has_device,
+                        hint=str(hint or ""),
+                    )
+
+                    # Oppdater metrics med de nye kalibreringsfeltene
                     metrics["estimated_error_pct_range"] = est_range
-                    metrics["precision_quality_hint"] = hint
+                    metrics["precision_quality_hint"] = quality_hint
+                    metrics["calibrated"] = calibrated
+                    metrics["calibration_status"] = calib_status
 
                     # benchmark-kandidat (append-only)
                     try:
@@ -958,6 +1142,13 @@ async def analyze_session(
 
                 resp["metrics"] = metrics
                 resp["weather_applied"] = weather_applied
+
+                # --- PATCH D: Trend logging ---
+                try:
+                    _append_trend_row(sid, metrics, samples, profile_version)
+                except Exception as e_tr:
+                    print(f"[SVR][TREND] trend logging failed: {e_tr!r}", flush=True)
+
             except Exception:
                 pass
         else:
@@ -1051,9 +1242,21 @@ async def analyze_session(
                     wx_used = (metrics.get("weather_used") or resp.get("weather_used") or {})
                     est_range, hint, completeness = compute_estimated_error_and_hint(profile_used or {}, wx_used or {})
 
-                    # speil inn i metrics (ikke gate)
+                    # --- PATCH A: Kalibreringsflagg for MVP (uten powermeter) ---
+                    has_device = _body_has_device_watts(samples)
+                    calibrated, quality_hint, calib_status = _derive_calibration_flags(
+                        calibration_mae=metrics.get("calibration_mae"),
+                        estimated_error_pct_range=est_range if isinstance(est_range, list) else None,
+                        profile_completeness=completeness,
+                        has_device_data=has_device,
+                        hint=str(hint or ""),
+                    )
+
+                    # Oppdater metrics med de nye kalibreringsfeltene
                     metrics["estimated_error_pct_range"] = est_range
-                    metrics["precision_quality_hint"] = hint
+                    metrics["precision_quality_hint"] = quality_hint
+                    metrics["calibrated"] = calibrated
+                    metrics["calibration_status"] = calib_status
 
                     # benchmark-kandidat (append-only)
                     try:
@@ -1084,6 +1287,13 @@ async def analyze_session(
 
                 resp["metrics"] = metrics
                 resp["weather_applied"] = weather_applied
+
+                # --- PATCH D: Trend logging ---
+                try:
+                    _append_trend_row(sid, metrics, samples, profile_version)
+                except Exception as e_tr:
+                    print(f"[SVR][TREND] trend logging failed: {e_tr!r}", flush=True)
+
             except Exception as e:
                 print(f"[SVR] [RUST] json.loads failed (no-fallback): {e!r}", file=sys.stderr, flush=True)
                 err_resp = {
@@ -1247,9 +1457,24 @@ async def analyze_session(
     # --- Trinn 15: Heuristisk presisjonsindikator for fallback ---
     try:
         est_range, hint, completeness = compute_estimated_error_and_hint(profile_used, wx_used or {})
+        
+        # --- PATCH A: Kalibreringsflagg for MVP (uten powermeter) ---
+        has_device = _body_has_device_watts(samples)
+        calibrated, quality_hint, calib_status = _derive_calibration_flags(
+            calibration_mae=None,  # fallback har ingen device data
+            estimated_error_pct_range=est_range if isinstance(est_range, list) else None,
+            profile_completeness=completeness,
+            has_device_data=has_device,
+            hint=str(hint or ""),
+        )
+
+        # Oppdater fallback_metrics med de nye kalibreringsfeltene
         fallback_metrics["estimated_error_pct_range"] = est_range
-        fallback_metrics["precision_quality_hint"] = hint
-        print(f"[SVR][T15] (fallback) → est_range={est_range} hint={hint}")
+        fallback_metrics["precision_quality_hint"] = quality_hint
+        fallback_metrics["calibrated"] = calibrated
+        fallback_metrics["calibration_status"] = calib_status
+        
+        print(f"[SVR][T15] (fallback) → est_range={est_range} hint={hint} calibrated={calibrated} status={calib_status}")
     except Exception as e:
         print(f"[SVR][T15] (fallback) compute_estimated_error_and_hint failed: {e}")
 
@@ -1299,6 +1524,12 @@ async def analyze_session(
     # sørg for identisk speiling
     mm["profile_used"] = dict(mu_top)
     # --- END TRINN 10 ---
+    
+    # --- PATCH D: Trend logging for fallback ---
+    try:
+        _append_trend_row(sid, fallback_metrics, samples, profile_version)
+    except Exception as e_tr:
+        print(f"[SVR][TREND] trend logging failed (fallback): {e_tr!r}", flush=True)
     
     try:
         _write_observability(resp)
