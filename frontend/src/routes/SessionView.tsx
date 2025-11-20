@@ -32,6 +32,29 @@ const USE_LIVE_TRENDS: boolean = (() => {
 // Bruk nøyaktig typen som SessionCard forventer på `session`-propen
 type SessionForCard = ComponentProps<typeof SessionCard>["session"];
 
+// Hjelpetyper for session_id sjekk
+interface AnalyzeResultWithSessionId extends AnalyzeResponse {
+  session_id?: string;
+}
+
+interface SessionWithSessionId extends SessionReport {
+  session_id?: string;
+}
+
+/** Status-badge komponent */
+function SessionStatusBadge(props: { source: "live" | "mock"; sessionId: string | null }) {
+  const { source, sessionId } = props;
+  const label = source === "live" ? "Live backend" : "Mock-data";
+
+  return (
+    <div className="mb-4 text-xs text-gray-500">
+      Datakilde: <span className="font-medium">{label}</span>
+      {" · "}
+      SessionId: <span className="font-mono">{sessionId ?? "–"}</span>
+    </div>
+  );
+}
+
 /** DEV fetch-proxy guard (rewrite gamle stier → /api/...) */
 function useDevFetchApiRewrite() {
   useEffect(() => {
@@ -388,6 +411,21 @@ export default function SessionView() {
     [effectiveSession, id]
   );
 
+  // Status badge variabler
+  const source: "live" | "mock" = backendSource === "api" ? "live" : "mock";
+  const sessionIdForStatus = useMemo(() => {
+    // Prøv analyzeResult først
+    if ((analyzeResult as AnalyzeResultWithSessionId)?.session_id) {
+      return (analyzeResult as AnalyzeResultWithSessionId).session_id ?? null;
+    }
+    // Deretter session
+    if ((session as SessionWithSessionId)?.session_id) {
+      return (session as SessionWithSessionId).session_id ?? null;
+    }
+    // Til slutt bruk sessionId fra URL/params
+    return sessionId || null;
+  }, [analyzeResult, session, sessionId]);
+
   const derivedProfile = useMemo<Profile | null>(() => {
     if (!analyzeResult) return null;
     try {
@@ -661,6 +699,7 @@ export default function SessionView() {
           {/* Trender — lazy-loadet for performance */}
           <div className="card">
             <div className="k">Trender</div>
+            <SessionStatusBadge source={source} sessionId={sessionIdForStatus} />
             <div className="mt-2">
               <React.Suspense
                 fallback={

@@ -13,21 +13,30 @@ import {
 import { fetchJSON } from "./fetchJSON";
 
 // Les Vite-ENV trygt uten å være bundet til ImportMetaEnv-typen
-function readViteEnv(): Record<string, string | undefined> {
+type ViteEnv = Record<string, string | undefined>;
+
+function readViteEnv(): ViteEnv {
   return (
     (typeof import.meta !== "undefined"
-      ? (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ? (import.meta as unknown as { env?: ViteEnv }).env
       : undefined) ?? {}
   );
 }
+
+const viteEnv = readViteEnv();
+
+// Forventer at VITE_BACKEND_URL ≈ "http://127.0.0.1:5175"
+// Vi legger selv på /api i BACKEND_BASE (brukes bl.a. for CSV).
+const BACKEND_BASE =
+  (viteEnv.VITE_BACKEND_URL || "http://127.0.0.1:5175") + "/api";
+
+// Legacy analyze_session bruker BASE uten /api og legger det selv på i URL-byggeren
+const BASE = viteEnv.VITE_BACKEND_URL || "http://127.0.0.1:5175";
 
 /** Result-typer beholdt som hos deg */
 type Ok = { ok: true; data: SessionReport; source: "mock" | "live" };
 type Err = { ok: false; error: string; source?: "mock" | "live" };
 export type FetchSessionResult = Ok | Err;
-
-// Hent Vite-variabler (.env.local). Hvis BASE mangler → vi faller til mock-kilde.
-const BASE = readViteEnv().VITE_BACKEND_URL;
 
 /** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
@@ -177,18 +186,29 @@ export function normalizeSummaryCsv(path: string, raw: string): string {
     return cols.join(",");
   });
 
+  console.log("[API] normalizeSummaryCsv ferdig", {
+    firstRow: fixedRows[0],
+  });
+
   return [header, ...fixedRows].join("\n");
 }
 
 export async function fetchCsv(path: string): Promise<string> {
-  const res = await fetch(BASE + path);
+  // Sørg for at path alltid starter med "/"
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${BACKEND_BASE}${normalizedPath}`;
+
+  console.log("[API] fetchCsv →", url);
+
+  const res = await fetch(url);
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch CSV: ${res.status}`);
+    throw new Error(`Failed to fetch CSV: ${res.status} ${res.statusText}`);
   }
 
   const raw = await res.text();
-  return normalizeSummaryCsv(path, raw);
+  // Her sender vi *full URL* inn til normalizeSummaryCsv, så loggen matcher faktisk requesten
+  return normalizeSummaryCsv(url, raw);
 }
 
 /**
@@ -409,7 +429,9 @@ export async function getTrendPivot(
   const qs = new URLSearchParams({
     profile_version: String(profileVersion),
   }).toString();
-  const url = `${API_ROOT}/trend/pivot/${encodeURIComponent(metric)}.csv?${qs}`;
+  const url = `${API_ROOT}/trend/pivot/${encodeURIComponent(
+    metric
+  )}.csv?${qs}`;
 
   const raw = await fetchJSON<string | unknown>(url, {
     method: "GET",
@@ -433,12 +455,13 @@ export async function getSessionsList(
 ): Promise<SessionInfo[]> {
   const url = `${API_ROOT}/sessions/list`;
 
-  const res = await fetchJSON<
-    SessionInfo[] | { value?: unknown } | unknown
-  >(url, {
-    method: "GET",
-    signal: opts?.signal,
-  });
+  const res = await fetchJSON<SessionInfo[] | { value?: unknown } | unknown>(
+    url,
+    {
+      method: "GET",
+      signal: opts?.signal,
+    }
+  );
 
   // Case 1: backend sender ren liste
   if (Array.isArray(res)) {
@@ -463,8 +486,7 @@ export async function getSessionsList(
       const ride_id =
         typeof obj.ride_id === "string" ? obj.ride_id : null;
 
-      const label =
-        typeof obj.label === "string" ? obj.label : null;
+      const label = typeof obj.label === "string" ? obj.label : null;
 
       const started_at =
         typeof obj.started_at === "string" ? obj.started_at : null;

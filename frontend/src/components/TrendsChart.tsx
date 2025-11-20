@@ -1,12 +1,18 @@
-import React, {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useCallback,
-} from "react";
-import { getTrendSummary, getTrendPivot } from "../lib/api";
-import { mapSummaryCsvToSeries } from "../lib/series";
+import React, { useEffect, useMemo, useState } from "react";
+import { fetchCsv } from "../lib/api";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  BarChart,
+  Bar,
+} from "recharts";
+
+const DEBUG_LOG = import.meta.env.MODE === "development";
+const SHOW_DEBUG_PANEL = false; // sett til true når du vil se JSON-dumpen igjen
 
 export interface TrendsChartProps {
   sessionId: string;
@@ -17,31 +23,6 @@ export interface TrendsChartProps {
   source?: "API" | "Mock" | string;
 }
 
-type TrendPoint = {
-  id: string;
-  timestamp: number; // ms epoch
-  np?: number | null;
-  pw?: number | null;
-  source?: "API" | "Mock" | string;
-  calibrated?: boolean;
-};
-
-type FetchState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "loaded"; data: TrendPoint[] }
-  | { kind: "error"; message: string };
-
-const W = 820;
-const H = 320;
-
-const PLOT_X = 50;
-const PLOT_Y = 16;
-const PLOT_W = 752;
-const PLOT_H = 276;
-const PLOT_RIGHT = PLOT_X + PLOT_W;
-const PLOT_BOTTOM = PLOT_Y + PLOT_H;
-
 function getRuntimeMode(): string {
   let viteMode: string | undefined;
   try {
@@ -51,13 +32,13 @@ function getRuntimeMode(): string {
           .env?.MODE) ||
       undefined;
   } catch {
-    // Ikke-kritisk: env kan mangle i test/build-miljø
     void 0;
   }
   const nodeMode =
     typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
   return (viteMode || nodeMode || "production").toLowerCase();
 }
+
 function isTestEnv(): boolean {
   if (getRuntimeMode() === "test") return true;
   if (typeof globalThis !== "undefined") {
@@ -67,6 +48,7 @@ function isTestEnv(): boolean {
   }
   return false;
 }
+
 function isMockEnv(): boolean {
   try {
     const env = (import.meta as unknown as { env?: Record<string, string | undefined> })
@@ -76,6 +58,7 @@ function isMockEnv(): boolean {
     return false;
   }
 }
+
 function isLiveTrendsEnv(): boolean {
   try {
     const env = (import.meta as unknown as { env?: Record<string, string | undefined> })
@@ -86,694 +69,423 @@ function isLiveTrendsEnv(): boolean {
   }
 }
 
-function niceNum(n: number) {
-  return Number.isFinite(n) ? Math.round(n) : n;
-}
-function formatDate(ts: number) {
-  const d = new Date(ts);
-  return d.toLocaleString(undefined, {
-    year: "2-digit",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-function linePath(xs: number[], ys: number[]) {
-  let d = "";
-  for (let i = 0; i < xs.length; i++)
-    d += `${i === 0 ? "M" : "L"}${xs[i]},${ys[i]}`;
-  return d;
-}
-function binarySearchClosestIndex(xs: number[], x: number): number {
-  let lo = 0,
-    hi = xs.length - 1;
-  if (xs.length === 0) return -1;
-  if (x <= xs[0]) return 0;
-  if (x >= xs[hi]) return hi;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const v = xs[mid];
-    if (v === x) return mid;
-    if (v < x) lo = mid + 1;
-    else hi = mid - 1;
-  }
-  const i1 = Math.max(0, lo - 1);
-  const i2 = Math.min(xs.length - 1, lo);
-  return Math.abs(xs[i1] - x) <= Math.abs(xs[i2] - x) ? i1 : i2;
-}
-
-// --- Performance helpers: mobil-nedprøving ---
-const isMobileViewport = () => {
-  if (typeof window === "undefined") return false;
-  if (typeof window.matchMedia !== "function") return false;
-  return window.matchMedia("(max-width: 768px)").matches;
+type DebugTrendPoint = {
+  sessionId: string;
+  date: string;
+  avgWatt: number | null;
+  avgHr: number | null;
+  mode: string | null;
 };
 
-function sampleEveryN<T>(arr: T[], n: number): T[] {
-  if (!Array.isArray(arr) || n <= 1) return arr;
-  const out: T[] = [];
-  for (let i = 0; i < arr.length; i += n) out.push(arr[i]);
-  return out;
-}
+type PivotDebugPoint = {
+  metric: string;
+  bin: string;
+  value: number;
+};
 
 export default function TrendsChart(props: TrendsChartProps) {
   const { sessionId, isMock } = props;
 
-  // 1) Hooks
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
-  const [state, setState] = useState<FetchState>({ kind: "idle" });
-  const [hasPivot, setHasPivot] = useState<boolean>(false);
+  const [rechartsFallbackData, setRechartsFallbackData] = useState<
+    { date: string; avgWatt: number }[]
+  >([]);
 
-  // 2) Utledninger
+  const [debugPoints, setDebugPoints] = useState<DebugTrendPoint[]>([]);
+  const [pivotPoints, setPivotPoints] = useState<PivotDebugPoint[]>([]);
+
   const autoHrOnly = useMemo(() => {
     const hrLen = props.series?.hr?.length ?? 0;
     const wLen = props.series?.watts?.length ?? 0;
     return hrLen > 0 && wLen === 0;
   }, [props.series?.hr?.length, props.series?.watts?.length]);
+
   const computedHrOnly = props.hrOnly ?? autoHrOnly ?? false;
 
-  // 3) Datafetch – nå via getTrendSummary() / getTrendPivot()
   useEffect(() => {
     let cancelled = false;
 
-    async function run() {
+    async function load() {
+      // Hvis vi bare har puls-serie → ingen watt-trender å vise
       if (computedHrOnly) {
-        setState((p) => (p.kind === "loaded" ? p : { kind: "idle" }));
-        setHasPivot(false);
+        setDebugPoints([]);
+        setPivotPoints([]);
+        setRechartsFallbackData([]);
         return;
       }
 
       const testEnv = isTestEnv();
       const liveActive = isLiveTrendsEnv();
-
-      // mock er kun aktiv når live IKKE er aktiv
       const mockActive = !liveActive && (isMock || (!testEnv && isMockEnv()));
 
-      // I ikke-testmiljø: bruk mock kun når mockActive er true
+      // MOCK-mode: generer fake trend-punkter uten å kalle backend
       if (!testEnv && mockActive) {
         const now = Date.now();
-        const pts: TrendPoint[] = Array.from({ length: 30 }).map((_, i) => {
-          const ts = now - (30 - i) * 2 * 24 * 3600 * 1000;
-          const hasPower = i % 7 !== 3;
-
-          const np = hasPower ? 200 + i * 3 : null;
-          const pw = hasPower ? 200 + i * 2 : null;
-
-          return {
-            id: `mock-${i}`,
-            timestamp: ts,
-            np,
-            pw,
-            source: "Mock",
-            calibrated: i % 4 !== 0,
-          };
-        });
+        const pts: DebugTrendPoint[] = Array.from({ length: 30 }).map(
+          (_, i) => {
+            const date = new Date(
+              now - (30 - i) * 2 * 24 * 3600 * 1000,
+            )
+              .toISOString()
+              .split("T")[0];
+            const avgWatt = 200 + i * 3;
+            const avgHr = 150 + i;
+            return {
+              sessionId: `mock-${i}`,
+              date,
+              avgWatt,
+              avgHr,
+              mode: "cycling",
+            };
+          },
+        );
 
         if (!cancelled) {
-          setState({ kind: "loaded", data: pts });
-          setHasPivot(false);
+          setDebugPoints(pts);
+          setPivotPoints([]);
+          setRechartsFallbackData(
+            pts.map((p) => ({
+              date: p.date,
+              avgWatt: p.avgWatt ?? 0,
+            })),
+          );
         }
         return;
       }
 
-      // Test og "ekte" live: bruk backend-trendendepunkter via api.ts
-      setState({ kind: "loading" });
-      setHasPivot(false);
-
       try {
-        const summary = await getTrendSummary();
+        if (DEBUG_LOG) {
+          console.log("[TRENDS] henter summary + pivot fra backend (live)");
+        }
 
-        if (!summary || !summary.rows || summary.rows.length <= 1) {
-          if (!cancelled) {
-            setState({ kind: "loaded", data: [] });
-            setHasPivot(false);
+        // 1) Hent summary + pivot parallelt
+        const [summaryRaw, pivotRaw] = await Promise.all([
+          fetchCsv("/trend/summary.csv"),
+          fetchCsv("/trend/pivot/avg_watt.csv?profile_version=0").catch(
+            (err) => {
+              if (DEBUG_LOG) {
+                console.warn(
+                  "[TRENDS] klarte ikke å hente pivot CSV",
+                  err,
+                );
+              }
+              return "";
+            },
+          ),
+        ]);
+
+        if (cancelled) return;
+
+        // --- SUMMARY (som før, men mer robust) ---
+        const summaryNorm = summaryRaw.replace(/\r\n/g, "\n").trim();
+        if (DEBUG_LOG) {
+          console.log(
+            "[TRENDS] raw summary length",
+            summaryNorm.length,
+          );
+        }
+
+        const summaryLines = summaryNorm
+          .split("\n")
+          .filter((l) => l.trim().length > 0);
+
+        if (!summaryLines.length) {
+          if (DEBUG_LOG) {
+            console.log("[TRENDS] summary.csv er tom");
           }
+          setDebugPoints([]);
+          setRechartsFallbackData([]);
+        } else {
+          const [headerLine, ...dataLines] = summaryLines;
+          if (DEBUG_LOG) {
+            console.log("[TRENDS] summary header =", headerLine);
+            console.log(
+              "[TRENDS] summary data rows =",
+              dataLines.length,
+            );
+            if (dataLines[0]) {
+              console.log(
+                "[TRENDS] first data row =",
+                dataLines[0],
+              );
+            }
+          }
+
+          const headerCols = headerLine.split(",");
+          const idxSession = headerCols.indexOf("session_id");
+          const idxDate = headerCols.indexOf("date");
+          const idxAvgWatt = headerCols.indexOf("avg_watt");
+          const idxAvgHr = headerCols.indexOf("avg_hr");
+          const idxMode = headerCols.indexOf("mode");
+
+          const parsedSummary: DebugTrendPoint[] = dataLines
+            .map((line) => line.split(","))
+            .map((cols) => {
+              const sessionId =
+                idxSession >= 0 ? cols[idxSession] : cols[0];
+              const date =
+                idxDate >= 0 ? cols[idxDate] : "";
+              const avgWattStr =
+                idxAvgWatt >= 0 ? cols[idxAvgWatt] : "";
+              const avgHrStr =
+                idxAvgHr >= 0 ? cols[idxAvgHr] : "";
+              const mode =
+                idxMode >= 0 ? cols[idxMode] || null : null;
+
+              const avgWatt =
+                avgWattStr &&
+                Number.isFinite(parseFloat(avgWattStr))
+                  ? parseFloat(avgWattStr)
+                  : null;
+              const avgHr =
+                avgHrStr &&
+                Number.isFinite(parseFloat(avgHrStr))
+                  ? parseFloat(avgHrStr)
+                  : null;
+
+              return { sessionId, date, avgWatt, avgHr, mode };
+            })
+            .filter((p) => p.date && p.avgWatt != null);
+
+          if (DEBUG_LOG) {
+            console.log(
+              "[TRENDS] debugPoints count =",
+              parsedSummary.length,
+            );
+            if (parsedSummary.length > 0) {
+              console.log(
+                "[TRENDS] first debugPoint =",
+                parsedSummary[0],
+              );
+            }
+          }
+
+          setDebugPoints(parsedSummary);
+
+          const rechartsData = parsedSummary.map((p) => ({
+            date: p.date,
+            avgWatt: p.avgWatt as number,
+          }));
+          setRechartsFallbackData(rechartsData);
+        }
+
+        // --- PIVOT (NY) ---
+        const pivotTrimmed = pivotRaw.replace(/\r\n/g, "\n").trim();
+        if (!pivotTrimmed) {
+          if (DEBUG_LOG) {
+            console.log(
+              "[TRENDS] pivot CSV tom / ikke tilgjengelig",
+            );
+          }
+          setPivotPoints([]);
           return;
         }
 
-        // Bygg NP og PW fra summary.csv
-        const avgSeries = mapSummaryCsvToSeries(summary.rows, "avg_watt");
-        const wPerBeatSeries = mapSummaryCsvToSeries(
-          summary.rows,
-          "w_per_beat"
-        );
-
-        const rows: TrendPoint[] = avgSeries.map((p, idx) => {
-          const twin = wPerBeatSeries[idx];
-          const ts =
-            p.x instanceof Date
-              ? p.x.getTime()
-              : new Date(String(p.x)).getTime();
-
-          return {
-            id: `trend-${idx}`,
-            timestamp: ts,
-            np: typeof p.y === "number" ? p.y : null,
-            pw:
-              twin && typeof twin.y === "number"
-                ? twin.y
-                : null,
-            source: "API",
-            calibrated: true,
-          };
-        });
-
-        if (!cancelled) {
-          setState({ kind: "loaded", data: rows });
+        const pivotLines = pivotTrimmed
+          .split("\n")
+          .filter((l) => l.trim().length > 0);
+        if (pivotLines.length <= 1) {
+          if (DEBUG_LOG) {
+            console.log(
+              "[TRENDS] pivot har bare header, ingen data",
+            );
+          }
+          setPivotPoints([]);
+          return;
         }
 
-        // TODO S16: koble på faktisk profile_version her i stedet for 0
-        const pivot = await getTrendPivot("avg_watt", 0);
-        if (!cancelled) {
-          if (pivot && pivot.rows && pivot.rows.length > 1) {
-            setHasPivot(true);
-          } else {
-            setHasPivot(false);
+        const [pivotHeaderLine, ...pivotDataLines] = pivotLines;
+        if (DEBUG_LOG) {
+          console.log("[TRENDS] pivot header =", pivotHeaderLine);
+        }
+
+        const pivotHeaderCols = pivotHeaderLine.split(",");
+        const idxMetric = pivotHeaderCols.indexOf("metric");
+        const idxBin = pivotHeaderCols.indexOf("bin");
+        const idxValue = pivotHeaderCols.indexOf("value");
+
+        const parsedPivot: PivotDebugPoint[] = pivotDataLines
+          .map((line) => line.split(","))
+          .map((cols) => {
+            const metric =
+              idxMetric >= 0 ? cols[idxMetric] : cols[0];
+            const bin =
+              idxBin >= 0 ? cols[idxBin] : cols[1] ?? "";
+            const valueStr =
+              idxValue >= 0 ? cols[idxValue] : cols[2] ?? "";
+            const value = parseFloat(valueStr);
+            return { metric, bin, value };
+          })
+          .filter((p) => p.bin && Number.isFinite(p.value));
+
+        if (DEBUG_LOG) {
+          console.log(
+            "[TRENDS] pivotPoints count =",
+            parsedPivot.length,
+          );
+          if (parsedPivot.length > 0) {
+            console.log(
+              "[TRENDS] first pivotPoint =",
+              parsedPivot[0],
+            );
           }
         }
-      } catch (e) {
+
+        setPivotPoints(parsedPivot);
+      } catch (err) {
+        if (DEBUG_LOG) {
+          console.error(
+            "[TRENDS] klarte ikke å laste trend-data",
+            err,
+          );
+        }
         if (!cancelled) {
-          const msg = e instanceof Error ? e.message : String(e);
-          setState({
-            kind: "error",
-            message: /abort/i.test(msg)
-              ? "Tidsavbrudd ved henting av trenddata."
-              : msg,
-          });
-          setHasPivot(false);
+          setDebugPoints([]);
+          setPivotPoints([]);
+          setRechartsFallbackData([]);
         }
       }
     }
 
-    void run();
+    void load();
 
     return () => {
       cancelled = true;
     };
   }, [isMock, computedHrOnly, sessionId]);
 
-  // 4) Avledet data + mobil-nedprøving og memo
-  const data: TrendPoint[] = useMemo(
-    () => (state.kind === "loaded" ? state.data : []),
-    [state]
-  );
-
-  const sortedData: TrendPoint[] = useMemo(() => {
-    if (data.length === 0) return [];
-    const copy = data.slice();
-    copy.sort((a, b) => a.timestamp - b.timestamp);
-    return copy;
-  }, [data]);
-
-  const downsampled: TrendPoint[] = useMemo(() => {
-    if (!isMobileViewport()) return sortedData;
-    return sampleEveryN(sortedData, 6);
-  }, [sortedData]);
-
-  const xDomain = useMemo(() => {
-    if (downsampled.length === 0) return [0, 1] as const;
-    return [
-      downsampled[0].timestamp,
-      downsampled[downsampled.length - 1].timestamp,
-    ] as const;
-  }, [downsampled]);
-
-  const yDomain = useMemo(() => {
-    let lo = Infinity,
-      hi = -Infinity;
-    for (const d of downsampled) {
-      if (typeof d.np === "number") {
-        lo = Math.min(lo, d.np);
-        hi = Math.max(hi, d.np);
-      }
-      if (typeof d.pw === "number") {
-        lo = Math.min(lo, d.pw);
-        hi = Math.max(hi, d.pw);
-      }
-    }
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [0, 1] as const;
-    const pad = Math.max(5, (hi - lo) * 0.1);
-    return [Math.max(0, lo - pad), hi + pad] as const;
-  }, [downsampled]);
-
-  const haveAnyPower = useMemo(
+  // Derivert datasett for pivot-graf (sortert på bin)
+  const pivotChartData = useMemo(
     () =>
-      downsampled.some(
-        (d) => typeof d.np === "number" || typeof d.pw === "number"
-      ),
-    [downsampled]
+      pivotPoints
+        .slice()
+        .sort((a, b) => a.bin.localeCompare(b.bin)),
+    [pivotPoints],
   );
 
-  const xScale = useCallback(
-    (ts: number) => {
-      const [x0, x1] = xDomain;
-      if (x1 === x0) return PLOT_X;
-      const t = (ts - x0) / (x1 - x0);
-      return PLOT_X + t * PLOT_W;
-    },
-    [xDomain]
-  );
+  // --- Render ------------------------------------------------------------
 
-  const yScale = useCallback(
-    (v: number) => {
-      const [y0, y1] = yDomain;
-      if (y1 === y0) return PLOT_BOTTOM;
-      const t = (v - y0) / (y1 - y0);
-      return PLOT_BOTTOM - t * PLOT_H;
-    },
-    [yDomain]
-  );
+  // Tom-state: ingen punkter ennå
+  if (!debugPoints || debugPoints.length === 0) {
+    if (DEBUG_LOG) {
+      console.log(
+        "[TRENDS] rendering EMPTY state (ingen debugPoints)",
+      );
+    }
 
-  const seriesNP = useMemo(
-    () => downsampled.filter((d) => typeof d.np === "number"),
-    [downsampled]
-  );
-  const seriesPW = useMemo(
-    () => downsampled.filter((d) => typeof d.pw === "number"),
-    [downsampled]
-  );
-
-  const npPath = useMemo(() => {
-    if (seriesNP.length === 0) return "";
-    const xs = seriesNP.map((d) => xScale(d.timestamp));
-    const ys = seriesNP.map((d) => yScale(d.np as number));
-    return linePath(xs, ys);
-  }, [seriesNP, xScale, yScale]);
-
-  const pwPath = useMemo(() => {
-    if (seriesPW.length === 0) return "";
-    const xs = seriesPW.map((d) => xScale(d.timestamp));
-    const ys = seriesPW.map((d) => yScale(d.pw as number));
-    return linePath(xs, ys);
-  }, [seriesPW, xScale, yScale]);
-
-  const xPixels = useMemo(
-    () => downsampled.map((d) => xScale(d.timestamp)),
-    [downsampled, xScale]
-  );
-
-  // rAF-throttle på pointermove (lavere TBT) + fallback hvis rAF mangler
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent<SVGSVGElement>) => {
-      const svg = svgRef.current;
-      if (!svg) return;
-      const rect = svg.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-
-      if (typeof requestAnimationFrame === "function") {
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        rafRef.current = requestAnimationFrame(() => setHover({ x, y }));
-      } else {
-        setHover({ x, y });
-      }
-    },
-    []
-  );
-  const handlePointerLeave = useCallback(() => setHover(null), []);
-
-  const hoverIdx = useMemo(() => {
-    if (!hover || xPixels.length === 0) return -1;
-    const clampedX = Math.max(PLOT_X, Math.min(PLOT_RIGHT, hover.x));
-    return binarySearchClosestIndex(xPixels, clampedX);
-  }, [hover, xPixels]);
-
-  const hoverPoint = hoverIdx >= 0 ? downsampled[hoverIdx] : null;
-
-  // 5) Render: alltid wrapper + tittel + SVG (også i tom/HR-only)
-  // velg placeholder-melding
-  let placeholderText: string | null = null;
-  if (computedHrOnly) {
-    placeholderText =
-      "Denne økten har bare pulsdata (ingen wattmåler). Watt-trendgrafen er ikke tilgjengelig.";
-  } else if (state.kind === "loading" || state.kind === "idle") {
-    placeholderText = "Laster trenddata…";
-  } else if (state.kind === "error") {
-    placeholderText = `Kunne ikke laste trenddata: ${state.message}`;
-  } else if (state.kind === "loaded" && downsampled.length === 0) {
-    placeholderText = "Ingen data ennå";
-  } else if (state.kind === "loaded" && !haveAnyPower) {
-    placeholderText = "Ingen wattdata tilgjengelig";
+    return (
+      <section className="mt-4 rounded-xl border border-dashed border-gray-300 p-4 text-sm text-gray-600">
+        <h3 className="mb-1 font-semibold text-gray-900">
+          Trend – avg watt
+        </h3>
+        <p>
+          Ingen trenddata tilgjengelig ennå. Kjør minst én analyse i
+          backend (multi-ride scriptet) for å generere{" "}
+          <code>summary.csv</code>.
+        </p>
+      </section>
+    );
   }
 
-  const showPlot = placeholderText === null;
+  if (DEBUG_LOG) {
+    console.log(
+      "[TRENDS] rendering DEBUG chart, points=",
+      debugPoints.length,
+    );
+  }
 
   return (
-    <div className="w-full">
-      <div className="text-sm mb-2 font-medium">Trender: NP vs PW</div>
+    <section className="mt-4 space-y-6">
+      <header className="flex items-baseline justify-between">
+        <h3 className="font-semibold text-gray-900">
+          Trend – avg watt (live summary.csv)
+        </h3>
+        <span className="text-xs text-gray-500">
+          {debugPoints.length} punkt
+        </span>
+      </header>
 
-      {/* Skjulte hjelpenoder for tester (Trinn 3 DoD) */}
-      {state.kind === "loaded" && downsampled.length === 0 && (
-        <div data-testid="trend-empty" className="hidden">
-          No trend data available
-        </div>
-      )}
+      {/* Hoved-trendlinje */}
+      <div className="h-64 w-full flex items-center justify-center">
+        <LineChart
+          width={720}
+          height={240}
+          data={rechartsFallbackData}
+          margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="date" />
+          <YAxis />
+          <Tooltip />
+          <Line type="monotone" dataKey="avgWatt" dot={false} />
+        </LineChart>
+      </div>
 
-      {state.kind === "loaded" && downsampled.length > 0 && (
-        <ul data-testid="trend-summary" className="hidden">
-          {sortedData.map((d) => (
-            <li key={d.id}>
-              {new Date(d.timestamp).toISOString().slice(0, 10)} –{" "}
-              {typeof d.np === "number" ? d.np.toFixed(1) : "–"}
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* Pivot-graf – vises kun hvis vi har pivot-data */}
+      <section className="space-y-2">
+        <header className="flex items-baseline justify-between">
+          <h4 className="font-medium text-gray-900">
+            Pivot – avg watt per bin
+          </h4>
+          <span className="text-xs text-gray-500">
+            {pivotChartData.length} rader
+          </span>
+        </header>
 
-      {hasPivot && (
-        <div data-testid="trend-pivot" className="hidden">
-          pivot-data
-        </div>
-      )}
-
-      <svg
-        ref={svgRef}
-        width={W}
-        height={H}
-        role="img"
-        aria-label="Trends NP og PW"
-        className="bg-white rounded-xl shadow-sm"
-        onPointerMove={showPlot ? handlePointerMove : undefined}
-        onPointerLeave={showPlot ? handlePointerLeave : undefined}
-      >
-        {/* plot bg */}
-        <rect
-          x={PLOT_X}
-          y={PLOT_Y}
-          width={PLOT_W}
-          height={PLOT_H}
-          className="fill-white"
-        />
-
-        {/* grid + akser tegnes kun når vi faktisk viser plot */}
-        {showPlot ? (
-          <>
-            {/* grid Y */}
-            {(() => {
-              const [y0, y1] = yDomain;
-              const n = Math.min(6, Math.max(2, Math.floor(PLOT_H / 60)));
-              return Array.from({ length: n }).map((_, i) => {
-                const t = i / (n - 1);
-                const v = y0 + t * (y1 - y0);
-                const y = yScale(v);
-                return (
-                  <line
-                    key={`gy-${i}`}
-                    x1={PLOT_X}
-                    x2={PLOT_RIGHT}
-                    y1={y}
-                    y2={y}
-                    className="stroke-slate-100"
-                  />
-                );
-              });
-            })()}
-
-            {/* grid X */}
-            {(() => {
-              const n = Math.min(6, Math.max(2, Math.floor(PLOT_W / 140)));
-              const [x0, x1] = xDomain;
-              return Array.from({ length: n }).map((_, i) => {
-                const t = i / (n - 1);
-                const ts = x0 + t * (x1 - x0);
-                const x = xScale(ts);
-                return (
-                  <line
-                    key={`gx-${i}`}
-                    x1={x}
-                    x2={x}
-                    y1={PLOT_Y}
-                    y2={PLOT_BOTTOM}
-                    className="stroke-slate-100"
-                  />
-                );
-              });
-            })()}
-
-            {/* axes */}
-            <line
-              x1={PLOT_X}
-              x2={PLOT_RIGHT}
-              y1={PLOT_BOTTOM}
-              y2={PLOT_BOTTOM}
-              className="stroke-slate-300"
-            />
-            <line
-              x1={PLOT_X}
-              x2={PLOT_X}
-              y1={PLOT_Y}
-              y2={PLOT_BOTTOM}
-              className="stroke-slate-300"
-            />
-
-            {/* y labels */}
-            {(() => {
-              const [y0, y1] = yDomain;
-              const n = Math.min(6, Math.max(2, Math.floor(PLOT_H / 60)));
-              return Array.from({ length: n }).map((_, i) => {
-                const t = i / (n - 1);
-                const v = y0 + t * (y1 - y0);
-                const y = yScale(v);
-                return (
-                  <text
-                    key={`yl-${i}`}
-                    x={PLOT_X - 8}
-                    y={y}
-                    textAnchor="end"
-                    dominantBaseline="middle"
-                    className="fill-slate-500 [font-size:clamp(10px,2.5vw,12px)]"
-                  >
-                    {Math.round(v)}
-                  </text>
-                );
-              });
-            })()}
-
-            {/* x labels */}
-            {(() => {
-              const n = Math.min(6, Math.max(2, Math.floor(PLOT_W / 140)));
-              const [x0, x1] = xDomain;
-              return Array.from({ length: n }).map((_, i) => {
-                const t = i / (n - 1);
-                const ts = x0 + t * (x1 - x0);
-                const x = xScale(ts);
-                return (
-                  <text
-                    key={`xl-${i}`}
-                    x={x}
-                    y={PLOT_BOTTOM + 12}
-                    textAnchor="middle"
-                    dominantBaseline="hanging"
-                    className="fill-slate-500 [font-size:clamp(10px,2.5vw,10px)]"
-                  >
-                    {new Date(ts).toLocaleDateString()}
-                  </text>
-                );
-              });
-            })()}
-
-            {/* NP path */}
-            {npPath && (
-              <path
-                d={npPath}
-                className="stroke-blue-500 fill-none"
-                strokeWidth={2}
-              />
-            )}
-
-            {/* PW path */}
-            {pwPath && (
-              <path
-                d={pwPath}
-                className="stroke-green-500 fill-none"
-                strokeWidth={2}
-              />
-            )}
-
-            {/* Points */}
-            {seriesNP.map((d) => (
-              <circle
-                key={`np-${d.id}`}
-                cx={xScale(d.timestamp)}
-                cy={yScale(d.np as number)}
-                r={2}
-                className="fill-blue-500"
-              />
-            ))}
-            {seriesPW.map((d) => (
-              <circle
-                key={`pw-${d.id}`}
-                cx={xScale(d.timestamp)}
-                cy={yScale(d.pw as number)}
-                r={2}
-                className="fill-green-500"
-              />
-            ))}
-
-            {/* Highlight current session */}
-            {downsampled.some((d) => d.id === sessionId) &&
-              (() => {
-                const d = downsampled.find((x) => x.id === sessionId)!;
-                const yVal =
-                  typeof d.pw === "number"
-                    ? d.pw
-                    : typeof d.np === "number"
-                    ? d.np
-                    : yDomain[0];
-                return (
-                  <circle
-                    cx={xScale(d.timestamp)}
-                    cy={yScale(yVal as number)}
-                    r={4}
-                    className="fill-amber-500"
-                  />
-                );
-              })()}
-
-            {/* Hover crosshair */}
-            {hover && (
-              <>
-                <line
-                  x1={hover.x}
-                  x2={hover.x}
-                  y1={PLOT_Y}
-                  y2={PLOT_BOTTOM}
-                  className="stroke-slate-200"
-                />
-                <line
-                  x1={PLOT_X}
-                  x2={PLOT_RIGHT}
-                  y1={hover.y}
-                  y2={hover.y}
-                  className="stroke-slate-200"
-                />
-              </>
-            )}
-
-            {/* Tooltip */}
-            {hoverPoint && (
-              <g>
-                <rect
-                  x={Math.min(
-                    PLOT_RIGHT - 180,
-                    Math.max(PLOT_X, xScale(hoverPoint.timestamp) + 8)
-                  )}
-                  y={PLOT_Y + 8}
-                  width={170}
-                  height={74}
-                  rx={8}
-                  className="fill-white stroke-slate-200"
-                />
-                <text
-                  x={Math.min(
-                    PLOT_RIGHT - 170,
-                    Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18)
-                  )}
-                  y={PLOT_Y + 24}
-                  className="fill-slate-700 text-xs"
-                >
-                  {formatDate(hoverPoint.timestamp)}
-                </text>
-                <text
-                  x={Math.min(
-                    PLOT_RIGHT - 170,
-                    Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18)
-                  )}
-                  y={PLOT_Y + 40}
-                  className="fill-blue-600 text-xs"
-                >
-                  NP:{" "}
-                  {typeof hoverPoint.np === "number"
-                    ? `${niceNum(hoverPoint.np)} W`
-                    : "—"}
-                </text>
-                <text
-                  x={Math.min(
-                    PLOT_RIGHT - 170,
-                    Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18)
-                  )}
-                  y={PLOT_Y + 56}
-                  className="fill-green-600 text-xs"
-                >
-                  PW:{" "}
-                  {typeof hoverPoint.pw === "number"
-                    ? `${niceNum(hoverPoint.pw)} W`
-                    : "—"}
-                </text>
-                <text
-                  x={Math.min(
-                    PLOT_RIGHT - 170,
-                    Math.max(PLOT_X + 10, xScale(hoverPoint.timestamp) + 18)
-                  )}
-                  y={PLOT_Y + 72}
-                  className="fill-slate-500 text-[10px]"
-                >
-                  Kilde: {String(hoverPoint.source ?? (isMock ? "Mock" : "API"))} •
-                  Kalibrert: {hoverPoint.calibrated ? "Ja" : "Nei"}
-                </text>
-              </g>
-            )}
-          </>
+        {pivotChartData.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Ingen pivot-data tilgjengelig (backend returnerer kun header
+            foreløpig).
+          </p>
         ) : (
-          // Placeholder inne i SVG så testen alltid finner role="img"
-          <text
-            x={PLOT_X + PLOT_W / 2}
-            y={PLOT_Y + PLOT_H / 2}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            className="fill-slate-500 text-sm"
-          >
-            {placeholderText}
-          </text>
+          <div className="h-64 w-full flex items-center justify-center">
+            <BarChart
+              width={720}
+              height={240}
+              data={pivotChartData}
+              margin={{ top: 10, right: 30, left: 0, bottom: 40 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="bin"
+                angle={-45}
+                textAnchor="end"
+                height={60}
+              />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="value" />
+            </BarChart>
+          </div>
         )}
+      </section>
 
-        {/* Legend vises bare når det er plot */}
-        {showPlot && (
-          <g aria-label="legend">
-            <circle
-              cx={PLOT_X + 8}
-              cy={PLOT_Y + 8}
-              r={4}
-              className="fill-blue-500"
-            />
-            <text
-              x={PLOT_X + 18}
-              y={PLOT_Y + 8}
-              dominantBaseline="middle"
-              className="fill-slate-700 text-xs"
-            >
-              NP
-            </text>
-            <circle
-              cx={PLOT_X + 52}
-              cy={PLOT_Y + 8}
-              r={4}
-              className="fill-green-500"
-            />
-            <text
-              x={PLOT_X + 62}
-              y={PLOT_Y + 8}
-              dominantBaseline="middle"
-              className="fill-slate-700 text-xs"
-            >
-              PW
-            </text>
-            {!haveAnyPower && (
-              <text
-                x={PLOT_X + 100}
-                y={PLOT_Y + 8}
-                dominantBaseline="middle"
-                className="fill-slate-500 text-xs"
-              >
-                HR-only
-              </text>
-            )}
-          </g>
-        )}
-      </svg>
-    </div>
+      {SHOW_DEBUG_PANEL && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 space-y-4">
+          {/* SUMMARY-debug */}
+          <div>
+            <div className="font-semibold">
+              Debug-data fra summary.csv
+            </div>
+            <div>Antall punkter: {debugPoints.length}</div>
+            <div>Første 5 datapunkter:</div>
+            <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted p-2">
+              {JSON.stringify(debugPoints.slice(0, 5), null, 2)}
+            </pre>
+          </div>
+
+          {/* PIVOT-debug */}
+          <div className="border-t pt-2">
+            <div className="font-semibold">
+              Debug-data fra pivot/avg_watt.csv
+            </div>
+            <div>Antall rader: {pivotPoints.length}</div>
+            <div>Første 5 rader:</div>
+            <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted p-2">
+              {JSON.stringify(pivotPoints.slice(0, 5), null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
