@@ -603,6 +603,23 @@ export default function SessionView() {
           >
             Lagre profil
           </button>
+
+          <button
+            type="button"
+            className="btn"
+            disabled={id === "mock" || id === "mock-short" || id === "mock-2h"}
+            onClick={() => {
+              if (id === "mock" || id === "mock-short" || id === "mock-2h") return;
+              analyzeSession(sessionId);
+            }}
+            title={
+              id === "mock" || id === "mock-short" || id === "mock-2h"
+                ? "Analyseknapp er deaktivert for mock-økter."
+                : "Kjør analyse på nytt for denne økten."
+            }
+          >
+            Analyser økt
+          </button>
         </div>
       </div>
 

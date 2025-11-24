@@ -1,0 +1,19 @@
+{
+  "ts_utc": "2025-11-23T19:10:46.155221+00:00",
+  "frozen_weather_hint": true,
+  "counts": {
+    "sessions": 11
+  },
+  "sha256": {
+    "profile_versions.jsonl": "2a55beb5ba02fbb817b65f53e8b28a183d51028b658891cb07b9b691ef26f418",
+    "sessions.jsonl": "47c554b5a9baa1d5f0b1934caf2a04671770f8f530096deb6ea75fd0e9df57df",
+    "t11_matrix.csv": "640d42411600cf4df5708d8a0fc370d92bbd0efb74d58d0cb4c8d2b8d12e2995",
+    "trend_summary.csv": "ddecbaeaadee9f66b2059b4df8487a829d36a3aec037c0c2ae4f96b4e8003f25",
+    "trend_pivots\\trinn9_pivot_avg_watt_vv1-6568af79836a-20251112.csv": "a36459f5535ce47f16d06c703189219d106812df9027bf0b43680484ff0e0ca7",
+    "trend_pivots\\trinn9_pivot_calibration_mae_vv1-6568af79836a-20251112.csv": "008abb3d6c51a02faeae81bc9f92fc275650b3d2b2c60f7402a4cee82b0e8a70",
+    "trend_pivots\\trinn9_pivot_drag_watt_vv1-6568af79836a-20251112.csv": "3f6c47d8b2d9ebd5d785a1e644250176635405cfc35d6fed1da477e04a36761a",
+    "trend_pivots\\trinn9_pivot_precision_watt_vv1-6568af79836a-20251112.csv": "bbc003a553c9d76e1b1c6bf3ce99632a92c56c5ee9fbe874a5e8459e9cc8512a",
+    "trend_pivots\\trinn9_pivot_rolling_watt_vv1-6568af79836a-20251112.csv": "02d8d972ee1c11d2a34094b6568d5258a41eb465a96efa659fdf79631ceeee3f",
+    "trend_pivots\\trinn9_pivot_w_per_beat_vv1-6568af79836a-20251112.csv": "00901f4ac4090f6e100eb5997f9b92b45717f802890f93820583395bc7d959d3"
+  }
+}

@@ -16,7 +16,8 @@ import { fetchJSON } from "./fetchJSON";
 function readViteEnv(): Record<string, string | undefined> {
   return (
     (typeof import.meta !== "undefined"
-      ? (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ? (import.meta as unknown as { env?: Record<string, string | undefined> })
+          .env
       : undefined) ?? {}
   );
 }
@@ -26,8 +27,28 @@ type Ok = { ok: true; data: SessionReport; source: "mock" | "live" };
 type Err = { ok: false; error: string; source?: "mock" | "live" };
 export type FetchSessionResult = Ok | Err;
 
-// Hent Vite-variabler (.env.local). Hvis BASE mangler → vi faller til mock-kilde.
-const BASE = readViteEnv().VITE_BACKEND_URL;
+// ---------------------------------------------------------------------------
+// ENV & API-base
+// ---------------------------------------------------------------------------
+
+const env = readViteEnv();
+const DEFAULT_BACKEND_BASE = "http://127.0.0.1:5175";
+
+/**
+ * Én normalisert backend-base som alle API-kall kan bruke.
+ * Bruker VITE_BACKEND_BASE (ny) → VITE_BACKEND_URL (gammel) → default.
+ */
+export const API_BASE = (
+  env.VITE_BACKEND_BASE ??
+  env.VITE_BACKEND_URL ??
+  DEFAULT_BACKEND_BASE
+).replace(/\/+$/, "");
+
+/**
+ * BACKCOMP: eldre kode i denne fila bruker BASE direkte (fetchSession/fetchCsv).
+ * Vi peker den mot samme API_BASE.
+ */
+const BASE = API_BASE;
 
 /** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
@@ -119,6 +140,162 @@ function buildAnalyzeUrl(base: string, id: string): string {
   return `${base}/api/analyze_session?id=${encodeURIComponent(id)}`;
 }
 
+// ---------------------------------------------------------------------------
+// SESSIONS – hentet fra trend/summary.csv (liste-visning)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimumsfelt vi trenger for å vise en liste over økter.
+ * Bygges fra trend/summary.csv.
+ */
+export type SessionSummary = {
+  id: string;
+  name: string;
+  start_time: string;
+  duration_sec: number;
+  distance_km: number;
+
+  // Kilde: summary.csv → avg_watt
+  // Tolkes som gjennomsnittlig Precision Watt for økta
+  precision_watt_avg?: number | null;
+
+  // Backwards-compat: alias til samme verdi inntil videre
+  avg_power?: number | null;
+  np_power?: number | null;
+};
+
+/**
+ * Hent rå summary.csv direkte fra backend (API_BASE).
+ *
+ * NB: Vi bruker /api/trend/summary.csv fordi det er den som faktisk gir CSV.
+ * Dette bypasser Vite/devFetchShim og går rett på backend.
+ */
+async function fetchSummaryCsvRows(
+  signal?: AbortSignal
+): Promise<string[][]> {
+  const url = `${API_BASE}/api/trend/summary.csv`;
+
+  console.log("[API] fetchSummaryCsvRows", { url });
+
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(
+      `Feil ved henting av summary.csv: ${res.status} ${res.statusText}`
+    );
+  }
+
+  const text = await res.text();
+  const rows = parseCsv(text);
+  return rows;
+}
+
+/**
+ * Bygger en unik liste med økter fra trend/summary.csv.
+ *
+ *  - Leser CSV via fetchSummaryCsvRows()
+ *  - Grupperer på session_id (kun én entry per id)
+ *  - Tolker avg_watt som “Precision Watt (snitt)”
+ */
+export async function fetchSessionsList(): Promise<SessionSummary[]> {
+  console.log("[API] fetchSessionsList via summary.csv");
+
+  const rows = await fetchSummaryCsvRows();
+  if (!rows.length) {
+    console.log("[API] fetchSessionsList: tomme rows");
+    return [];
+  }
+
+  const [header, ...data] = rows;
+
+  const idx = {
+    session_id: header.indexOf("session_id"),
+    date: header.indexOf("date"),
+    avg_watt: header.indexOf("avg_watt"),
+  };
+
+  if (idx.session_id === -1) {
+    console.warn(
+      "[API] fetchSessionsList: fant ikke kolonne 'session_id' i summary.csv"
+    );
+    return [];
+  }
+
+  const byId = new Map<string, SessionSummary>();
+
+  for (const row of data) {
+    const rawId = row[idx.session_id];
+    const id = rawId ? rawId.trim() : "";
+    if (!id) {
+      continue;
+    }
+
+    const date =
+      idx.date >= 0 && row[idx.date] != null ? String(row[idx.date]) : "";
+
+    const avgWattStr =
+      idx.avg_watt >= 0 && row[idx.avg_watt] != null
+        ? String(row[idx.avg_watt])
+        : "";
+    const avgWattNum = avgWattStr ? Number(avgWattStr) : NaN;
+    const precisionWatt = Number.isFinite(avgWattNum) ? avgWattNum : undefined;
+
+    const existing = byId.get(id);
+
+    if (!existing) {
+      // Første gang vi ser denne session_id-en
+      byId.set(id, {
+        id,
+        name: id, // kan senere byttes til et penere navn
+        start_time: date,
+        duration_sec: 0,
+        distance_km: 0,
+
+        // Precision Watt (snitt) = avg_watt fra summary.csv
+        precision_watt_avg: precisionWatt ?? null,
+
+        // alias for backwards compat
+        avg_power: precisionWatt ?? null,
+        np_power: null,
+      });
+    } else {
+      // Vi har allerede en entry; oppdater med "bedre" info
+      const betterDate = date || existing.start_time;
+
+      let betterPw = existing.precision_watt_avg ?? undefined;
+      if (
+        Number.isFinite(avgWattNum) &&
+        (betterPw == null || avgWattNum > (betterPw as number))
+      ) {
+        betterPw = avgWattNum;
+      }
+
+      byId.set(id, {
+        ...existing,
+        start_time: betterDate,
+        precision_watt_avg: betterPw ?? null,
+        avg_power: betterPw ?? null,
+      });
+    }
+  }
+
+  // Gjør om til array og sorter – nyeste først (basert på start_time-string)
+  const sessions = Array.from(byId.values());
+  sessions.sort((a, b) => {
+    const aKey = a.start_time || "";
+    const bKey = b.start_time || "";
+    const cmpDate = bKey.localeCompare(aKey);
+    if (cmpDate !== 0) return cmpDate;
+    return a.id.localeCompare(b.id);
+  });
+
+  console.log("[API] fetchSessionsList: antall unike økter =", sessions.length);
+  return sessions;
+}
+
+// ---------------------------------------------------------------------------
+// Gammel summary-normalisering (beholdt for bakoverkompatibilitet)
+// ---------------------------------------------------------------------------
+
 // CSV header-normalisering for trend/summary.csv
 const TREND_SUMMARY_HEADER =
   "session_id,date,avg_watt,w_per_beat,cgs,avg_hr,mode,profile_version,pw_quality,calibrated";
@@ -181,7 +358,12 @@ export function normalizeSummaryCsv(path: string, raw: string): string {
 }
 
 export async function fetchCsv(path: string): Promise<string> {
-  const res = await fetch(BASE + path);
+  const base = normalizeBase(BASE);
+  if (!base) {
+    throw new Error("BASE ikke satt for fetchCsv");
+  }
+
+  const res = await fetch(base + path);
 
   if (!res.ok) {
     throw new Error(`Failed to fetch CSV: ${res.status}`);
@@ -193,7 +375,7 @@ export async function fetchCsv(path: string): Promise<string> {
 
 /**
  * Hent en session (legacy):
- * - id === "mock" eller BASE mangler → bruk mockSession (kilde: "mock")
+ * - id === "mock" → bruk mockSession (kilde: "mock")
  * - ellers → GET {BASE}/api/analyze_session?id={id} (kilde: "live")
  * Validerer alltid med Zod + semver.
  * Støtter timeout og ekstern AbortSignal.
@@ -205,7 +387,7 @@ export async function fetchSession(
   try {
     const base = normalizeBase(BASE);
 
-    // MOCK eller manglende BASE → mock-kilde
+    // MOCK → mock-kilde
     if (id === "mock" || !base) {
       await delay(150);
 
@@ -377,24 +559,13 @@ export async function setProfile(
 
 /**
  * getTrendSummary()
- * GET /api/trend/summary.csv
- * Tom / timeout → rows: [].
+ * Bruker samme summary.csv som sessions-listen, men returnerer som CsvRows.
  */
 export async function getTrendSummary(
   opts?: { signal?: AbortSignal }
 ): Promise<TrendSummary> {
-  const url = `${API_ROOT}/trend/summary.csv`;
-  const raw = await fetchJSON<string | unknown>(url, {
-    method: "GET",
-    signal: opts?.signal,
-  });
-
-  if (typeof raw === "string") {
-    return { rows: parseCsv(raw) };
-  }
-
-  // AbortError (undefined) eller tomt objekt → ingen rader
-  return { rows: [] };
+  const rows = await fetchSummaryCsvRows(opts?.signal);
+  return { rows };
 }
 
 /**
@@ -409,7 +580,9 @@ export async function getTrendPivot(
   const qs = new URLSearchParams({
     profile_version: String(profileVersion),
   }).toString();
-  const url = `${API_ROOT}/trend/pivot/${encodeURIComponent(metric)}.csv?${qs}`;
+  const url = `${API_ROOT}/trend/pivot/${encodeURIComponent(
+    metric
+  )}.csv?${qs}`;
 
   const raw = await fetchJSON<string | unknown>(url, {
     method: "GET",
@@ -427,18 +600,20 @@ export async function getTrendPivot(
  * getSessionsList()
  * GET /api/sessions/list
  * Defensive: håndterer både ren liste og { value: [...] }-wrapper.
+ * (Beholdt for bakoverkompatibilitet – ny UI kan bruke fetchSessionsList.)
  */
 export async function getSessionsList(
   opts?: { signal?: AbortSignal }
 ): Promise<SessionInfo[]> {
   const url = `${API_ROOT}/sessions/list`;
 
-  const res = await fetchJSON<
-    SessionInfo[] | { value?: unknown } | unknown
-  >(url, {
-    method: "GET",
-    signal: opts?.signal,
-  });
+  const res = await fetchJSON<SessionInfo[] | { value?: unknown } | unknown>(
+    url,
+    {
+      method: "GET",
+      signal: opts?.signal,
+    }
+  );
 
   // Case 1: backend sender ren liste
   if (Array.isArray(res)) {

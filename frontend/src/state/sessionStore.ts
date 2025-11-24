@@ -1,39 +1,38 @@
 ﻿/// <reference types="vite/client" />
 
 import { create } from "zustand";
-import type { SessionReport, SessionInfo } from "../types/session";
+import type { SessionReport } from "../types/session";
 import {
   fetchSession as fetchSessionApi,
   analyze as analyzeApi,
-  getSessionsList as getSessionsListApi,
+  fetchSessionsList,
 } from "../lib/api";
 import type { AnalyzeResponse, Profile } from "../lib/schema";
+import type { SessionSummary } from "../lib/api";
 
 type Source = "api" | "mock" | null;
 
 type SessionState = {
+  // Enkeltsesjon (legacy / session-endepunktet)
   session: SessionReport | null;
   loading: boolean;
   error: string | null;
   source: Source;
 
-  // --- Trinn 2: analyze-resultater ---
+  // Analyze-resultater
   analyzeResult: AnalyzeResponse | null;
   analyzeLoading: boolean;
   analyzeError: string | null;
 
-  // --- Trinn 6: sessions-liste ---
-  sessions: SessionInfo[] | null;
-  sessionsLoading: boolean;
-  sessionsError: string | null;
+  // Sessions-liste (nå bygget fra trend/summary.csv via SessionSummary)
+  sessionsList: SessionSummary[] | null;
+  loadingList: boolean;
+  errorList: string | null;
 
+  // Actions
   fetchSession: (id?: string) => Promise<void>;
   analyzeSession: (id: string) => Promise<void>;
-
-  // --- Ny: sessions-liste ---
-  fetchSessionsList: () => Promise<void>;
-
-  // --- Trinn 4: profil-lagring + re-analyze ---
+  loadSessionsList: () => Promise<void>;
   saveProfileAndReanalyze: (sessionId: string, profile: Profile) => Promise<void>;
 };
 
@@ -44,30 +43,29 @@ function getMode(): "api" | "mock" {
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
+  // --- State ---
   session: null,
   loading: false,
   error: null,
   source: null,
 
-  // --- Trinn 2: analyze-session state ---
   analyzeResult: null,
   analyzeLoading: false,
   analyzeError: null,
 
-  // --- Trinn 6: sessions-liste ---
-  sessions: null,
-  sessionsLoading: false,
-  sessionsError: null,
+  sessionsList: null,
+  loadingList: false,
+  errorList: null,
 
+  // -------------------------------------------------------------------------
+  // Hent én økt (legacy / session-endepunktet)
+  // -------------------------------------------------------------------------
   async fetchSession(id?: string) {
     set({ loading: true, error: null });
 
     const mode = getMode();
     const effectiveId = mode === "api" ? (id ?? "mock") : "mock";
 
-    // Nytt:
-    // I API-modus for ekte økter (ikke mock), hopper vi over legacy-endepunktet
-    // /api/analyze_session og lar analyzeResult være den "sanne" kilden.
     if (
       mode === "api" &&
       id &&
@@ -75,6 +73,8 @@ export const useSessionStore = create<SessionState>((set) => ({
       id !== "mock-short" &&
       id !== "mock-2h"
     ) {
+      // I API-modus for ekte sessions henter vi ikke legacy-session-data.
+      // SessionCard bruker analyzeResult (mapAnalyzeToCard) i stedet.
       set({
         session: null,
         loading: false,
@@ -113,11 +113,13 @@ export const useSessionStore = create<SessionState>((set) => ({
     }
   },
 
+  // -------------------------------------------------------------------------
+  // Analyze – kjør backend-analyse for en gitt sessionId
+  // -------------------------------------------------------------------------
   async analyzeSession(id: string) {
     set({ analyzeLoading: true, analyzeError: null });
 
     try {
-      // Kall backend direkte via api.analyze
       const res = await analyzeApi(id);
 
       console.log("[SESSION STORE] analyzeSession result", { id, res });
@@ -146,40 +148,50 @@ export const useSessionStore = create<SessionState>((set) => ({
     }
   },
 
-  async fetchSessionsList() {
-    set({ sessionsLoading: true, sessionsError: null });
+  // -------------------------------------------------------------------------
+  // Sessions-liste – brukt i /sessions-route
+  // Nå koblet til fetchSessionsList() → summary.csv → SessionSummary[]
+  // -------------------------------------------------------------------------
+  loadSessionsList: async () => {
+    set({ loadingList: true, errorList: null });
 
     try {
-      const list = await getSessionsListApi();
+      console.log("[SESSION STORE] loadSessionsList → fetchSessionsList()");
+      const sessions = await fetchSessionsList();
 
       set({
-        sessions: list,
-        sessionsLoading: false,
-        sessionsError: null,
+        sessionsList: sessions,
+        loadingList: false,
       });
     } catch (err: unknown) {
-      console.error("[SESSION STORE] fetchSessionsList error", err);
+      console.error("[SESSION STORE] loadSessionsList error", err);
       set({
-        sessions: null,
-        sessionsLoading: false,
-        sessionsError:
+        errorList:
           err instanceof Error ? err.message : "Kunne ikke hente økter",
+        loadingList: false,
       });
     }
   },
 
+  // -------------------------------------------------------------------------
+  // Lagre profil til backend og kjør analyze på nytt
+  // -------------------------------------------------------------------------
   async saveProfileAndReanalyze(sessionId: string, profile: Profile) {
     set({ analyzeLoading: true, analyzeError: null });
 
     try {
-      // Samme mønster som analyzeSession – bruk dynamisk import for setProfile
       const api = await import("../lib/api");
 
-      // 1) Lagre profil (backend øker profile_version og returnerer oppdatert Profile)
+      // 1) Lagre profil (backend oppdaterer profile_version)
       await api.setProfile(profile);
 
-      // 2) Kjør analyze på aktuelt sessionId
+      // 2) Kjør analyze på nytt for denne økten
       const res = await analyzeApi(sessionId);
+
+      console.log("[SESSION STORE] saveProfileAndReanalyze result", {
+        sessionId,
+        res,
+      });
 
       if (!res) {
         set({

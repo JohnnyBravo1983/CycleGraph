@@ -7,6 +7,7 @@ import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom"
 
 import App from "./App";
 import SessionView from "./routes/SessionView";
+import SessionsPage from "./routes/SessionsPage";
 import { installAxiosDevRewrite } from "./lib/axiosDevRewrite";
 
 // Installer dev-rewrite for axios FØR appen starter (kun i dev)
@@ -16,10 +17,11 @@ if (import.meta.env.DEV) {
 
 /**
  * Router:
- *  - "/"            -> /session/mock
- *  - "/session"     -> /session/mock
- *  - "/session/:id" -> SessionView (mock/live styres av .env + id)
- *  - "*"(catch-all) -> /session/mock
+ *  - "/"             -> /session/mock
+ *  - "/session"      -> /session/mock
+ *  - "/session/:id"  -> SessionView (mock/live styres av .env + id)
+ *  - "/sessions"     -> SessionsPage (liste over økter fra summary.csv)
+ *  - "*"(catch-all)  -> /session/mock
  */
 const router = createBrowserRouter([
   {
@@ -29,6 +31,10 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="/session/mock" replace /> },
       { path: "session", element: <Navigate to="/session/mock" replace /> },
       { path: "session/:id", element: <SessionView /> },
+
+      // Ny route for øktliste
+      { path: "sessions", element: <SessionsPage /> },
+
       { path: "*", element: <Navigate to="/session/mock" replace /> },
     ],
   },

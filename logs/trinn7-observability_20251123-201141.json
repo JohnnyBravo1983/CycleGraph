@@ -1,0 +1,58 @@
+{
+  "calibrated": false,
+  "metrics": {
+    "drag_watt": 0.0,
+    "gravity_watt": 0.0,
+    "precision_watt": 0.0,
+    "profile_used": {
+      "rider_weight_kg": 83.0,
+      "bike_weight_kg": 8.0,
+      "weight_kg": 91.0,
+      "total_weight_kg": 91.0,
+      "bike_type": "road",
+      "tire_width_mm": 28,
+      "tire_quality": "performance",
+      "device": "strava",
+      "profile_version": "v1-a0c54a9e-20251123"
+    },
+    "rolling_watt": 0.0,
+    "total_watt": 0.0,
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available",
+    "estimated_error_pct_range": [
+      14.0,
+      16.0
+    ],
+    "precision_quality_hint": "normal",
+    "weather_applied": false,
+    "weather_source": "open-meteo"
+  },
+  "source": "rust_1arg",
+  "v_rel": [],
+  "watts": [],
+  "weather_applied": false,
+  "wind_rel": [],
+  "repr_kind": "object_v3",
+  "debug": {
+    "reason": "ok",
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false,
+    "used_fallback": false,
+    "weather_source": "neutral"
+  },
+  "weather_source": "open-meteo",
+  "profile_version": "v1-a0c54a9e-20251123",
+  "profile_used": {
+    "rider_weight_kg": 83.0,
+    "bike_weight_kg": 8.0,
+    "weight_kg": 91.0,
+    "total_weight_kg": 91.0,
+    "bike_type": "road",
+    "tire_width_mm": 28,
+    "tire_quality": "performance",
+    "device": "strava",
+    "profile_version": "v1-a0c54a9e-20251123"
+  }
+}
