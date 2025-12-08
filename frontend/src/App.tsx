@@ -1,31 +1,15 @@
 // frontend/src/App.tsx
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 
 export default function App() {
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-slate-50">
       <header className="border-b bg-white">
         <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-lg font-semibold">CycleGraph</div>
-          <nav className="flex items-center gap-2 text-sm">
-            <NavLink
-              to="/session/mock"
-              className={({ isActive }) =>
-                `px-3 py-1.5 rounded-2xl border ${isActive ? "shadow" : ""}`
-              }
-              end
-            >
-              Home
-            </NavLink>
-            <NavLink
-              to="/session/mock"
-              className={({ isActive }) =>
-                `px-3 py-1.5 rounded-2xl border ${isActive ? "shadow" : ""}`
-              }
-            >
-              Session
-            </NavLink>
-          </nav>
+          <div className="text-lg font-semibold tracking-tight">
+            CycleGraph
+          </div>
+          {/* Navigasjon kommer senere (Dashboard / Rides / Profile osv.) */}
         </div>
       </header>
 

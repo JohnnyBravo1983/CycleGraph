@@ -21,13 +21,6 @@ export interface AnalysisPanelProps {
   useLiveTrends?: boolean;
 }
 
-/** TRINN 6: Les toggle fra Vite-ENV (string/boolean) */
-function readUseLiveTrends(): boolean {
-  const env = (import.meta as unknown as { env: Record<string, unknown> }).env;
-  const v = env?.VITE_USE_LIVE_TRENDS;
-  return v === true || v === "true";
-}
-
 function Badge({ kind }: { kind: "FULL" | "HR-only" | "LIMITED" | string }) {
   const map: Record<string, string> = {
     FULL: "bg-emerald-100 text-emerald-800 border-emerald-200",
@@ -122,22 +115,22 @@ function CalibrationBadge({
   );
 }
 
-export default function AnalysisPanel({ series, useLiveTrends: useLiveTrendsProp }: AnalysisPanelProps) {
+export default function AnalysisPanel({ series }: AnalysisPanelProps) {
   const [showPower, setShowPower] = useState(true);
   const [showHR, setShowHR] = useState(true);
   const [showPWCI, setShowPWCI] = useState(true);
 
-  // TRINN 6: bestem modus (prop vinner over ENV)
-  const useLiveTrends = useLiveTrendsProp ?? readUseLiveTrends();
+  // 🚨 Midlertidig: tving LIVE-data (match SessionView)
+  const trendsSource: "mock" | "live" = "live";
 
   // QA-logg ved mount (ikke spam)
   const qaLoggedRef = useRef(false);
   useEffect(() => {
     if (qaLoggedRef.current) return;
     qaLoggedRef.current = true;
- 
-    console.log(useLiveTrends ? "TrendsChart bruker LIVE-data" : "TrendsChart bruker MOCK-data");
-  }, [useLiveTrends]);
+
+    console.log("[ANALYSIS PANEL] TrendsChart bruker LIVE-data");
+  }, []);
 
   const n = useMemo(() => series.t?.length ?? 0, [series.t]);
   const hasPower = (series.watts?.length ?? 0) > 0;
@@ -151,7 +144,13 @@ export default function AnalysisPanel({ series, useLiveTrends: useLiveTrendsProp
   const canToggleHR = hasHR;
   const canToggleCI = hasCI;
 
-  const sourceRaw = typeof series.source === "string" ? series.source : (useLiveTrends ? "API" : "Mock");
+  const sourceRaw =
+    typeof series.source === "string"
+      ? series.source
+      : trendsSource === "live"
+      ? "API"
+      : "Mock";
+
   const sourceLabel = useMemo(() => prettySource(sourceRaw), [sourceRaw]);
 
   // Behold tri-state (true/false/undefined) for riktig tooltip/visning
@@ -167,7 +166,7 @@ export default function AnalysisPanel({ series, useLiveTrends: useLiveTrendsProp
     <div
       className="rounded-2xl border border-slate-200 bg-white shadow-sm"
       data-testid="analysis-panel"
-      data-live-trends={useLiveTrends ? "1" : "0"}
+      data-live-trends={trendsSource === "live" ? "1" : "0"}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">

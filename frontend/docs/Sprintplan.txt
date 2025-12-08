@@ -1,0 +1,53 @@
+Fobreredende Sprint. Sprint 1 Pågår. Startet 8.12. Avsluttet .....
+
+
+
+Når strukturen er satt:
+
+Sprint 1: Routing + Skeleton Pages
+
+Implementere bare layout + navigasjon
+
+8–10 tomme sider med overskrifter
+
+Ingen backend enda
+
+👉 Resultat: Hele appen navigerer riktig
+→ Du får mental modell + kontroll
+
+Sprint 2: Koble dagens “element of truth” inn i skeleton
+
+/rides kobles til backend-lista (summary.csv)
+
+/rides/:id bruker dagens SessionView/AnalysisPanel
+
+👉 Resultat: Ekte data fungerer i ny struktur
+→ Du får momentum
+
+Sprint 3: Calibration UI & Profile
+
+Enkel form
+
+Gauge-komponenter
+
+State-håndtering
+
+Sprint 4: Login/Signup
+
+Fake/auth-light i starten
+
+Ekte auth senere
+
+Sprint 5: Trends
+
+Integrer dagens trend-CSV-data
+
+Filters
+
+Line charts
+
+Sprint 6: Goals
+
+Simple UI
+
+Connect til Trends

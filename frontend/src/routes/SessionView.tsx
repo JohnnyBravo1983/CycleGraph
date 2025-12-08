@@ -21,13 +21,6 @@ const TrendsChart = React.lazy(() => import("../components/TrendsChart"));
 // NEW: helpers for HR-only & modal
 import { isHROnly as isHROnlyHelper, shouldShowCalibrationModal } from "../lib/state";
 
-/** ENV toggle: les VITE_USE_LIVE_TRENDS (string/boolean) */
-function readUseLiveTrends(): boolean {
-  const env = (import.meta as unknown as { env: Record<string, unknown> }).env;
-  const v = env?.VITE_USE_LIVE_TRENDS;
-  return v === true || v === "true";
-}
-
 /** DEV fetch-proxy guard (rewrite gamle stier → /api/...) */
 function useDevFetchApiRewrite() {
   useEffect(() => {
@@ -332,17 +325,16 @@ export default function SessionView() {
 
   const backendSource = useMemo(() => getBackendSource(), []);
 
-  /** Toggle – styr grafen av VITE_USE_LIVE_TRENDS */
-  const useLiveTrends = useMemo(() => readUseLiveTrends(), []);
-  const isMockForChart = !useLiveTrends;
-  const sourceForChart = useLiveTrends ? "API" : "Mock";
+  // 🚨 Midlertidig: tving LIVE-data (overstyrer ENV-toggle)
+  const isMockForChart = false;
+  const sourceForChart = "API" as const;
 
   const qaLoggedRef = useRef(false);
   useEffect(() => {
     if (qaLoggedRef.current) return;
     qaLoggedRef.current = true;
-    console.log(useLiveTrends ? "TrendsChart bruker LIVE-data" : "TrendsChart bruker MOCK-data");
-  }, [useLiveTrends]);
+    console.log("[SESSION VIEW] TrendsChart bruker LIVE-data");
+  }, []);
 
   const calibrated = useMemo(
     () =>
@@ -461,33 +453,32 @@ export default function SessionView() {
     setShowCalibration(false);
   }
 
- /** Props-normalisering til SessionCard (unngå typekollisjon) */
-type SessionCardProps = React.ComponentProps<typeof SessionCard>;
-const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
-  if (!effectiveSession) return null;
+  /** Props-normalisering til SessionCard (unngå typekollisjon) */
+  type SessionCardProps = React.ComponentProps<typeof SessionCard>;
+  const sessionForCard = useMemo<SessionCardProps["session"] | null>(() => {
+    if (!effectiveSession) return null;
 
-  // Lag en kopi og fjern precision_watt_ci uten å binde en ubrukt variabel
-  const base = { ...(effectiveSession as SessionReport) };
-  delete (base as unknown as { precision_watt_ci?: unknown }).precision_watt_ci;
+    // Lag en kopi og fjern precision_watt_ci uten å binde en ubrukt variabel
+    const base = { ...(effectiveSession as SessionReport) };
+    delete (base as unknown as { precision_watt_ci?: unknown }).precision_watt_ci;
 
-  const watts =
-    Array.isArray(effectiveSession.watts)
-      ? effectiveSession.watts
-      : typeof effectiveSession.watts === "number"
-      ? [effectiveSession.watts]
-      : null;
+    const watts =
+      Array.isArray(effectiveSession.watts)
+        ? effectiveSession.watts
+        : typeof effectiveSession.watts === "number"
+        ? [effectiveSession.watts]
+        : null;
 
-  const sources = Array.isArray(effectiveSession.sources)
-    ? effectiveSession.sources
-    : undefined;
+    const sources = Array.isArray(effectiveSession.sources)
+      ? effectiveSession.sources
+      : undefined;
 
-  return {
-    ...base,
-    watts,
-    sources,
-  } as SessionCardProps["session"];
-}, [effectiveSession]);
-
+    return {
+      ...base,
+      watts,
+      sources,
+    } as SessionCardProps["session"];
+  }, [effectiveSession]);
 
   return (
     <div className="page">
