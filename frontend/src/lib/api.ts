@@ -17,9 +17,6 @@ function normalizeBase(url?: string): string | undefined {
   return url.replace(/\/+$/, "");
 }
 
-/** Liten hjelp for realisme i mock */
-const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
-
 /** Dev-bryter: ?simulateInvalid i URL for å teste ugyldig/manglende schema_version */
 function shouldSimulateInvalid(): boolean {
   try {
@@ -56,18 +53,18 @@ export async function fetchWithTimeout(
   try {
     const res = await fetch(input, { ...rest, signal: ac.signal });
     return res;
- } catch (err: unknown) {
-  const isAbort =
-    typeof err === "object" &&
-    err !== null &&
-    "name" in err &&
-    (err as { name?: unknown }).name === "AbortError";
+  } catch (err: unknown) {
+    const isAbort =
+      typeof err === "object" &&
+      err !== null &&
+      "name" in err &&
+      (err as { name?: unknown }).name === "AbortError";
 
-  if (isAbort) {
-    throw new Error("Tidsavbrudd: forespørselen tok for lang tid.");
-  }
-  throw err instanceof Error ? err : new Error(String(err));
-} finally {
+    if (isAbort) {
+      throw new Error("Tidsavbrudd: forespørselen tok for lang tid.");
+    }
+    throw err instanceof Error ? err : new Error(String(err));
+  } finally {
     clearTimeout(timeoutId);
   }
 }
@@ -92,81 +89,85 @@ async function safeReadText(res: Response): Promise<string> {
   }
 }
 
-/** Bygg URL til analyze_session */
-function buildAnalyzeUrl(base: string, id: string): string {
-  return `${base}/api/analyze_session?id=${encodeURIComponent(id)}`;
-}
-
 /**
  * Hent en session:
- * - id === "mock" eller BASE mangler → bruk mockSession (kilde: "mock")
- * - ellers → GET {BASE}/api/analyze_session?id={id} (kilde: "live")
+ * - hvis BASE mangler eller id === "mock" → bruk mockSession (kilde: "mock")
+ * - ellers → POST {BASE}/api/sessions/{id}/analyze (kilde: "live")
  * Validerer alltid med Zod + semver.
- * Støtter timeout og ekstern AbortSignal.
  */
-export async function fetchSession(
-  id: string,
-  options?: { timeoutMs?: number; signal?: AbortSignal }
-): Promise<FetchSessionResult> {
-  try {
-    const base = normalizeBase(BASE);
+export async function fetchSession(id: string): Promise<FetchSessionResult> {
+  const base = normalizeBase(BASE);
 
-    // MOCK eller manglende BASE → mock-kilde
-    if (id === "mock" || !base) {
-      await delay(150);
+  // MOCK eller manglende BASE → mock-kilde
+  if (!base || id === "mock") {
+    console.warn(
+      "[API] fetchSession → bruker mockSession (ingen backend eller id === 'mock')"
+    );
 
-      const raw = shouldSimulateInvalid()
-        ? invalidateSchemaForTest(mockSession)
-        : mockSession;
+    const raw = shouldSimulateInvalid()
+      ? invalidateSchemaForTest(mockSession)
+      : mockSession;
 
-      const parsed = safeParseSession(raw);
-      if (!parsed.ok) {
-        return {
-          ok: false,
-          error: `Mock-data validerte ikke: ${parsed.error}`,
-          source: "mock",
-        };
-      }
-      try {
-        ensureSemver(parsed.data.schema_version);
-      } catch (e) {
-        return {
-          ok: false,
-          error:
-            e instanceof Error
-              ? e.message
-              : "Ugyldig schema_version i mock-data.",
-          source: "mock",
-        };
-      }
-      return { ok: true, data: parsed.data, source: "mock" };
-    }
-
-    // LIVE
-    const url = buildAnalyzeUrl(base, id);
-    const resp = await fetchWithTimeout(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      timeoutMs: options?.timeoutMs ?? 10_000,
-      signal: options?.signal,
-    });
-
-    if (!resp.ok) {
-      // Prøv å hente feilkropp (tekst) for mer nyttig tilbakemelding
-      const text = await safeReadText(resp);
+    const parsed = safeParseSession(raw);
+    if (!parsed.ok) {
       return {
         ok: false,
-        error: `HTTP ${resp.status} ${resp.statusText}${
-          text ? ` – ${text}` : ""
-        }`,
+        error: `Mock-data validerte ikke: ${parsed.error}`,
+        source: "mock",
+      };
+    }
+
+    try {
+      ensureSemver(parsed.data.schema_version);
+    } catch (e) {
+      return {
+        ok: false,
+        error:
+          e instanceof Error
+            ? e.message
+            : "Ugyldig schema_version i mock-data.",
+        source: "mock",
+      };
+    }
+
+    return { ok: true, data: parsed.data, source: "mock" };
+  }
+
+  const url = `${base}/api/sessions/${encodeURIComponent(id)}/analyze`;
+  console.log("[API] fetchSession (LIVE) →", url);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      // analyze trenger egentlig ikke body, men noen backends liker eksplisitt {}
+      body: JSON.stringify({}),
+    });
+
+    if (!res.ok) {
+      const text = await safeReadText(res);
+      console.error(
+        "[API] fetchSession LIVE feilet:",
+        res.status,
+        res.statusText,
+        text
+      );
+      return {
+        ok: false,
+        error: `Kunne ikke hente session analyze (${res.status} ${res.statusText})`,
         source: "live",
       };
     }
 
-    // Forsøk å parse JSON
-    const json = await parseJsonSafe(resp);
+    const json = await parseJsonSafe(res);
     if (typeof json === "string") {
-      // parseJsonSafe returnerer string når backend ikke sendte JSON
+      console.error(
+        "[API] fetchSession → backend svarte ikke med JSON",
+        json
+      );
       return {
         ok: false,
         error: "Kunne ikke parse JSON fra backend.",
@@ -181,9 +182,13 @@ export async function fetchSession(
 
     const parsed = safeParseSession(maybeInvalid);
     if (!parsed.ok) {
+      console.error(
+        "[API] fetchSession → safeParseSession feilet",
+        parsed.error
+      );
       return {
         ok: false,
-        error: `Ugyldig respons fra backend: ${parsed.error}`,
+        error: `Ugyldig session-format fra backend: ${parsed.error}`,
         source: "live",
       };
     }
@@ -201,13 +206,122 @@ export async function fetchSession(
       };
     }
 
-    return { ok: true, data: parsed.data, source: "live" };
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
+    return {
+      ok: true,
+      data: parsed.data,
+      source: "live",
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[API] fetchSession → exception:", msg);
     return {
       ok: false,
-      error: message,
-      source: BASE ? ("live" as const) : ("mock" as const),
+      error: msg,
+      source: "live",
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// SESSIONS (fra /api/sessions/list)
+// ---------------------------------------------------------------------------
+
+export type SessionSummary = {
+  id: string;
+
+  // Profil og vær slik backend rapporterer det
+  profile_version?: string | null;
+  weather_source?: string | null;
+
+  // Ferdig label vi kan vise i UI
+  profile_label?: string | null;
+
+  // Reservert til senere når backend/summary.csv gir oss mer
+  start_time?: string | null;
+  precision_watt_avg?: number | null;
+  distance_km?: number | null;
+};
+
+export async function fetchSessionsList(): Promise<SessionSummary[]> {
+  const base = normalizeBase(BASE);
+  if (!base) {
+    console.warn("[API] VITE_BACKEND_URL mangler → tom sessions-liste");
+    return [];
+  }
+
+  const url = `${base}/api/sessions/list`;
+  console.log("[API] fetchSessionsList →", url);
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(
+      `Kunne ikke hente sessions list (${res.status} ${res.statusText})`
+    );
+  }
+
+  const rawJson = await res.json();
+
+  if (!Array.isArray(rawJson)) {
+    console.error("[API] /api/sessions/list svarte ikke med liste", rawJson);
+    throw new Error("Ugyldig svar fra /api/sessions/list");
+  }
+
+  if (rawJson.length > 0) {
+    console.log("[API] /api/sessions/list example row:", rawJson[0]);
+  }
+
+  const mapped: SessionSummary[] = (rawJson as unknown[])
+    .map((row): SessionSummary | null => {
+      if (typeof row !== "object" || row === null) {
+        console.warn(
+          "[API] droppet rad som ikke er objekt i /api/sessions/list",
+          row
+        );
+        return null;
+      }
+
+      const obj = row as Record<string, unknown>;
+
+      const rawId =
+        obj["id"] ??
+        obj["ride_id"] ?? // dette har vi sett i output
+        obj["sid"] ??
+        obj["session_id"] ??
+        obj["activity_id"] ??
+        obj["strava_id"];
+
+      if (!rawId) {
+        console.warn("[API] droppet rad uten id i /api/sessions/list", obj);
+        return null;
+      }
+
+      const profile_version =
+        typeof obj["profile_version"] === "string"
+          ? (obj["profile_version"] as string)
+          : null;
+
+      const weather_source =
+        typeof obj["weather_source"] === "string"
+          ? (obj["weather_source"] as string)
+          : null;
+
+      const profile_label =
+        profile_version && weather_source
+          ? `${profile_version} – vær: ${weather_source}`
+          : profile_version ?? weather_source ?? null;
+
+      return {
+        id: String(rawId),
+        profile_version,
+        weather_source,
+        profile_label,
+        start_time: null,
+        precision_watt_avg: null,
+        distance_km: null,
+      };
+    })
+    .filter((x): x is SessionSummary => x !== null);
+
+  console.log("[API] fetchSessionsList →", mapped.length, "økter");
+  return mapped;
 }

@@ -1,34 +1,37 @@
-// frontend/src/routes/SessionsPage.tsx
 import React, { useEffect } from "react";
 import { useSessionStore } from "../state/sessionStore";
-
-// Lokal type for hva vi forventer at én økt inneholder
-type SessionListItem = {
-  id: string;
-  start_time?: string;
-  precision_watt_avg?: number | null;
-  avg_power?: number | null;
-};
+import { useNavigate } from "react-router-dom";
 
 export const SessionsPage: React.FC = () => {
-  // TS-triks: cast via unknown først, så til vår lokale shape.
   const { sessionsList, loadingList, errorList, loadSessionsList } =
-    (useSessionStore() as unknown) as {
-      sessionsList: SessionListItem[] | null;
-      loadingList: boolean;
-      errorList: string | null;
-      loadSessionsList: () => void;
-    };
+    useSessionStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Last økter når siden åpnes
     loadSessionsList();
   }, [loadSessionsList]);
+
+  const formatDate = (iso?: string | null): string => {
+    if (!iso) return "ukjent";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "ukjent";
+    return d.toLocaleString("nb-NO", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  };
+
+  const formatPrecisionWatt = (value?: number | null): string => {
+    if (typeof value !== "number" || Number.isNaN(value)) return "—";
+    return `${Math.round(value)} W`;
+  };
 
   if (loadingList) {
     return (
       <div className="p-4">
-        <h1 className="text-xl font-semibold mb-2">Økter</h1>
+        <h1 className="text-xl font-semibold mb-2">
+          Økter (fra /api/sessions/list)
+        </h1>
         <p>Laster økter fra backend…</p>
       </div>
     );
@@ -37,7 +40,9 @@ export const SessionsPage: React.FC = () => {
   if (errorList) {
     return (
       <div className="p-4">
-        <h1 className="text-xl font-semibold mb-2">Økter</h1>
+        <h1 className="text-xl font-semibold mb-2">
+          Økter (fra /api/sessions/list)
+        </h1>
         <p className="text-red-600">Feil ved henting av økter: {errorList}</p>
       </div>
     );
@@ -46,49 +51,60 @@ export const SessionsPage: React.FC = () => {
   if (!sessionsList || sessionsList.length === 0) {
     return (
       <div className="p-4">
-        <h1 className="text-xl font-semibold mb-2">Økter</h1>
-        <p>Ingen økter funnet i summary.csv.</p>
+        <h1 className="text-xl font-semibold mb-2">
+          Økter (fra /api/sessions/list)
+        </h1>
+        <p>Fant ingen økter.</p>
       </div>
     );
   }
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-semibold mb-4">Økter (fra summary.csv)</h1>
+      <h1 className="text-xl font-semibold mb-4">
+        Økter (fra /api/sessions/list)
+      </h1>
 
-      <ul className="space-y-2">
-        {sessionsList.map((s: SessionListItem) => {
-          // Bruk precision_watt_avg som hovedkilde,
-          // men fall back til avg_power hvis den mot formodning er satt.
-          const pw =
-            s.precision_watt_avg != null
-              ? s.precision_watt_avg
-              : s.avg_power != null
-              ? s.avg_power
-              : null;
-
-          return (
-            <li
-              key={s.id}
-              className="border rounded-lg p-3 flex flex-col md:flex-row md:items-center md:justify-between"
-            >
+      <div className="space-y-3">
+        {sessionsList.map((s) => (
+          <div
+            key={s.id}
+            className="border rounded-lg p-3 flex flex-col gap-1 bg-white shadow-sm"
+          >
+            <div className="flex justify-between items-center">
               <div>
-                <div className="font-mono text-sm text-gray-700">
-                  ID: {s.id}
-                </div>
-                <div className="text-sm text-gray-500">
-                  Dato: {s.start_time || "ukjent"}
-                </div>
+                <p className="font-medium">ID: {s.id}</p>
+                <p>
+                  Dato: <span>{formatDate(s.start_time)}</span>
+                </p>
+                {s.profile_label && (
+                  <p className="text-sm text-gray-600">
+                    profil: {s.profile_label}
+                  </p>
+                )}
+                {typeof s.distance_km === "number" && (
+                  <p className="text-sm text-gray-600">
+                    Distanse: {s.distance_km.toFixed(1)} km
+                  </p>
+                )}
               </div>
 
-              <div className="mt-1 md:mt-0 text-sm text-gray-700">
-                Precision Watt (snitt):{" "}
-                {pw != null ? `${Math.round(pw)} W` : "—"}
+              <div className="text-right">
+                <p>Precision Watt (snitt):</p>
+                <p className="font-semibold">
+                  {formatPrecisionWatt(s.precision_watt_avg)}
+                </p>
+                <button
+                  className="mt-2 text-blue-600 underline"
+                  onClick={() => navigate(`/session/${s.id}`)}
+                >
+                  Åpne økt
+                </button>
               </div>
-            </li>
-          );
-        })}
-      </ul>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

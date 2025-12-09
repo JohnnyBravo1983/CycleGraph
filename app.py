@@ -25,6 +25,11 @@ from pydantic import BaseModel, Field
 
 from cyclegraph.weather_client import get_weather_for_session, WeatherError
 
+# Legg til imports av routers
+from server.routes import sessions
+from server.routes.profile_router import router as profile_router
+from server.routes.sessions_list_router import router as sessions_list_router
+
 # -----------------------------------------------------------------------------
 # Konfig
 # -----------------------------------------------------------------------------
@@ -33,6 +38,11 @@ API_HOST = os.getenv("CG_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("CG_API_PORT", "5179"))  # default 5179
 
 app = FastAPI(title="CycleGraph API", version="0.1.0")
+
+# Inkluder routerne i app
+app.include_router(sessions.router)
+app.include_router(profile_router)
+app.include_router(sessions_list_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,18 +55,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# -----------------------------------------------------------------------------
-# Router-registrering
-# -----------------------------------------------------------------------------
-
-from server.routes import sessions
-from server.routes.profile_router import router as profile_router
-from server.routes.sessions_list_router import router as sessions_list_router
-
-app.include_router(sessions.router)
-app.include_router(profile_router)
-app.include_router(sessions_list_router)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("cyclegraph.app")
@@ -532,7 +530,13 @@ def api_get_session(sid: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
-
+@app.post("/api/sessions/{sid}/analyze")
+def api_analyze_session(
+    sid: str,
+    body: Optional[AnalyzeRequest2] = Body(None),
+    force_recompute_q: Optional[bool] = Query(None, alias="force"),
+    x_cyclegraph_force: Optional[int] = Header(None),
+):
     """
     Støtter to datakilder:
     1) Inline timeserie (samples/records) dersom ANALYZE_ALLOW_INLINE=1

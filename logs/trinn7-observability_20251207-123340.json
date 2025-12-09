@@ -13,7 +13,7 @@
       "calibrated": false,
       "crr": 0.004,
       "device": "strava",
-      "profile_version": "v1-883d8daf-20251209"
+      "profile_version": "v1-883d8daf-20251207"
     },
     "rolling_watt": 34.74041230310917,
     "total_watt": 57.07899392733807,
@@ -1220,7 +1220,7 @@
     }
   },
   "weather_source": "open-meteo/era5",
-  "profile_version": "v1-883d8daf-20251209",
+  "profile_version": "v1-883d8daf-20251207",
   "profile_used": {
     "rider_weight_kg": 111.0,
     "bike_weight_kg": 8.0,
@@ -1230,6 +1230,6 @@
     "calibrated": false,
     "crr": 0.004,
     "device": "strava",
-    "profile_version": "v1-883d8daf-20251209"
+    "profile_version": "v1-883d8daf-20251207"
   }
 }

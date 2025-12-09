@@ -1,10 +1,10 @@
-Fobreredende Sprint. Sprint 1 Pågår. Startet 8.12. Avsluttet .....
+Fobreredende Sprint. Sprint 1 Pågår. Startet 8.12. Avsluttet .....8.12 Kun en times tid. 
 
 
 
 Når strukturen er satt:
 
-Sprint 1: Routing + Skeleton Pages
+Sprint 1: Routing + Skeleton Pages Starte 8.12 Avsluttet 8.12
 
 Implementere bare layout + navigasjon
 
@@ -34,9 +34,7 @@ State-håndtering
 
 Sprint 4: Login/Signup
 
-Fake/auth-light i starten
-
-Ekte auth senere
+Ekte auth
 
 Sprint 5: Trends
 
