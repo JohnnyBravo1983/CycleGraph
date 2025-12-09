@@ -1,102 +1,101 @@
-﻿/// <reference types="vite/client" />
-
+﻿// frontend/src/state/sessionStore.ts
 import { create } from "zustand";
-import type { SessionReport } from "../types/session";
+import type { SessionListItem, SessionReport } from "../types/session";
 import {
-  fetchSession as fetchSessionApi,
   fetchSessionsList,
+  fetchSession as apiFetchSession,
+  type FetchSessionResult,
 } from "../lib/api";
-import type { SessionSummary } from "../lib/api";
 
-type Source = "api" | "mock" | null;
-
-type SessionState = {
-  // Enkelt-økt (SessionView)
-  session: SessionReport | null;
-  loading: boolean;
-  error: string | null;
-  source: Source;
-  fetchSession: (id?: string) => Promise<void>;
-
-  // Øktliste (SessionsPage / Rides)
-  sessionsList: SessionSummary[] | null;
+interface SessionState {
+  // 🔹 Listevisning (/api/sessions/list)
+  sessionsList: SessionListItem[] | null;
   loadingList: boolean;
   errorList: string | null;
   loadSessionsList: () => Promise<void>;
-};
 
-function getMode(): "api" | "mock" {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  const raw = env?.VITE_BACKEND_MODE as "api" | "mock" | undefined;
-  return raw === "api" ? "api" : "mock";
+  // 🔹 Detaljvisning (SessionView – analyze for én økt)
+  session: SessionReport | null;
+  loading: boolean;
+  error: string | null;
+  fetchSession: (id: string) => Promise<void>;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
-  // Enkelt-økt (SessionView)
-  session: null,
-  loading: false,
-  error: null,
-  source: null,
-
-  // Øktliste (SessionsPage / Rides)
+  // 🚩 Init state – liste
   sessionsList: null,
   loadingList: false,
   errorList: null,
 
-  async fetchSession(id?: string) {
-    set({ loading: true, error: null });
+  // 🚩 Init state – enkelt-session
+  session: null,
+  loading: false,
+  error: null,
 
-    const mode = getMode();
-    const effectiveId = mode === "api" ? (id ?? "mock") : "mock";
-
+  // -----------------------------
+  // Liste: /api/sessions/list
+  // -----------------------------
+  async loadSessionsList() {
+    console.log("[sessionStore.loadSessionsList] KALT");
+    set({ loadingList: true, errorList: null });
     try {
-      const res = await fetchSessionApi(effectiveId);
-
-      if (res.ok) {
-        set({
-          session: res.data,
-          loading: false,
-          error: null,
-          source: res.source === "live" ? "api" : "mock",
-        });
-      } else {
-        set({
-          session: null,
-          loading: false,
-          error: res.error,
-          source: res.source === "live" ? "api" : res.source ?? mode,
-        });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const sessions = await fetchSessionsList();
+      console.log(
+        "[sessionStore.loadSessionsList] Ferdig – antall sessions:",
+        sessions.length,
+      );
       set({
-        session: null,
-        loading: false,
-        error: msg,
-        source: mode,
+        sessionsList: sessions,
+        loadingList: false,
+        errorList: null,
+      });
+    } catch (err) {
+      console.error("[sessionStore.loadSessionsList] Feil:", err);
+      set({
+        loadingList: false,
+        errorList: "Klarte ikke å laste økter fra backend.",
       });
     }
   },
 
-  async loadSessionsList() {
-    set({ loadingList: true, errorList: null });
+  // -----------------------------
+  // Enkelt-økt: POST /api/sessions/{sid}/analyze
+  // -----------------------------
+  async fetchSession(id: string) {
+    console.log("[sessionStore.fetchSession] KALT med id:", id);
+    set({ loading: true, error: null });
 
+    let result: FetchSessionResult;
     try {
-      // fetchSessionsList() returnerer nå rett SessionSummary[]
-      const list = await fetchSessionsList();
-
+      result = await apiFetchSession(id);
+    } catch (err) {
+      console.error("[sessionStore.fetchSession] Uventet feil:", err);
       set({
-        sessionsList: list,
-        loadingList: false,
-        errorList: null,
+        loading: false,
+        error: "Klarte ikke å hente analyse for økten.",
       });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      set({
-        sessionsList: null,
-        loadingList: false,
-        errorList: msg,
-      });
+      return;
     }
+
+    if (!result.ok) {
+      console.warn(
+        "[sessionStore.fetchSession] analyze-feil:",
+        result.error,
+        "source=",
+        result.source,
+      );
+      set({
+        loading: false,
+        error: result.error || "Noe gikk galt ved henting av økt.",
+      });
+      return;
+    }
+
+    console.log("[sessionStore.fetchSession] OK – har session-data");
+    set({
+      session: result.data,
+      loading: false,
+      error: null,
+    });
   },
 }));

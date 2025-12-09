@@ -222,106 +222,182 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// SESSIONS (fra /api/sessions/list)
-// ---------------------------------------------------------------------------
+// -----------------------------
+// Sessions-list (/api/sessions/list)
+// -----------------------------
 
-export type SessionSummary = {
-  id: string;
-
-  // Profil og vær slik backend rapporterer det
-  profile_version?: string | null;
-  weather_source?: string | null;
-
-  // Ferdig label vi kan vise i UI
-  profile_label?: string | null;
-
-  // Reservert til senere når backend/summary.csv gir oss mer
-  start_time?: string | null;
-  precision_watt_avg?: number | null;
-  distance_km?: number | null;
+export type SessionListItem = {
+  session_id: string;
+  ride_id: string;
+  start_time: string | null;
+  distance_km: number | null;
+  precision_watt_avg: number | null;
+  profile_label: string | null;
+  weather_source: string | null;
 };
 
-export async function fetchSessionsList(): Promise<SessionSummary[]> {
-  const base = normalizeBase(BASE);
-  if (!base) {
-    console.warn("[API] VITE_BACKEND_URL mangler → tom sessions-liste");
+type RawSession = {
+  id?: string | number;
+  session_id?: string | number;
+  ride_id?: string | number;
+
+  // mulige feltnavn for tid/dato
+  start_time?: string | null;
+  started_at?: string | null;
+  start?: string | null;
+  date?: string | null;
+
+  // distanse
+  distance_km?: number | null;
+  distance?: number | null;
+  distance_m?: number | null;
+
+  // watt / precision
+  precision_watt_avg?: number | null;
+  avg_watt?: number | null;
+  precision_watt?: number | null;
+  metrics?: {
+    precision_watt?: number | null;
+  } | null;
+
+  profile_label?: string | null;
+  profile_used?: string | null;
+  profile?: string | null;
+  profile_version?: string | null; // 👈 lagt til
+
+  weather_source?: string | null;
+  weather?: { source?: string | null } | null;
+};
+
+export async function fetchSessionsList(): Promise<SessionListItem[]> {
+  if (!BASE) {
+    console.log(
+      "[api.fetchSessionsList] Mangler VITE_BACKEND_URL – returnerer tom liste."
+    );
     return [];
   }
 
-  const url = `${base}/api/sessions/list`;
+  const url = `${normalizeBase(BASE)}/api/sessions/list`;
   console.log("[API] fetchSessionsList →", url);
 
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    console.error("[api.fetchSessionsList] Nettverksfeil:", err);
+    return [];
+  }
+
+  console.log(
+    "[API] fetchSessionsList status:",
+    res.status,
+    res.statusText
+  );
+
   if (!res.ok) {
-    throw new Error(
-      `Kunne ikke hente sessions list (${res.status} ${res.statusText})`
+    console.error(
+      "[api.fetchSessionsList] Backend svarte ikke OK:",
+      res.status,
+      res.statusText
     );
+    return [];
   }
 
-  const rawJson = await res.json();
-
-  if (!Array.isArray(rawJson)) {
-    console.error("[API] /api/sessions/list svarte ikke med liste", rawJson);
-    throw new Error("Ugyldig svar fra /api/sessions/list");
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch (err) {
+    console.error("[api.fetchSessionsList] Klarte ikke å parse JSON:", err);
+    return [];
   }
 
-  if (rawJson.length > 0) {
-    console.log("[API] /api/sessions/list example row:", rawJson[0]);
+  console.log("[API] fetchSessionsList raw JSON:", json);
+
+  // Støtt både:
+  // 1) [ { ... }, { ... } ]
+  // 2) { sessions: [ ... ] }
+  const rawList: RawSession[] = Array.isArray(json)
+    ? (json as RawSession[])
+    : json &&
+      typeof json === "object" &&
+      Array.isArray((json as { sessions?: unknown }).sessions)
+    ? ((json as { sessions: RawSession[] }).sessions)
+    : [];
+
+  if (!Array.isArray(rawList) || rawList.length === 0) {
+    console.warn("[api.fetchSessionsList] Ingen sessions i responsen.");
+    return [];
   }
 
-  const mapped: SessionSummary[] = (rawJson as unknown[])
-    .map((row): SessionSummary | null => {
-      if (typeof row !== "object" || row === null) {
+  const mapped: SessionListItem[] = rawList
+    .map((raw, idx): SessionListItem | null => {
+      const rideId = raw.ride_id ?? raw.session_id ?? raw.id;
+      if (rideId === undefined || rideId === null) {
         console.warn(
-          "[API] droppet rad som ikke er objekt i /api/sessions/list",
-          row
+          `[api.fetchSessionsList] Hopper over entry uten ride_id/session_id (index ${idx}):`,
+          raw
         );
         return null;
       }
 
-      const obj = row as Record<string, unknown>;
+      // 🔹 Velg beste kandidat for start_time
+      const startTime =
+        raw.start_time ??
+        raw.started_at ??
+        raw.start ??
+        raw.date ??
+        null;
 
-      const rawId =
-        obj["id"] ??
-        obj["ride_id"] ?? // dette har vi sett i output
-        obj["sid"] ??
-        obj["session_id"] ??
-        obj["activity_id"] ??
-        obj["strava_id"];
-
-      if (!rawId) {
-        console.warn("[API] droppet rad uten id i /api/sessions/list", obj);
-        return null;
-      }
-
-      const profile_version =
-        typeof obj["profile_version"] === "string"
-          ? (obj["profile_version"] as string)
+      // 🔹 Distanse: km hvis mulig, ellers m → km
+      const distanceKm =
+        typeof raw.distance_km === "number"
+          ? raw.distance_km
+          : typeof raw.distance === "number"
+          ? raw.distance
+          : typeof raw.distance_m === "number"
+          ? raw.distance_m / 1000
           : null;
 
-      const weather_source =
-        typeof obj["weather_source"] === "string"
-          ? (obj["weather_source"] as string)
+      // 🔹 Precision Watt snitt: prøv flere felter
+      const precisionAvg =
+        typeof raw.precision_watt_avg === "number"
+          ? raw.precision_watt_avg
+          : typeof raw.avg_watt === "number"
+          ? raw.avg_watt
+          : typeof raw.precision_watt === "number"
+          ? raw.precision_watt
+          : typeof raw.metrics?.precision_watt === "number"
+          ? raw.metrics.precision_watt
           : null;
 
-      const profile_label =
-        profile_version && weather_source
-          ? `${profile_version} – vær: ${weather_source}`
-          : profile_version ?? weather_source ?? null;
+      const profileLabel =
+        raw.profile_label ??
+        raw.profile_used ??
+        raw.profile ??
+        raw.profile_version ?? // 👈 ny kandidat
+        null;
+
+      const weatherSource =
+        raw.weather_source ??
+        raw.weather?.source ??
+        null;
 
       return {
-        id: String(rawId),
-        profile_version,
-        weather_source,
-        profile_label,
-        start_time: null,
-        precision_watt_avg: null,
-        distance_km: null,
+        session_id: String(raw.session_id ?? rideId),
+        ride_id: String(rideId),
+        start_time: startTime,
+        distance_km: distanceKm,
+        precision_watt_avg: precisionAvg,
+        profile_label: profileLabel,
+        weather_source: weatherSource,
       };
     })
-    .filter((x): x is SessionSummary => x !== null);
+    .filter((x): x is SessionListItem => x !== null);
 
-  console.log("[API] fetchSessionsList →", mapped.length, "økter");
+  console.log(
+    `[api.fetchSessionsList] Mappet ${mapped.length} økter (fra ${rawList.length})`,
+    mapped
+  );
+
   return mapped;
 }

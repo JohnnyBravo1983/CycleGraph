@@ -1,6 +1,8 @@
+// frontend/src/routes/SessionsPage.tsx
 import React, { useEffect } from "react";
-import { useSessionStore } from "../state/sessionStore";
 import { useNavigate } from "react-router-dom";
+import { useSessionStore } from "../state/sessionStore";
+import type { SessionListItem } from "../types/session";
 
 export const SessionsPage: React.FC = () => {
   const { sessionsList, loadingList, errorList, loadSessionsList } =
@@ -8,6 +10,7 @@ export const SessionsPage: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    console.debug("[SessionsPage] mount → henter økter...");
     loadSessionsList();
   }, [loadSessionsList]);
 
@@ -21,17 +24,28 @@ export const SessionsPage: React.FC = () => {
     });
   };
 
-  const formatPrecisionWatt = (value?: number | null): string => {
-    if (typeof value !== "number" || Number.isNaN(value)) return "—";
-    return `${Math.round(value)} W`;
+  const formatPrecision = (value?: number | null): string => {
+    if (value == null || Number.isNaN(value)) return "—";
+    return `${value.toFixed(0)} W`;
+  };
+
+  const handleOpen = (s: SessionListItem) => {
+    const id = s.ride_id || s.session_id;
+    if (!id) {
+      console.warn(
+        "[SessionsPage] Kan ikke navigere – mangler ride_id/session_id",
+        s,
+      );
+      return;
+    }
+    console.debug("[SessionsPage] navigate → /sessions/", id);
+    navigate(`/sessions/${id}`);
   };
 
   if (loadingList) {
     return (
       <div className="p-4">
-        <h1 className="text-xl font-semibold mb-2">
-          Økter (fra /api/sessions/list)
-        </h1>
+        <h1 className="text-xl font-semibold mb-2">Økter</h1>
         <p>Laster økter fra backend…</p>
       </div>
     );
@@ -40,10 +54,17 @@ export const SessionsPage: React.FC = () => {
   if (errorList) {
     return (
       <div className="p-4">
-        <h1 className="text-xl font-semibold mb-2">
-          Økter (fra /api/sessions/list)
-        </h1>
-        <p className="text-red-600">Feil ved henting av økter: {errorList}</p>
+        <h1 className="text-xl font-semibold mb-2">Økter</h1>
+        <p className="text-red-600 mb-4">
+          Klarte ikke å laste økter: {errorList}
+        </p>
+        <button
+          type="button"
+          className="px-3 py-1 rounded bg-blue-600 text-white"
+          onClick={() => loadSessionsList()}
+        >
+          Prøv igjen
+        </button>
       </div>
     );
   }
@@ -54,7 +75,7 @@ export const SessionsPage: React.FC = () => {
         <h1 className="text-xl font-semibold mb-2">
           Økter (fra /api/sessions/list)
         </h1>
-        <p>Fant ingen økter.</p>
+        <p>Fant ingen økter i backend.</p>
       </div>
     );
   }
@@ -66,44 +87,49 @@ export const SessionsPage: React.FC = () => {
       </h1>
 
       <div className="space-y-3">
-        {sessionsList.map((s) => (
-          <div
-            key={s.id}
-            className="border rounded-lg p-3 flex flex-col gap-1 bg-white shadow-sm"
-          >
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="font-medium">ID: {s.id}</p>
-                <p>
-                  Dato: <span>{formatDate(s.start_time)}</span>
-                </p>
-                {s.profile_label && (
-                  <p className="text-sm text-gray-600">
-                    profil: {s.profile_label}
-                  </p>
-                )}
-                {typeof s.distance_km === "number" && (
-                  <p className="text-sm text-gray-600">
-                    Distanse: {s.distance_km.toFixed(1)} km
-                  </p>
-                )}
+        {sessionsList.map((s) => {
+          const key = s.session_id ?? s.ride_id;
+          const idLabel = s.ride_id ?? s.session_id ?? "ukjent";
+          const dateLabel = formatDate(s.start_time);
+          const precisionLabel = formatPrecision(s.precision_watt_avg);
+          const profileLabel = s.profile_label ?? "ukjent profil";
+          const weatherLabel = s.weather_source ?? "ukjent værkilde";
+
+          return (
+            <div
+              key={key}
+              className="border rounded-lg px-4 py-3 bg-white shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="space-y-1">
+                <div>
+                  <span className="font-semibold">ID:</span> {idLabel}
+                </div>
+                <div>
+                  <span className="font-semibold">Dato:</span> {dateLabel}
+                </div>
+                <div className="text-sm text-gray-600">
+                  profil: {profileLabel} – vær: {weatherLabel}
+                </div>
               </div>
 
-              <div className="text-right">
-                <p>Precision Watt (snitt):</p>
-                <p className="font-semibold">
-                  {formatPrecisionWatt(s.precision_watt_avg)}
-                </p>
+              <div className="mt-3 sm:mt-0 flex items-center gap-4">
+                <div className="text-right">
+                  <div className="text-xs text-gray-500">
+                    Precision Watt (snitt):
+                  </div>
+                  <div className="font-semibold">{precisionLabel}</div>
+                </div>
                 <button
-                  className="mt-2 text-blue-600 underline"
-                  onClick={() => navigate(`/session/${s.id}`)}
+                  type="button"
+                  className="text-blue-600 underline text-sm"
+                  onClick={() => handleOpen(s)}
                 >
                   Åpne økt
                 </button>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

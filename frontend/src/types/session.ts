@@ -1,10 +1,33 @@
 // frontend/src/types/session.ts
 
+/** En linje i sessions-lista (/api/sessions/list) */
+export interface SessionListItem {
+  /** Unik ID for økt på serversiden (kan være lik ride_id, men vi skiller de) */
+  session_id: string;
+  /** Strava- eller internt ride-id */
+  ride_id: string;
+
+  /** Menneskelig / ISO starttidspunkt */
+  start_time?: string | null;
+
+  /** Total distanse i kilometer */
+  distance_km?: number | null;
+
+  /** Gjennomsnittlig Precision Watt for økta (snitt) */
+  precision_watt_avg?: number | null;
+
+  /** F.eks. "v1-a0c54a9e-20251209" */
+  profile_label?: string | null;
+
+  /** F.eks. "open-meteo" */
+  weather_source?: string | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Type-definisjon for SessionReport – tåler HR-only (watts kan mangle/null)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type SessionMode = 'indoor' | 'outdoor';
+export type SessionMode = "indoor" | "outdoor";
 
 export type SessionReport = {
   schema_version: string; // SemVer
@@ -88,13 +111,7 @@ export type SessionReport = {
 // Hjelpetype for å plukke ut nøkkelmetrikker i UI (SessionCard m.m.)
 export type KeyMetrics = Pick<
   SessionReport,
-  | 'np'
-  | 'if_'
-  | 'vi'
-  | 'pa_hr'
-  | 'w_per_beat'
-  | 'cgs'
-  | 'precision_watt_value'
+  "np" | "if_" | "vi" | "pa_hr" | "w_per_beat" | "cgs" | "precision_watt_value"
 >;
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -103,22 +120,22 @@ export type KeyMetrics = Pick<
    Alle nye felt er valgfrie for bakoverkompatibilitet.
 ──────────────────────────────────────────────────────────────────────────── */
 
-export type PublishState = 'none' | 'pending' | 'published' | 'failed';
+export type PublishState = "none" | "pending" | "published" | "failed";
 
 /** Match mot schema/session_metrics.v1.json */
 export interface SessionMetrics {
   user_id: string;
-  date: string;           // ISO-date (YYYY-MM-DD)
+  date: string; // ISO-date (YYYY-MM-DD)
   avg_watt: number;
   duration_min: number;
 
   // S14 – Bike Setup / fysikk
   bike_type?: string;
-  bike_weight?: number;   // kg
-  tire_width?: number;    // mm
-  tire_quality?: string;  // "Trening" | "Vanlig" | "Ritt" | fri tekst
+  bike_weight?: number; // kg
+  tire_width?: number; // mm
+  tire_quality?: string; // "Trening" | "Vanlig" | "Ritt" | fri tekst
   crr_used?: number;
-  rider_weight?: number;  // kg
+  rider_weight?: number; // kg
   bike_name?: string;
 
   // S14 – Precision Watt (aggregert/lagret per økt)
@@ -129,7 +146,7 @@ export interface SessionMetrics {
   publish_state?: PublishState;
   publish_hash?: string;
   published_to_strava?: boolean;
-  publish_time?: string;  // ISO date-time
+  publish_time?: string; // ISO date-time
 
   // Schema-versjon (v0.7.x)
   schema_version: string;
