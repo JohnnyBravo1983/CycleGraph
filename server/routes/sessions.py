@@ -1,5 +1,7 @@
 ﻿# server/routes/sessions.py
 from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Request, Query
 from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
 
 import json
@@ -12,33 +14,9 @@ import os
 import csv
 import datetime
 import re
+import glob
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
-
-from fastapi import APIRouter, HTTPException, Request, Query
-
-
-# Trinn 15 helpers (robust import + trygg fallback)
-try:
-    from server.analysis.calibration15 import (
-        compute_estimated_error_and_hint,
-        append_benchmark_candidate,
-    )
-except Exception:
-    def compute_estimated_error_and_hint(profile, weather):
-        return [15.0, 17.0], "unknown", 0
-    def append_benchmark_candidate(**kwargs):
-        return False
-
-# Primær import med trygg fallback (brukes i standardstien)
-try:
-    from cli.rust_bindings import rs_power_json  # ✅ primær
-except Exception:
-    try:
-        from cyclegraph.cli.rust_bindings import rs_power_json  # ✅ pakket namespace fallback
-    except Exception as e_imp:
-        rs_power_json = None  # type: ignore
-        _adapter_import_error = e_imp
+from typing import Any, Dict, Tuple, Optional, List
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -70,6 +48,21 @@ def _load_result_doc(session_id: str) -> Optional[Dict[str, Any]]:
             continue
 
     return None
+
+
+def _ride_id_from_result_path(path: str) -> str:
+    """
+    Fallback: hent ride_id fra filnavnet, f.eks.
+      logs/results/result_16127771071.json -> "16127771071"
+    """
+    base = os.path.basename(path)
+    m = re.match(r"result_(.+)\.json$", base)
+    if m:
+        return m.group(1)
+    return ""
+
+
+
 
 
 G = 9.80665
@@ -1437,4 +1430,3 @@ def get_session(session_id: str) -> Dict[str, Any]:
         "debug_error": debug_error,
 
     }
-

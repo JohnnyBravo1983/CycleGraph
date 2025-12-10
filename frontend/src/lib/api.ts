@@ -277,7 +277,7 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
     return [];
   }
 
-  const url = `${normalizeBase(BASE)}/api/sessions/list`;
+  const url = `${BASE}/sessions/list/all`;
   console.log("[API] fetchSessionsList →", url);
 
   let res: Response;

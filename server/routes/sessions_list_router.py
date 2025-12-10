@@ -1,123 +1,165 @@
+# server/routes/sessions_list_router.py
 from __future__ import annotations
-from fastapi import APIRouter
+
+import glob
+import json
+import os
+import re
 from typing import Any, Dict, List, Optional
-import glob, json, os, re
+
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-RESULTS_DIR = os.path.join(os.getcwd(), "logs", "results")
-DEBUG_DIR = os.path.join(os.getcwd(), "_debug")
+BASE_DIR = os.getcwd()
+RESULTS_DIR = os.path.join(BASE_DIR, "logs", "results")
+DEBUG_DIR = os.path.join(BASE_DIR, "_debug")
 
 
-def _ride_id_from_path(path: str) -> str:
+def _ride_id_from_result_path(path: str) -> Optional[str]:
     """
-    Fallback: hent ride_id fra filnavnet, f.eks.
-      logs/results/result_16127771071.json -> "16127771071"
+    Trekk ut ren numerisk ride_id fra result_*.json.
+    Ignorerer f.eks. result_16127771071__backup.json.
     """
     base = os.path.basename(path)
-    m = re.match(r"result_(.+)\.json$", base)
-    if m:
-        return m.group(1)
-    return ""
+    m = re.match(r"result_(\d+)\.json$", base)
+    if not m:
+        return None
+    return m.group(1)
 
 
-def _load_result_doc(session_id: str) -> Optional[Dict[str, Any]]:
+def _load_result_for_list(ride_id: str) -> Optional[Dict[str, Any]]:
     """
-    Prøv å laste analysert resultat for en gitt økt/ride_id.
-    1) logs/results/result_<id>.json
-    2) _debug/result_<id>.json
+    Minimal og eksplisitt loader for listeendepunktet:
+    - Prøv _debug/result_{ride_id}.json først (ferdiganalysert)
+    - Fallback til logs/results/result_{ride_id}.json
+    - Les alltid med utf-8-sig for å håndtere BOM.
     """
-    candidates: list[str] = []
-
-    # Primær: resultat fra ordinær pipeline
-    candidates.append(os.path.join(RESULTS_DIR, f"result_{session_id}.json"))
-    # Fallback/fasit: debug-katalog
-    candidates.append(os.path.join(DEBUG_DIR, f"result_{session_id}.json"))
+    candidates = [
+        os.path.join(DEBUG_DIR, f"result_{ride_id}.json"),
+        os.path.join(RESULTS_DIR, f"result_{ride_id}.json"),
+    ]
 
     for path in candidates:
         if not os.path.exists(path):
             continue
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            # Hvis en fil er korrupt el.l., prøv neste kandidat
-            continue
 
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                doc = json.load(f)
+            print(
+                f"[sessions_list_router] loaded ride_id={ride_id} from {path}",
+                flush=True,
+            )
+            return doc
+        except Exception as e:
+            print(
+                "[sessions_list_router][ERROR load] "
+                f"ride_id={ride_id} path={path} error={repr(e)}",
+                flush=True,
+            )
+            return None
+
+    print(
+        f"[sessions_list_router] NO FILE for ride_id={ride_id} "
+        f"(candidates: {candidates})",
+        flush=True,
+    )
     return None
 
 
-@router.get("/list")
+@router.get("/list/all")
 def list_sessions() -> List[Dict[str, Any]]:
+    """
+    Returner en liste over økter basert på result_*.json i logs/results,
+    men les selve innholdet fra _debug/ eller logs/results slik at vi
+    får samme analyse som /api/sessions/{session_id}.
+    """
     rows: List[Dict[str, Any]] = []
 
-    for path in glob.glob(os.path.join(RESULTS_DIR, "result_*.json")):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                doc = json.load(f)
+    pattern = os.path.join(RESULTS_DIR, "result_*.json")
+    print(f"[sessions_list_router] scanning pattern={pattern}", flush=True)
 
-            # Primær: hent fra selve JSON-dokumentet
-            ride_id = str(doc.get("ride_id") or doc.get("id") or "")
-
-            # Fallback: hent fra filnavnet hvis ride_id mangler i doc
-            if not ride_id:
-                ride_id = _ride_id_from_path(path)
-
-            # Hvis vi fortsatt ikke har noe id, hopp over denne fila
-            if not ride_id:
-                continue
-
-            rows.append(
-                {
-                    "ride_id": ride_id,
-                    "id": ride_id,  # ekstra alias for frontendens skyld
-                    "profile_version": doc.get("profile_version"),
-                    "weather_source": (
-                        doc.get("weather_source")
-                        or (doc.get("metrics") or {}).get("weather_source")
-                    ),
-                }
+    for path in glob.glob(pattern):
+        ride_id = _ride_id_from_result_path(path)
+        if not ride_id:
+            print(
+                f"[sessions_list_router] skip non-numeric file: {path}",
+                flush=True,
             )
-        except Exception:
             continue
 
-    return rows
+        result_doc = _load_result_for_list(ride_id)
+        if not result_doc:
+            print(
+                f"[sessions_list_router] NO RESULT DOC for ride_id={ride_id}",
+                flush=True,
+            )
+            continue
 
-
-@router.get("/{session_id}")
-def get_session(session_id: str) -> Dict[str, Any]:
-    """
-    Returner enkel sessions-respons, men med Precision Watt fra analysert resultat
-    hvis det finnes på disk.
-    """
-    result_doc = _load_result_doc(session_id)
-
-    if result_doc:
         metrics = result_doc.get("metrics") or {}
+        if not isinstance(metrics, dict):
+            metrics = {}
 
-        precision_watt = metrics.get("precision_watt")
-        precision_watt_ci = metrics.get("precision_watt_ci")  # hvis vi får det senere
+        # --- Precision Watt ---
+        precision_watt_avg: Optional[float] = None
 
-        # Beholder eksisterende felter hvis de finnes i result_doc, ellers None
-        return {
-            "session_id": session_id,
-            "precision_watt": precision_watt,
-            "precision_watt_ci": precision_watt_ci,
-            "strava_activity_id": result_doc.get("strava_activity_id"),
-            "publish_state": result_doc.get("publish_state"),
-            "publish_time": result_doc.get("publish_time"),
-            "publish_hash": result_doc.get("publish_hash", ""),
-            "publish_error": result_doc.get("publish_error"),
-        }
+        pw_avg = result_doc.get("precision_watt_avg")
+        if isinstance(pw_avg, (int, float)):
+            precision_watt_avg = float(pw_avg)
+        else:
+            pw = metrics.get("precision_watt")
+            if not isinstance(pw, (int, float)):
+                pw = result_doc.get("precision_watt")
+            if isinstance(pw, (int, float)):
+                precision_watt_avg = float(pw)
 
-    # Fallback – hvis vi ikke fant noen result_*.json
-    return {
-        "session_id": session_id,
-        "precision_watt": None,
-        "precision_watt_ci": None,
-        "strava_activity_id": None,
-        "publish_state": None,
-        "publish_time": None,
-        "publish_hash": "",
-        "publish_error": None,
-    }
+        # --- profile_version ---
+        profile_used = metrics.get("profile_used") or {}
+        if not isinstance(profile_used, dict):
+            profile_used = {}
+
+        profile_version = result_doc.get("profile_version") or profile_used.get(
+            "profile_version"
+        )
+
+        # --- weather_source ---
+        weather_used = metrics.get("weather_used") or {}
+        if not isinstance(weather_used, dict):
+            weather_used = {}
+
+        weather_source = (
+            result_doc.get("weather_source")
+            or metrics.get("weather_source")
+            or weather_used.get("provider")
+            or weather_used.get("source")
+        )
+
+        # --- start_time / distance_km ---
+        start_time = result_doc.get("start_time")
+        distance_km = result_doc.get("distance_km")
+
+        if ride_id == "16127771071":
+            print(
+                "[sessions_list_router][DEBUG 16127771071] "
+                f"keys={list(result_doc.keys())}; "
+                f"metrics_keys={list(metrics.keys())}; "
+                f"precision_watt={result_doc.get('precision_watt')}; "
+                f"precision_watt_avg={precision_watt_avg}",
+                flush=True,
+            )
+
+        rows.append(
+            {
+                "ride_id": ride_id,
+                "id": ride_id,
+                "profile_version": profile_version,
+                "weather_source": weather_source,
+                "start_time": start_time,
+                "distance_km": distance_km,
+                "precision_watt_avg": precision_watt_avg,
+            }
+        )
+
+    print(f"[sessions_list_router] built {len(rows)} rows", flush=True)
+    return rows
