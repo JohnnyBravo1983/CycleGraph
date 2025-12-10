@@ -42,6 +42,36 @@ except Exception:
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
+
+RESULTS_DIR = os.path.join(os.getcwd(), "logs", "results")
+DEBUG_DIR = os.path.join(os.getcwd(), "_debug")
+
+
+def _load_result_doc(session_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Prøv å laste analysert resultat for en gitt økt/ride_id.
+    1) _debug/result_<id>.json (fasit fra scriptet)
+    2) logs/results/result_<id>.json (fallback/skall)
+    """
+    candidates: list[str] = []
+
+    # 1) Script/analysis sin _debug-mappe (fasit hvis den finnes)
+    candidates.append(os.path.join(DEBUG_DIR, f"result_{session_id}.json"))
+    # 2) Standard result-mappe som fallback
+    candidates.append(os.path.join(RESULTS_DIR, f"result_{session_id}.json"))
+
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            continue
+
+    return None
+
+
 G = 9.80665
 RHO_DEFAULT = 1.225  # enkel fallback-rho
 
@@ -1315,3 +1345,96 @@ async def analyze_session(
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
     return resp
+
+
+@router.get("/{session_id}")
+def get_session(session_id: str) -> Dict[str, Any]:
+    """
+    Returner enkel sessions-respons, med Precision Watt hentet fra
+    enten _debug/result_<id>.json (fasit) eller logs/results/result_<id>.json (fallback).
+    I tillegg returnerer vi litt debug-info om hvilke paths som ble sjekket.
+    """
+
+    base_dir = os.getcwd()
+    debug_path = os.path.join(base_dir, "_debug", f"result_{session_id}.json")
+    results_path = os.path.join(base_dir, "logs", "results", f"result_{session_id}.json")
+
+    debug_exists = os.path.exists(debug_path)
+    results_exists = os.path.exists(results_path)
+
+    doc: Optional[Dict[str, Any]] = None
+    source = None  # liten debug-tag så vi ser hva som brukes
+
+    debug_error: Optional[str] = None
+
+    # 1) Prøv _debug først (sanntidsanalyse fra scriptet)
+    if debug_exists:
+        try:
+            # utf-8-sig stripper BOM automatisk (løser JSONDecodeError på BOM)
+            with open(debug_path, "r", encoding="utf-8-sig") as f:
+                doc = json.load(f)
+                source = "_debug"
+        except Exception as e_any:
+            debug_error = f"debug read error: {e_any!r}"
+            doc = None
+
+
+
+    # 2) Hvis vi ikke fikk debug-doc, prøv logs/results som fallback
+    if doc is None and results_exists:
+        try:
+            with open(results_path, "r", encoding="utf-8") as f:
+                doc = json.load(f)
+                source = "logs/results"
+        except Exception:
+            doc = None
+
+    # 3) Hvis vi fant en doc et av stedene, trekk ut metrics + kjente felter
+    if doc is not None:
+        metrics = doc.get("metrics") or {}
+
+        precision_watt = metrics.get("precision_watt")
+        precision_watt_ci = metrics.get("precision_watt_ci")
+
+        return {
+            "session_id": session_id,
+            "precision_watt": precision_watt,
+            "precision_watt_ci": precision_watt_ci,
+            "strava_activity_id": doc.get("strava_activity_id"),
+            "publish_state": doc.get("publish_state"),
+            "publish_time": doc.get("publish_time"),
+            "publish_hash": doc.get("publish_hash", ""),
+            "publish_error": doc.get("publish_error"),
+            # ekstra debug-felt
+            "analysis_source": source,
+            "raw_has_metrics": bool(metrics),
+            "base_dir": base_dir,
+            "debug_path": debug_path,
+            "debug_exists": debug_exists,
+            "results_path": results_path,
+            "results_exists": results_exists,
+            "debug_error": debug_error,
+        }
+
+    # 4) Fallback – vi fant ingen result-fil for denne økten
+    return {
+        "session_id": session_id,
+        "precision_watt": None,
+        "precision_watt_ci": None,
+        "strava_activity_id": None,
+        "publish_state": None,
+        "publish_time": None,
+        "publish_hash": "",
+        "publish_error": None,
+        # ekstra debug-felt
+        "analysis_source": None,
+        "raw_has_metrics": False,
+        "base_dir": base_dir,
+        "debug_path": debug_path,
+        "debug_exists": debug_exists,
+        "results_path": results_path,
+        "results_exists": results_exists,
+        "debug_error": debug_error,
+
+    }
+
