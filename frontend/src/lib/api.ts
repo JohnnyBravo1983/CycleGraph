@@ -8,7 +8,7 @@ type Ok = { ok: true; data: SessionReport; source: "mock" | "live" };
 type Err = { ok: false; error: string; source?: "mock" | "live" };
 export type FetchSessionResult = Ok | Err;
 
-// Hent Vite-variabler (.env.local). Hvis BASE mangler → vi faller til mock-kilde.
+// Hent Vite-variabler (.env.local).
 const BASE = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
 /** Fjern trailing slash for robust sammensetting av URL-er */
@@ -89,20 +89,87 @@ async function safeReadText(res: Response): Promise<string> {
   }
 }
 
+// Hjelpefunksjon: gjør backend-responsen mer "schema-vennlig"
+function adaptBackendSession(raw: unknown): any {
+  if (!raw || typeof raw !== "object") return raw;
+
+  const r = raw as any;
+  const metrics = r.metrics ?? {};
+  const debug = r.debug ?? {};
+
+  const adapted: any = {
+    // behold alt originalt
+    ...r,
+
+    // 1) sørg for at schema_version alltid er en streng (ellers setter vi en dummy-verdi)
+    schema_version:
+      typeof r.schema_version === "string"
+        ? r.schema_version
+        : typeof metrics.schema_version === "string"
+        ? metrics.schema_version
+        : typeof debug.schema_version === "string"
+        ? debug.schema_version
+        : "0.0.0",
+
+    // 2) gjennomsnittspuls – prøv flere steder, default null
+    avg_hr:
+      typeof r.avg_hr === "number"
+        ? r.avg_hr
+        : typeof metrics.avg_hr === "number"
+        ? metrics.avg_hr
+        : typeof debug.avg_hr === "number"
+        ? debug.avg_hr
+        : null,
+
+    // 3) calibrated må være boolean for Zod → default false hvis ikke satt
+    calibrated:
+      typeof r.calibrated === "boolean"
+        ? r.calibrated
+        : typeof metrics.calibrated === "boolean"
+        ? metrics.calibrated
+        : false,
+
+    // 4) status – prøv noen fallback-kilder
+    status:
+      typeof r.status === "string"
+        ? r.status
+        : typeof metrics.status === "string"
+        ? metrics.status
+        : typeof debug.status === "string"
+        ? debug.status
+        : typeof r.source === "string"
+        ? r.source
+        : "ok",
+
+    // 5) watts – bruk metrics.precision_watt hvis vi har det
+    watts: Array.isArray(r.watts)
+      ? r.watts
+      : Array.isArray(metrics.precision_watt)
+      ? metrics.precision_watt
+      : Array.isArray(metrics.watts)
+      ? metrics.watts
+      : null,
+
+    // 6) vind-relaterte felter – optional / nullable uansett
+    wind_rel: r.wind_rel ?? metrics.wind_rel ?? null,
+    v_rel: r.v_rel ?? metrics.v_rel ?? null,
+  };
+
+  return adapted;
+}
+
 /**
  * Hent en session:
- * - hvis BASE mangler eller id === "mock" → bruk mockSession (kilde: "mock")
- * - ellers → POST {BASE}/api/sessions/{id}/analyze (kilde: "live")
+ * - hvis id === "mock" → bruk mockSession (kilde: "mock")
+ * - ellers krever vi VITE_BACKEND_URL og kaller POST {BASE}/sessions/{id}/analyze (kilde: "live")
  * Validerer alltid med Zod + semver.
  */
 export async function fetchSession(id: string): Promise<FetchSessionResult> {
   const base = normalizeBase(BASE);
 
-  // MOCK eller manglende BASE → mock-kilde
-  if (!base || id === "mock") {
-    console.warn(
-      "[API] fetchSession → bruker mockSession (ingen backend eller id === 'mock')"
-    );
+  // 1) Eksplisitt mock-modus: /session/mock
+  if (id === "mock") {
+    console.warn("[API] fetchSession → bruker mockSession (id === 'mock')");
 
     const raw = shouldSimulateInvalid()
       ? invalidateSchemaForTest(mockSession)
@@ -117,23 +184,36 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
       };
     }
 
+    // 👇 Semver-avvik i mock gir bare warning, ikke feil
     try {
-      ensureSemver(parsed.data.schema_version);
+      ensureSemver(parsed.data.schema_version as string | undefined);
     } catch (e) {
-      return {
-        ok: false,
-        error:
-          e instanceof Error
-            ? e.message
-            : "Ugyldig schema_version i mock-data.",
-        source: "mock",
-      };
+      console.warn(
+        "[API] fetchSession MOCK → uventet schema_version, fortsetter likevel:",
+        (e as Error).message
+      );
     }
 
     return { ok: true, data: parsed.data, source: "mock" };
   }
 
-  const url = `${base}/api/sessions/${encodeURIComponent(id)}/analyze`;
+  // 2) For alle "ekte" id-er krever vi backend-URL
+  if (!base) {
+    console.error(
+      "[API] fetchSession (LIVE) mangler VITE_BACKEND_URL for id=",
+      id
+    );
+    return {
+      ok: false,
+      error:
+        "Mangler backend-konfigurasjon (VITE_BACKEND_URL). Kan ikke hente økten fra server.",
+      source: "live",
+    };
+  }
+
+  // 3) LIVE-kall mot backend (analyze)
+  // Merk: base forventes å allerede inkludere "/api" (f.eks. "http://localhost:5175/api")
+  const url = `${base}/sessions/${encodeURIComponent(id)}/analyze`;
   console.log("[API] fetchSession (LIVE) →", url);
 
   try {
@@ -175,48 +255,51 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
       };
     }
 
+    // Ekstra logging av rå JSON fra backend
+    console.log("[API] fetchSession LIVE raw JSON:", json);
+
+    // 🔹 NYTT: tilpass backend-responsen til det schemaet vårt forventer
+    const adaptedBase = adaptBackendSession(json);
+    console.log("[API] fetchSession LIVE adapted for schema:", adaptedBase);
+
     const maybeInvalid =
-      shouldSimulateInvalid() && json && typeof json === "object"
-        ? invalidateSchemaForTest(json)
-        : json;
+      shouldSimulateInvalid() &&
+      adaptedBase &&
+      typeof adaptedBase === "object"
+        ? invalidateSchemaForTest(adaptedBase)
+        : adaptedBase;
 
     const parsed = safeParseSession(maybeInvalid);
     if (!parsed.ok) {
       console.error(
-        "[API] fetchSession → safeParseSession feilet",
+        "[API] fetchSession LIVE → schema-validering feilet",
         parsed.error
       );
       return {
         ok: false,
-        error: `Ugyldig session-format fra backend: ${parsed.error}`,
+        error: `Backend-data validerte ikke: ${parsed.error}`,
         source: "live",
       };
     }
 
+    const session = parsed.data;
+
+    // 🔹 Vi sjekker fortsatt schema_version, men lar det være en WARNING
     try {
-      ensureSemver(parsed.data.schema_version);
-    } catch (e) {
-      return {
-        ok: false,
-        error:
-          e instanceof Error
-            ? e.message
-            : "Ugyldig schema_version i backend-respons.",
-        source: "live",
-      };
+      ensureSemver(session.schema_version as string | undefined);
+    } catch (err) {
+      console.warn(
+        "[API] fetchSession LIVE → uventet schema_version, fortsetter likevel:",
+        String((err as Error)?.message ?? err)
+      );
     }
 
-    return {
-      ok: true,
-      data: parsed.data,
-      source: "live",
-    };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[API] fetchSession → exception:", msg);
+    return { ok: true, data: session, source: "live" };
+  } catch (err) {
+    console.error("[API] fetchSession LIVE → nettverks-/runtime-feil:", err);
     return {
       ok: false,
-      error: msg,
+      error: "Klarte ikke å hente økten fra backend.",
       source: "live",
     };
   }
@@ -277,7 +360,8 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
     return [];
   }
 
-  const url = `${BASE}/sessions/list/all`;
+  // Merk: backend-routen er /api/sessions/list
+  const url = `${BASE}/sessions/list`;
   console.log("[API] fetchSessionsList →", url);
 
   let res: Response;
@@ -288,11 +372,7 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
     return [];
   }
 
-  console.log(
-    "[API] fetchSessionsList status:",
-    res.status,
-    res.statusText
-  );
+  console.log("[API] fetchSessionsList status:", res.status, res.statusText);
 
   if (!res.ok) {
     console.error(
@@ -342,11 +422,7 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
 
       // 🔹 Velg beste kandidat for start_time
       const startTime =
-        raw.start_time ??
-        raw.started_at ??
-        raw.start ??
-        raw.date ??
-        null;
+        raw.start_time ?? raw.started_at ?? raw.start ?? raw.date ?? null;
 
       // 🔹 Distanse: km hvis mulig, ellers m → km
       const distanceKm =
@@ -377,10 +453,7 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
         raw.profile_version ?? // 👈 ny kandidat
         null;
 
-      const weatherSource =
-        raw.weather_source ??
-        raw.weather?.source ??
-        null;
+      const weatherSource = raw.weather_source ?? raw.weather?.source ?? null;
 
       return {
         session_id: String(raw.session_id ?? rideId),

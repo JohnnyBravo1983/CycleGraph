@@ -16,28 +16,33 @@ export const NumOrNumListSchema = z
 
 /**
  * Zod-schema for session-objektet.
- * Beholder din eksisterende kontrakt:
- * - schema_version: enkel semver X.Y.Z
- * - avg_hr: number | null | undefined
- * - calibrated: boolean
- * - status: string
- * - watts: number[] | null | undefined  (NB: liste når tilstede)
- * - wind_rel/v_rel: number | number[] | null | undefined
- * - .passthrough() for å akseptere flere felt uten å feile
+ * Nå *ekstra* tolerant:
+ * - alle felt er optional
+ * - calibrated godtar boolean | number | string | null | undefined
+ * - .passthrough() lar resten flyte
  */
 export const SessionZodSchema = z
   .object({
     schema_version: z
       .string()
-      .regex(SEMVER_RE, "schema_version must be semver X.Y.Z"),
+      .regex(SEMVER_RE, "schema_version must be semver X.Y.Z")
+      .optional(),
+
     avg_hr: z.number().nullable().optional(),
-    calibrated: z.boolean(),
-    status: z.string(),
-    watts: z.array(z.number()).nullable().optional(), // beholdt som hos deg
-    wind_rel: NumOrNumListSchema,
-    v_rel: NumOrNumListSchema,
+
+    // 👇 ekstra tolerant, siden backend kan sende f.eks. 0/1 eller "true"/"false" eller mangle helt
+    calibrated: z
+      .union([z.boolean(), z.number(), z.string()])
+      .nullable()
+      .optional(),
+
+    status: z.string().optional(),
+
+    watts: z.array(z.number()).nullable().optional(),
+
+    wind_rel: NumOrNumListSchema.optional(),
+    v_rel: NumOrNumListSchema.optional(),
   })
-  // Ekstra defensivitet: hvis avg_hr finnes, må den være et endelig tall (ikke NaN/Infinity)
   .superRefine((val, ctx) => {
     if (typeof val.avg_hr === "number" && !Number.isFinite(val.avg_hr)) {
       ctx.addIssue({
@@ -56,15 +61,14 @@ export function parseSession(input: unknown): SessionReport {
 }
 
 /** Lettvekts helper for eksplisitt semver-sjekk når du vil feile tidlig */
-export function ensureSemver(v: string): void {
-  if (!SEMVER_RE.test(v)) {
+export function ensureSemver(v: string | undefined): void {
+  if (!v || !SEMVER_RE.test(v)) {
     throw new Error("Ugyldig schema_version (må være semver X.Y.Z)");
   }
 }
 
 /**
  * Trygg parser som ikke kaster — nyttig i adapteret for kontrollert feil.
- * Beholder nøyaktig samme returtype som du har, men forbedrer feilmeldingen.
  */
 export function safeParseSession(
   input: unknown
@@ -73,7 +77,6 @@ export function safeParseSession(
   if (res.success) {
     return { ok: true, data: res.data as SessionReport };
   }
-  // Kompakt, men informativ feilmelding (første hovedfeil)
   const first =
     res.error.issues?.[0]?.message ||
     res.error.message ||

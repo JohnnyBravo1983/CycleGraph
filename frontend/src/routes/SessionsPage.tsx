@@ -9,6 +9,14 @@ export const SessionsPage: React.FC = () => {
     useSessionStore();
   const navigate = useNavigate();
 
+  // 🔍 Litt debug for å se hva som skjer hver render
+  console.debug("[SessionsPage] render:", {
+    count: sessionsList?.length ?? 0,
+    loadingList,
+    errorList,
+    sessionsList,
+  });
+
   useEffect(() => {
     console.debug("[SessionsPage] mount → henter økter...");
     loadSessionsList();

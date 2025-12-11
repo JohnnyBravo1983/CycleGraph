@@ -13,7 +13,7 @@
                                          "calibrated":  false,
                                          "crr":  0.004,
                                          "device":  "strava",
-                                         "profile_version":  "v1-883d8daf-20251209"
+                                         "profile_version":  "v1-883d8daf-20251211"
                                      },
                     "rolling_watt":  36.35978157519571,
                     "total_watt":  180.15937636286446,
@@ -21,10 +21,10 @@
                     "calibrated":  false,
                     "calibration_status":  "not_available",
                     "estimated_error_pct_range":  [
-                                                      14.0,
-                                                      16.0
+                                                      null,
+                                                      null
                                                   ],
-                    "precision_quality_hint":  "normal",
+                    "precision_quality_hint":  "no-heuristics-available",
                     "weather_applied":  false,
                     "weather_source":  "open-meteo"
                 },
@@ -5863,7 +5863,7 @@
                   "weather_source":  "neutral"
               },
     "weather_source":  "open-meteo",
-    "profile_version":  "v1-883d8daf-20251209",
+    "profile_version":  "v1-883d8daf-20251211",
     "profile_used":  {
                          "rider_weight_kg":  111.0,
                          "bike_weight_kg":  8.0,
@@ -5873,6 +5873,6 @@
                          "calibrated":  false,
                          "crr":  0.004,
                          "device":  "strava",
-                         "profile_version":  "v1-883d8daf-20251209"
+                         "profile_version":  "v1-883d8daf-20251211"
                      }
 }

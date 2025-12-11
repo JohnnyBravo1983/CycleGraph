@@ -1,17 +1,16 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import { useParams, Link, useLocation } from "react-router-dom";
+import { useParams, Link, useLocation, useSearchParams } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
 import SessionCard from "../components/SessionCard";
 import { guessSampleLength, isShortSession } from "../lib/guards";
-import { mockSessionShort } from "../mocks/mockSession";
+import { mockSession, mockSessionShort } from "../mocks/mockSession";
 import ErrorBanner from "../components/ErrorBanner";
 import AnalysisPanel from "../components/AnalysisPanel";
 
 import CalibrationGuide from "../components/CalibrationGuide";
 // ── Trinn 6 additions (lim inn under eksisterende imports) ───────────────────
-// ── Trinn 6 additions (lim inn under eksisterende imports) ───────────────────
-// Imports under skal taees i bruk i trinn 7 
+// Imports under skal taees i bruk i trinn 7
 //import type { SessionMetricsDoc, SessionMetricsView } from "../types/SessionMetrics";
 //import { isSessionMetricsDoc, toSessionMetricsView } from "../types/SessionMetrics";
 //import { getSessionMetricsById } from "../mocks/sessionApi";
@@ -171,8 +170,8 @@ function isNumArray(v: unknown): v is NumArray {
 }
 function getNumArrayProp(rec: unknown, key: string): NumArray | undefined {
   if (!isRecord(rec)) return undefined;
-  const v = rec[key];
-  return isNumArray(v) ? (v as NumArray) : undefined;
+  const vv = rec[key];
+  return isNumArray(vv) ? (vv as NumArray) : undefined;
 }
 function getPrecisionCI(rec: unknown): { lower?: NumArray; upper?: NumArray } {
   if (!isRecord(rec)) return {};
@@ -225,9 +224,15 @@ export default function SessionView() {
 
   const params = useParams();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+
   const id = useMemo(() => params.id ?? "mock", [params.id]);
 
   const { session, loading, error, fetchSession } = useSessionStore();
+
+  // URL-param for å *tvinge* mock (f.eks. ?mock=1)
+  const mockParam = searchParams.get("mock");
+  const forceMock = mockParam === "1" || mockParam === "true";
 
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [shortSession, setShortSession] = useState<boolean>(false);
@@ -236,11 +241,14 @@ export default function SessionView() {
   const [local2hLoading, setLocal2hLoading] = useState<boolean>(false);
   const [local2hError, setLocal2hError] = useState<string | null>(null);
 
+  // LIVE-henting: ikke hent for dev-fixtures eller ren mock-modus
   useEffect(() => {
-    if (id === "mock-short" || id === "mock-2h") return;
+    if (id === "mock-short" || id === "mock-2h" || id === "mock") return;
+    if (forceMock) return;
     fetchSession(id);
-  }, [id, fetchSession]);
+  }, [id, fetchSession, forceMock]);
 
+  // Dev-fixture for "2h"-mock
   useEffect(() => {
     if (id !== "mock-2h") {
       setLocal2h(null);
@@ -260,12 +268,24 @@ export default function SessionView() {
       .finally(() => setLocal2hLoading(false));
   }, [id]);
 
-  const effectiveSession: SessionReport | null =
+  // Basis-session før vi eventuelt overstyrer med forceMock
+  const baseSession: SessionReport | null =
     id === "mock-short"
       ? mockSessionShort
       : id === "mock-2h"
       ? ((local2h as unknown) as SessionReport)
+      : id === "mock"
+      ? (mockSession as SessionReport)
       : session ?? null;
+
+  // Hvis vi eksplisitt ber om mock → bruk mockSession (eller dev-fixtures)
+  const effectiveSession: SessionReport | null = forceMock
+    ? id === "mock-short"
+      ? mockSessionShort
+      : id === "mock-2h"
+      ? ((local2h as unknown) as SessionReport)
+      : (mockSession as SessionReport)
+    : baseSession;
 
   useEffect(() => {
     const s = effectiveSession;
@@ -285,7 +305,8 @@ export default function SessionView() {
   const loadingNow = id === "mock-2h" ? local2hLoading : loading;
   const effectiveError = id === "mock-2h" ? local2hError : error;
 
-  const hasError = !loadingNow && !!effectiveError && id !== "mock-short";
+  // Når vi har aktivt valgt mock-modus, undertrykker vi LIVE-feil i UI
+  const hasError = !loadingNow && !!effectiveError && id !== "mock-short" && !forceMock;
   const friendlyMessage = effectiveError ? classifyErrorMessage(effectiveError) : "";
 
   const wattsArr = useMemo<NumArray | undefined>(() => {
@@ -325,7 +346,7 @@ export default function SessionView() {
 
   const backendSource = useMemo(() => getBackendSource(), []);
 
-  // 🚨 Midlertidig: tving LIVE-data (overstyrer ENV-toggle)
+  // 🚨 Midlertidig: tving LIVE-data (overstyrer ENV-toggle) for TrendsChart
   const isMockForChart = false;
   const sourceForChart = "API" as const;
 
@@ -480,22 +501,52 @@ export default function SessionView() {
     } as SessionCardProps["session"];
   }, [effectiveSession]);
 
+  // Hjelpefelt for å vise i UI hvilken kilde vi faktisk bruker
+  const effectiveSource: "mock" | "live" =
+    id === "mock-short" || id === "mock-2h" || id === "mock" || forceMock ? "mock" : "live";
+
   return (
     <div className="page">
       {/* Header */}
       <div className="page-header">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">Økt</h1>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold">
+              Økt{" "}
+              {sessionId && (
+                <span className="ml-2 text-sm text-slate-500">
+                  #{sessionId}
+                </span>
+              )}
+            </h1>
+          </div>
+          <p className="text-xs text-slate-500">
+            Kilde:{" "}
+            <span className="font-medium">
+              {effectiveSource === "live" ? "LIVE fra backend" : "MOCK / dev-data"}
+            </span>
+            {forceMock && (
+              <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800">
+                tvunget via ?mock=1
+              </span>
+            )}
+          </p>
         </div>
         <button
-          onClick={() => id !== "mock-short" && id !== "mock-2h" && fetchSession(id)}
-          className={`btn ${id === "mock-short" || id === "mock-2h" ? "opacity-60 cursor-not-allowed" : ""}`}
-          disabled={id === "mock-short" || id === "mock-2h"}
+          onClick={() => id !== "mock-short" && id !== "mock-2h" && id !== "mock" && fetchSession(id)}
+          className={`btn ${
+            id === "mock-short" || id === "mock-2h" || id === "mock"
+              ? "opacity-60 cursor-not-allowed"
+              : ""
+          }`}
+          disabled={id === "mock-short" || id === "mock-2h" || id === "mock"}
           title={
             id === "mock-short"
               ? "Dev-visning bruker lokal mock (kort)"
               : id === "mock-2h"
               ? "Dev-visning bruker lokal 2h-fixture"
+              : id === "mock"
+              ? "Dev-visning bruker frontend-mock"
               : "Hent på nytt"
           }
         >
@@ -506,17 +557,28 @@ export default function SessionView() {
       {/* Navigasjon */}
       <nav className="text-sm text-slate-600 mb-2">
         <span>Velg datasett: </span>
-        <Link className="underline" to="/session/mock">Eksempel – Outdoor</Link>
+        <Link className="underline" to="/session/mock">
+          Eksempel – Outdoor
+        </Link>
         <span> · </span>
-        <Link className="underline" to="/session/mock-short">Eksempel – Indoor (kort)</Link>
+        <Link className="underline" to="/session/mock-short">
+          Eksempel – Indoor (kort)
+        </Link>
         <span> · </span>
-        <Link className="underline" to="/session/mock-2h">Eksempel – 2h (stor)</Link>
+        <Link className="underline" to="/session/mock-2h">
+          Eksempel – 2h (stor)
+        </Link>
         <span> · </span>
-        <Link className="underline" to={`/session/${encodeURIComponent("ABC123")}`}>Live fra API</Link>
+        <Link className="underline" to={`/session/${encodeURIComponent("ABC123")}`}>
+          Live fra API
+        </Link>
         {import.meta.env.DEV && (
           <>
             <span> · </span>
-            <button className="underline text-emerald-700" onClick={() => setShowCalibration(true)}>
+            <button
+              className="underline text-emerald-700"
+              onClick={() => setShowCalibration(true)}
+            >
               Åpne kalibrering
             </button>
           </>
@@ -531,7 +593,10 @@ export default function SessionView() {
 
       {hasError && (
         <div className="mb-3">
-          <ErrorBanner message={friendlyMessage} onRetry={() => id !== "mock-2h" && fetchSession(id)} />
+          <ErrorBanner
+            message={friendlyMessage}
+            onRetry={() => id !== "mock-2h" && id !== "mock" && fetchSession(id)}
+          />
         </div>
       )}
 
@@ -545,7 +610,9 @@ export default function SessionView() {
           <div className="card">
             <div className="k">Trender</div>
             <div className="mt-2">
-              <React.Suspense fallback={<div className="p-4 text-sm text-slate-500">Laster graf …</div>}>
+              <React.Suspense
+                fallback={<div className="p-4 text-sm text-slate-500">Laster graf …</div>}
+              >
                 <TrendsChart
                   key={sessionId}
                   sessionId={sessionId}
@@ -570,7 +637,9 @@ export default function SessionView() {
           {shortSession && (
             <div className="mt-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
               <div className="font-medium">Kort økt – viser begrenset visning</div>
-              <div className="text-sm opacity-80">Samples: {sampleCount} (krever ≥ 30 for full analyse)</div>
+              <div className="text-sm opacity-80">
+                Samples: {sampleCount} (krever ≥ 30 for full analyse)
+              </div>
             </div>
           )}
 
@@ -582,20 +651,28 @@ export default function SessionView() {
           <div className="card">
             <div className="k">watt-data</div>
             {hasWattsValue(effectiveSession.watts) ? (
-              <div className="mono text-sm break-words">{wattsPreview(effectiveSession.watts)}</div>
+              <div className="mono text-sm break-words">
+                {wattsPreview(effectiveSession.watts)}
+              </div>
             ) : (
-              <div className="italic text-gray-600">HR-only: ingen watt i denne økten</div>
+              <div className="italic text-gray-600">
+                HR-only: ingen watt i denne økten
+              </div>
             )}
           </div>
 
           <div className="card grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <div className="k">wind_rel</div>
-              <div className="mono text-sm break-words">{renderScalarOrList(effectiveSession.wind_rel)}</div>
+              <div className="mono text-sm break-words">
+                {renderScalarOrList(effectiveSession.wind_rel)}
+              </div>
             </div>
             <div>
               <div className="k">v_rel</div>
-              <div className="mono text-sm break-words">{renderScalarOrList(effectiveSession.v_rel)}</div>
+              <div className="mono text-sm break-words">
+                {renderScalarOrList(effectiveSession.v_rel)}
+              </div>
             </div>
           </div>
         </div>
@@ -616,7 +693,8 @@ export default function SessionView() {
           : "Live (API)"}{" "}
         {import.meta.env.DEV && (
           <>
-            — Tips: legg til <code>?calibrate=1</code> i URL.
+            — Tips: legg til <code>?calibrate=1</code> i URL. Du kan også tvinge mock
+            med <code>?mock=1</code>.
           </>
         )}
       </div>
