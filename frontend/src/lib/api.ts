@@ -213,7 +213,7 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
 
   // 3) LIVE-kall mot backend (analyze)
   // Merk: base forventes å allerede inkludere "/api" (f.eks. "http://localhost:5175/api")
-  const url = `${base}/sessions/${encodeURIComponent(id)}/analyze`;
+  const url = `${base}/api/sessions/${encodeURIComponent(id)}/analyze`;
   console.log("[API] fetchSession (LIVE) →", url);
 
   try {
@@ -361,7 +361,7 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
   }
 
   // Merk: backend-routen er /api/sessions/list
-  const url = `${BASE}/sessions/list`;
+  const url = `${BASE}/api/sessions/list/all`;
   console.log("[API] fetchSessionsList →", url);
 
   let res: Response;

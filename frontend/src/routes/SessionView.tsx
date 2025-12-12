@@ -8,6 +8,8 @@ import type { SessionReport } from "../types/session";
 import ErrorBanner from "../components/ErrorBanner";
 import CalibrationGuide from "../components/CalibrationGuide";
 
+import { ROUTES } from "../lib/routes";
+
 const SessionView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
@@ -51,8 +53,7 @@ const SessionView: React.FC = () => {
   }, [id]);
 
   const title = useMemo(() => (id ? `Økt #${id}` : "Økt"), [id]);
-  const sourceLabel =
-    id === "mock" ? "MOCK (lokale testdata)" : "LIVE fra backend";
+  const sourceLabel = id === "mock" ? "MOCK (lokale testdata)" : "LIVE fra backend";
 
   // ─────────────────────────────────────────────────────
   // Tydelig rendering state – ingen silent fallback
@@ -71,9 +72,7 @@ const SessionView: React.FC = () => {
   if (loadingSession) {
     return (
       <div className="session-view max-w-4xl mx-auto px-4 py-6">
-        <div className="text-sm text-slate-500">
-          Laster analyse for denne økten…
-        </div>
+        <div className="text-sm text-slate-500">Laster analyse for denne økten…</div>
       </div>
     );
   }
@@ -82,7 +81,7 @@ const SessionView: React.FC = () => {
     return (
       <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-4">
         <ErrorBanner message={errorSession} onRetry={() => loadSession(id)} />
-        <Link className="underline" to="/rides">
+        <Link className="underline" to={ROUTES.RIDES}>
           ← Tilbake til økter
         </Link>
       </div>
@@ -92,10 +91,8 @@ const SessionView: React.FC = () => {
   if (!currentSession) {
     return (
       <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-4">
-        <div className="text-sm text-slate-500">
-          Ingen øktdata tilgjengelig ennå.
-        </div>
-        <Link className="underline" to="/rides">
+        <div className="text-sm text-slate-500">Ingen øktdata tilgjengelig ennå.</div>
+        <Link className="underline" to={ROUTES.RIDES}>
           ← Tilbake til økter
         </Link>
       </div>
@@ -141,15 +138,13 @@ const SessionView: React.FC = () => {
           <p className="text-sm text-slate-500">Kilde: {sourceLabel}</p>
 
           {location.state && (location.state as any).from === "sessions" && (
-            <p className="text-xs text-slate-400 mt-1">
-              Navigert hit fra øktlisten.
-            </p>
+            <p className="text-xs text-slate-400 mt-1">Navigert hit fra øktlisten.</p>
           )}
         </div>
 
         <div className="text-right">
           <Link
-            to="/rides"
+            to={ROUTES.RIDES}
             className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
           >
             ← Tilbake til økter
@@ -233,18 +228,14 @@ const SessionView: React.FC = () => {
 
             <p className="text-slate-500">
               Versjon:{" "}
-              <span className="font-mono">
-                {profileUsed.profile_version ?? "ukjent"}
-              </span>
+              <span className="font-mono">{profileUsed.profile_version ?? "ukjent"}</span>
             </p>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
               <div>
                 <dt className="text-slate-500">Totalvekt (rider + sykkel)</dt>
                 <dd className="font-medium">
-                  {typeof totalWeight === "number"
-                    ? `${totalWeight.toFixed(1)} kg`
-                    : "—"}
+                  {typeof totalWeight === "number" ? `${totalWeight.toFixed(1)} kg` : "—"}
                 </dd>
               </div>
 
@@ -260,9 +251,7 @@ const SessionView: React.FC = () => {
 
               <div>
                 <dt className="text-slate-500">Enhet / device</dt>
-                <dd className="font-medium">
-                  {profileUsed.device ?? "ukjent"}
-                </dd>
+                <dd className="font-medium">{profileUsed.device ?? "ukjent"}</dd>
               </div>
             </dl>
           </section>
@@ -339,8 +328,7 @@ const SessionView: React.FC = () => {
             {Object.keys(session as any).join(", ")}
           </div>
           <div>
-            <span className="text-slate-500">metrics exists:</span>{" "}
-            {metrics ? "yes" : "no"}
+            <span className="text-slate-500">metrics exists:</span> {metrics ? "yes" : "no"}
           </div>
           <div>
             <span className="text-slate-500">metrics keys:</span>{" "}
