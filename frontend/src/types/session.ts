@@ -1,139 +1,83 @@
-// frontend/src/state/sessionStore.ts
-import { create } from "zustand";
-import type { SessionListItem, SessionReport } from "../types/session";
-import { fetchSessionsList, fetchSession } from "../lib/api";
+// frontend/src/types/session.ts
 
-type SessionStore = {
-  // List
-  sessionsList: SessionListItem[] | null;
-  loadingList: boolean;
-  errorList: string | null;
+/** En linje i sessions-lista (/api/sessions/list) */
+export interface SessionListItem {
+  /** Unik ID for økt på serversiden (kan være lik ride_id, men vi skiller de) */
+  session_id: string;
 
-  // Single session (SessionView)
-  currentSession: SessionReport | null;
-  loadingSession: boolean;
-  errorSession: string | null;
+  /** Strava- eller internt ride-id */
+  ride_id: string;
 
-  // Actions
-  loadSessionsList: () => Promise<void>;
-  loadSession: (id: string) => Promise<void>;
-  clearCurrentSession: () => void;
-};
+  /** Menneskelig / ISO starttidspunkt */
+  start_time?: string | null;
 
-function normalizeId(id: unknown): string {
-  if (id === null || id === undefined) return "";
-  return String(id);
+  /** Total distanse i kilometer */
+  distance_km?: number | null;
+
+  /** Gjennomsnittlig Precision Watt for økta (snitt) */
+  precision_watt_avg?: number | null;
+
+  /** F.eks. "v1-a0c54a9e-20251209" */
+  profile_label?: string | null;
+
+  /** F.eks. "open-meteo" / "open-meteo/era5" */
+  weather_source?: string | null;
+}
+
+export type SessionMode = "indoor" | "outdoor";
+
+/**
+ * “Loose” objekt-type uten any (for å unngå eslint @typescript-eslint/no-explicit-any).
+ * Brukes kun til å beskrive ukjente JSON-objekter.
+ */
+export type UnknownRecord = Record<string, unknown>;
+
+/**
+ * Minimal “metrics” shape som UI-en din leser fra.
+ * Resten kan ligge som ukjente felter.
+ */
+export interface SessionMetrics extends UnknownRecord {
+  precision_watt?: number | null;
+  total_watt?: number | null;
+  drag_watt?: number | null;
+  rolling_watt?: number | null;
+  gravity_watt?: number | null;
+
+  calibrated?: boolean | null;
+  calibration_mae?: number | null;
+
+  profile_used?: UnknownRecord | null;
+  weather_used?: UnknownRecord | null;
 }
 
 /**
- * Backend har historisk levert litt ulike felt:
- * - `session_id` (vår foretrukne)
- * - `id` (noen ganger samme som ride_id)
- * - `ride_id`
- *
- * Vi normaliserer til SessionListItem med `session_id` + `ride_id`.
+ * SessionReport – tåler HR-only / delvis data.
+ * Dette er primærtypen som SessionView og api.ts bruker.
  */
-function mapListRow(raw: any): SessionListItem | null {
-  const session_id =
-    normalizeId(raw?.session_id) || normalizeId(raw?.id) || normalizeId(raw?.ride_id);
+export interface SessionReport extends UnknownRecord {
+  /** Semver / schema id (kan mangle i mock eller eldre resultater) */
+  schema_version?: string | null;
 
-  const ride_id = normalizeId(raw?.ride_id) || normalizeId(raw?.id) || session_id;
+  /** Server-side id */
+  session_id?: string | null;
 
-  if (!session_id || !ride_id) return null;
+  /** Strava / ride id */
+  ride_id?: string | null;
 
-  return {
-    session_id,
-    ride_id,
-    start_time: raw?.start_time ?? null,
-    distance_km: raw?.distance_km ?? null,
-    precision_watt_avg: raw?.precision_watt_avg ?? null,
-    profile_label:
-      raw?.profile_label ??
-      raw?.profile_used ??
-      raw?.profile ??
-      raw?.profile_version ??
-      null,
-    weather_source: raw?.weather_source ?? raw?.weather?.source ?? null,
-  };
+  /** Starttid */
+  start_time?: string | null;
+
+  /** Distanse */
+  distance_km?: number | null;
+
+  /** Mode (om du har den) */
+  mode?: SessionMode | null;
+
+  /** Analyse-metrics */
+  metrics?: SessionMetrics | null;
+
+  /** Mange docs har “summary”/“profile”/“weather” osv – la de være åpne */
+  summary?: UnknownRecord | null;
+  profile?: UnknownRecord | null;
+  weather?: UnknownRecord | null;
 }
-
-export const useSessionStore = create<SessionStore>((set, get) => ({
-  // List
-  sessionsList: null,
-  loadingList: false,
-  errorList: null,
-
-  // Single session
-  currentSession: null,
-  loadingSession: false,
-  errorSession: null,
-
-  loadSessionsList: async () => {
-    // Unngå dobbeltkall (React StrictMode kan trigge)
-    if (get().loadingList) return;
-
-    set({ loadingList: true, errorList: null });
-
-    try {
-      const raw = await fetchSessionsList();
-
-      // fetchSessionsList kan returnere enten:
-      // - en array direkte
-      // - eller en { ok, data }-variant (avhengig av din api.ts)
-      const rows: any[] = Array.isArray(raw) ? raw : (raw as any)?.data ?? [];
-
-      const mapped = rows
-        .map(mapListRow)
-        .filter((x): x is SessionListItem => Boolean(x));
-
-      set({ sessionsList: mapped, loadingList: false, errorList: null });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      set({ sessionsList: [], loadingList: false, errorList: msg });
-    }
-  },
-
-  loadSession: async (id: string) => {
-    if (!id) {
-      set({ currentSession: null, errorSession: "Mangler session-id", loadingSession: false });
-      return;
-    }
-
-    // Unngå dobbeltkall
-    if (get().loadingSession) return;
-
-    set({ loadingSession: true, errorSession: null });
-
-    try {
-      const result = await fetchSession(id);
-
-      if (!result.ok) {
-        set({
-          currentSession: null,
-          errorSession: result.error || "Noe gikk galt ved henting av økt",
-          loadingSession: false,
-        });
-        return;
-      }
-
-      // ✅ PATCH 2 endring: sørg for at error nulles når vi får live data
-      console.log("[SessionStore] LIVE session parsed:", result.data);
-      set({
-        currentSession: result.data,
-        errorSession: null,
-        loadingSession: false,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      set({
-        currentSession: null,
-        errorSession: msg,
-        loadingSession: false,
-      });
-    }
-  },
-
-  clearCurrentSession: () => {
-    set({ currentSession: null, loadingSession: false, errorSession: null });
-  },
-}));

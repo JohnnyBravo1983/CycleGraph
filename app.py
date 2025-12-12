@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Callable, List, Literal
 
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Response, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -542,10 +543,12 @@ def api_analyze_session(
     1) Inline timeserie (samples/records) dersom ANALYZE_ALLOW_INLINE=1
     2) Persistert session (tidligere oppførsel)
     Fallback: stub-resultat dersom USE_STUB_FALLBACK=1 og ingen data finnes.
+
+    PATCH: Prioriter "full persisted result" fra logs/actual10/latest (eller største i logs/actual10/**)
+    uavhengig av working directory (vi finner repo-root via __file__).
     """
     global PROFILE_USED_TOTAL, PROFILE_MISSING_TOTAL
 
-    # DEBUG MARK for å bekrefte at vi er i riktig handler
     print("DEBUG MARK: top of analyze handler", file=sys.stderr)
     print(f"DEBUG WHO: module={__name__} file={__file__}", file=sys.stderr)
 
@@ -563,7 +566,6 @@ def api_analyze_session(
 
     analyzer = _resolve_analyzer()
     if analyzer is None and not CORE_IMPORT_OK:
-        # verken core analyze() eller python fallback funnet
         raise HTTPException(
             status_code=501,
             detail=(
@@ -578,13 +580,11 @@ def api_analyze_session(
     norm_samples = None
 
     if allow_inline and body is not None and (body.samples or body.records):
-        # Normaliser inline
         if body.samples:
             norm_samples = _normalize_samples(body.samples)
         else:
             norm_samples = _records_to_samples(body.records or [])
 
-        # Konstruer en minimal session-blob med streams
         watts_series = [s.get("watts") for s in norm_samples if s.get("watts") is not None]
         hr_series = [s.get("hr") for s in norm_samples if s.get("hr") is not None]
         speed_series = [s.get("speed") for s in norm_samples if s.get("speed") is not None]
@@ -609,6 +609,104 @@ def api_analyze_session(
             }
         source = "inline"
 
+    # --- Bestem force_recompute (må være før persisted-fastpath) ---
+    force_from_body = bool(body and body.options and body.options.force_recompute)
+    force = bool(force_recompute_q or force_from_body or (x_cyclegraph_force == 1))
+
+    # --- PATCH: Prioriter full persisted result hvis ikke inline og ikke force ---
+    if inline_session is None and not force:
+        from pathlib import Path
+        import json as _json
+
+        def _find_repo_root() -> Path:
+            """
+            Finn en rotmappe som inneholder 'logs/' ved å gå oppover fra denne filen.
+            Dette gjør at vi ikke er avhengig av Path.cwd().
+            """
+            p = Path(__file__).resolve().parent
+            for _ in range(0, 8):
+                if (p / "logs").exists():
+                    return p
+                if p.parent == p:
+                    break
+                p = p.parent
+            # fallback: cwd hvis alt feiler
+            return Path.cwd()
+
+        def _is_full_doc(doc: Dict[str, Any]) -> bool:
+            try:
+                watts_ = doc.get("watts") or []
+                v_rel_ = doc.get("v_rel") or []
+                wind_rel_ = doc.get("wind_rel") or []
+                if isinstance(watts_, list) and len(watts_) > 0:
+                    return True
+                if isinstance(v_rel_, list) and len(v_rel_) > 0:
+                    return True
+                if isinstance(wind_rel_, list) and len(wind_rel_) > 0:
+                    return True
+                m = doc.get("metrics") or {}
+                pw = m.get("precision_watt")
+                if isinstance(pw, (int, float)) and pw > 0:
+                    return True
+            except Exception:
+                pass
+            return False
+
+        def _pick_best_path(sid_: str) -> Optional[Path]:
+            root = _find_repo_root()
+            logs = root / "logs"
+            fn = f"result_{sid_}.json"
+
+            p1 = logs / "actual10" / "latest" / fn
+            if p1.exists():
+                sz = p1.stat().st_size
+                print(f"[persisted_pick] candidate1={p1} size={sz}", file=sys.stderr)
+                if sz > 20_000:
+                    return p1
+
+            base = logs / "actual10"
+            if base.exists():
+                candidates = list(base.rglob(fn))
+                if candidates:
+                    candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+                    print(
+                        f"[persisted_pick] actual10 candidates={len(candidates)} top={candidates[0]} size={candidates[0].stat().st_size}",
+                        file=sys.stderr,
+                    )
+                    for p in candidates:
+                        if p.exists() and p.stat().st_size > 20_000:
+                            return p
+
+            p3 = logs / "results" / fn
+            if p3.exists():
+                print(f"[persisted_pick] fallback results={p3} size={p3.stat().st_size}", file=sys.stderr)
+                return p3
+
+            print(f"[persisted_pick] NO FILE FOUND for sid={sid_} root={root}", file=sys.stderr)
+            return None
+
+        best_path = _pick_best_path(sid)
+        if best_path is not None:
+            try:
+                with best_path.open("r", encoding="utf-8") as f:
+                    doc = _json.load(f)
+
+                if isinstance(doc, dict) and _is_full_doc(doc):
+                    dbg = doc.get("debug") or {}
+                    if isinstance(dbg, dict):
+                        dbg.setdefault("reason", "persisted_hit")
+                        dbg.setdefault("persist_path", str(best_path))
+                        dbg.setdefault("force_recompute", False)
+                        doc["debug"] = dbg
+
+                    doc.setdefault("source", "persisted")
+                    print(f"[persisted_hit] sid={sid} path={best_path}", file=sys.stderr)
+                    return doc
+                else:
+                    print(f"[persisted_skip] sid={sid} path={best_path} reason=not_full_doc", file=sys.stderr)
+            except Exception as e:
+                print(f"[api_analyze_session] persisted read failed sid={sid} path={best_path}: {e}", file=sys.stderr)
+
     # --- Last session (persist) hvis ikke inline
     if inline_session is not None:
         session = inline_session
@@ -621,9 +719,6 @@ def api_analyze_session(
             source = "none"
             logger.warning(f"load_session feilet for sid={sid}: {e}")
 
-    # --- Bestem force_recompute ---
-    force_from_body = bool(body and body.options and body.options.force_recompute)
-    force = bool(force_recompute_q or force_from_body or (x_cyclegraph_force == 1))
     persisted_before = bool(session)
 
     # --- Bygg brukt profil (profile_used) ---
@@ -662,13 +757,11 @@ def api_analyze_session(
     has_powermeter = bool(watts)
     has_physics = bool(velocity) and bool(altitude)
 
-    # Debug: synlig i stderr
     print(
         f"DEBUG inline counts: watts={len(watts or [])} hr={len(pulses or [])} speed={len(velocity or [])}",
         flush=True
     )
 
-    # Dersom vi fortsatt ikke har noen serier og kilden ikke ga data:
     if not (has_powermeter or has_physics):
         if use_stub:
             proxy_vals = _debug_power_proxy(profile_used)
@@ -731,53 +824,37 @@ def api_analyze_session(
     if _HAS_COMPUTE_POWER_WITH_WIND and norm_samples:
         print(f"DEBUG FLAG: HAS_COMPUTE_POWER_WITH_WIND={_HAS_COMPUTE_POWER_WITH_WIND} inline={bool(norm_samples)}", file=sys.stderr)
         print(f"DEBUG INLINE: samples_in={len(norm_samples or [])}", file=sys.stderr)
-        
+
         try:
             from cyclegraph_core import compute_power_with_wind as rust_compute_power
-            
-            # Normaliser profilen før bruk
+
             profile_normalized = _norm_profile(body_profile_dict if body and body.profile else {})
-            
-            # Bygg weather dict
+
             weather = {}
             if body and body.wind_angle_deg is not None:
                 weather["wind_angle_deg"] = body.wind_angle_deg
             if body and body.air_density_kg_per_m3 is not None:
                 weather["air_density_kg_per_m3"] = body.air_density_kg_per_m3
-            
+
             print("DEBUG PATH: using compute_power_with_wind (3-args)", file=sys.stderr)
-            print(f"DEBUG SAMPLES[0]: {norm_samples[0] if norm_samples else None}", file=sys.stderr)
-            print(f"DEBUG PROFILE (normalized): {profile_normalized}", file=sys.stderr)
-            
-            # Prøv 3-args direkte (foretrukket)
+
             try:
                 result_json = rust_compute_power(norm_samples, profile_normalized, weather)
                 call_path = "compute_power_with_wind:3-args"
             except TypeError:
-                # Fallback: kall via JSON-streng
-                print("DEBUG PATH: using compute_power_with_wind (json)", file=sys.stderr)
-                payload = {
-                    "samples": norm_samples,
-                    "profile": profile_normalized,
-                    "weather": weather,
-                }
+                payload = {"samples": norm_samples, "profile": profile_normalized, "weather": weather}
                 result_json = rust_compute_power(json.dumps(payload))
                 call_path = "compute_power_with_wind:json"
-            
-            print(f"DEBUG PATH: using compute_power_with_wind, n={len(norm_samples)}", file=sys.stderr)
-            print(f"DEBUG RESULT HEAD: {result_json[:200]}", file=sys.stderr)
-            
-            # Parse resultatet
+
             result = json.loads(result_json)
-            
-            def _avg(xs): 
-                return (sum(xs)/len(xs)) if xs else 0.0
+
+            def _avg(xs):
+                return (sum(xs) / len(xs)) if xs else 0.0
 
             drag = result.get("drag_watt")
             roll = result.get("rolling_watt")
             prec = result.get("precision_watt")
 
-            # fallback hvis Rust returnerer serier:
             if drag is None and "drag_watt_series" in result:
                 drag = _avg(result["drag_watt_series"])
             if roll is None and "rolling_watt_series" in result:
@@ -785,17 +862,15 @@ def api_analyze_session(
             if prec is None and "precision_watt_series" in result:
                 prec = _avg(result["precision_watt_series"])
 
-            # Bygg analyse-resultat
             analysis = {
                 "drag_watt": float(drag or 0.0),
                 "rolling_watt": float(roll or 0.0),
                 "precision_watt": float(prec or 0.0),
                 "calibrated": False,
                 "profile": json.dumps(profile_normalized),
-                "reason": "ok"
+                "reason": "ok",
             }
-            
-            # Legg til debug info
+
             dbg = result.get("debug", {})
             dbg.update({
                 "analyzer_mode": "compute_power_with_wind",
@@ -803,10 +878,9 @@ def api_analyze_session(
                 "samples_in": len(norm_samples),
             })
             analysis["_debug"] = dbg
-                
+
         except Exception as e:
             logger.warning(f"compute_power_with_wind feilet: {e}, fallback til standard analyzer")
-            # Fallback til standard analyzer hvis den nye feiler
 
     # --- WEATHER: body override > weather_client ---
     wind_angle_deg: Optional[float]
@@ -829,19 +903,16 @@ def api_analyze_session(
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Weather unexpected error: {e}")
 
-    # Valider
     if any(
         (v is None) or (isinstance(v, float) and math.isnan(v))
         for v in (wind_angle_deg, air_density_kg_per_m3)
     ):
         raise HTTPException(status_code=422, detail="Weather values NaN/None")
 
-    # Persist vær på session før analyse (nyttig for with_profile)
     session.setdefault("weather", {})
     session["weather"]["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
     session["weather"]["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
 
-    # --- Fallback til standard analyzer hvis compute_power_with_wind ikke ble brukt ---
     if analysis is None:
         try:
             if _HAS_ANALYZE_WITH_PROFILE:
@@ -854,9 +925,10 @@ def api_analyze_session(
                         status_code=501,
                         detail=(
                             "Analyzer i 'series'-modus krever watts+puls (powermeter). "
-                            "Mangler watts. Aktiver dict-analyzer (analyze_session(session)) eller skaff powermeter."
+                            "Mangler watts."
                         ),
                     )
+
                 sig = None
                 names: List[str] = []
                 try:
@@ -865,14 +937,9 @@ def api_analyze_session(
                 except Exception:
                     names = []
 
-                # Foretrekk kwargs med speed/profile hvis tilgjengelig
-                tried = []
                 def _try_call(**kwargs):
-                    nonlocal tried
-                    tried.append(kwargs)
                     return analyzer(**kwargs)
 
-                # 1) kwargs med speed + profile + vær (mest moderne)
                 if ("speed" in names or "velocity" in names) and "profile" in names:
                     try:
                         kw = {
@@ -887,9 +954,8 @@ def api_analyze_session(
                         analysis = _try_call(**kw)
                         call_path = "series:kwargs-speed+profile+weather"
                     except TypeError:
-                        analysis = None  # fallthrough
+                        analysis = None
 
-                # 2) kwargs med speed + vær (uten profile)
                 if call_path == "unknown" and ("speed" in names or "velocity" in names):
                     try:
                         kw = {
@@ -905,7 +971,6 @@ def api_analyze_session(
                     except TypeError:
                         analysis = None
 
-                # 3) kwargs uten speed (som før) – med vær
                 if call_path == "unknown":
                     try:
                         kw = {
@@ -920,7 +985,6 @@ def api_analyze_session(
                     except TypeError:
                         analysis = None
 
-                # 4) posisjonell 5
                 if call_path == "unknown":
                     try:
                         analysis = analyzer(
@@ -931,19 +995,10 @@ def api_analyze_session(
                     except TypeError:
                         analysis = None
 
-                # 5) posisjonell 3 (eldre fallback)
                 if call_path == "unknown":
                     analysis = analyzer(watts, pulses or [], device_watts)
                     call_path = "series:positional-3"
             else:
-                if not (has_powermeter or has_physics):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Mangler data: trenger enten watts+hr (powermeter) ELLER "
-                            "velocity_smooth(+altitude) for fysikk-beregning."
-                        ),
-                    )
                 analysis = analyzer(session)
                 call_path = "dict:session"
         except HTTPException:
@@ -951,20 +1006,13 @@ def api_analyze_session(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"analyze_session feilet: {e}")
 
-    # --- Slå sammen resultat og persist vær-/profilfelter ---
     merged = _merge_analysis(session, analysis)
 
-    # Bruk faktisk brukt profil i output (og persist)
     merged["profile"] = dict(profile_used)
     merged["weather_applied"] = bool(merged.get("weather_applied", True))
     merged["wind_angle_deg"] = float(wind_angle_deg)  # type: ignore[arg-type]
     merged["air_density_kg_per_m3"] = float(air_density_kg_per_m3)  # type: ignore[arg-type]
 
-    # -------------------------------------------------------------------------
-    # Profilsensitive felt: sikre *variasjon* og *force*-semantikk
-    # - Hvis core ikke leverer komponenter -> generér via debug-proxy
-    # - Hvis force=true -> overskriv alltid komponentene med nye verdier
-    # -------------------------------------------------------------------------
     analysis_raw = merged.get("analysis_raw", {}) if isinstance(merged.get("analysis_raw"), dict) else {}
     has_components_in_core = all(k in analysis_raw for k in ("total_watt", "drag_watt", "rolling_watt"))
 
@@ -979,7 +1027,6 @@ def api_analyze_session(
             if force or (k not in merged):
                 merged[k] = proxy_vals[k]
 
-    # --- Lagre og logg ---
     try:
         save_session(sid, merged)
     except Exception as e:
@@ -1003,7 +1050,6 @@ def api_analyze_session(
         float(wind_angle_deg), float(air_density_kg_per_m3), call_path, used_override
     )
 
-    # --- Svar ---
     return {
         "ok": True,
         "session_id": sid,
@@ -1016,7 +1062,6 @@ def api_analyze_session(
             "weather_applied": merged.get("weather_applied"),
             "wind_angle_deg": merged.get("wind_angle_deg"),
             "air_density_kg_per_m3": merged.get("air_density_kg_per_m3"),
-            # Profilsensitive felt
             "total_watt": merged.get("total_watt"),
             "drag_watt": merged.get("drag_watt"),
             "rolling_watt": merged.get("rolling_watt"),
@@ -1033,6 +1078,7 @@ def api_analyze_session(
         },
         "profile": profile_used,
     }
+
 
 @app.post("/api/sessions/{sid}/publish")
 def api_publish(sid: str):

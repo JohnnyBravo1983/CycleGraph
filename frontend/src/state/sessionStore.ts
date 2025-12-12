@@ -8,94 +8,167 @@ import {
 } from "../lib/api";
 
 interface SessionState {
-  // 🔹 Listevisning (/api/sessions/list)
+  // ─────────────────────────────────────────────────────────────
+  // Listevisning (/api/sessions/list)
+  // ─────────────────────────────────────────────────────────────
   sessionsList: SessionListItem[] | null;
   loadingList: boolean;
   errorList: string | null;
   loadSessionsList: () => Promise<void>;
 
-  // 🔹 Detaljvisning (SessionView – analyze for én økt)
+  // ─────────────────────────────────────────────────────────────
+  // Enkelt-økt (navn som SessionView forventer)
+  // ─────────────────────────────────────────────────────────────
+  currentSession: SessionReport | null;
+  loadingSession: boolean;
+  errorSession: string | null;
+
+  loadSession: (id: string) => Promise<void>;
+  clearCurrentSession: () => void;
+
+  // ─────────────────────────────────────────────────────────────
+  // Backward compatibility (gamle navn)
+  // ─────────────────────────────────────────────────────────────
   session: SessionReport | null;
   loading: boolean;
   error: string | null;
+
   fetchSession: (id: string) => Promise<void>;
 }
 
-export const useSessionStore = create<SessionState>((set) => ({
-  // 🚩 Init state – liste
-  sessionsList: null,
-  loadingList: false,
-  errorList: null,
+export const useSessionStore = create<SessionState>((set) => {
+  // ✅ Intern helper: unngår self-reference til useSessionStore i initializer
+  const runLoadSession = async (id: string): Promise<void> => {
+    console.log("[sessionStore.loadSession] KALT med id:", id);
 
-  // 🚩 Init state – enkelt-session
-  session: null,
-  loading: false,
-  error: null,
-
-  // -----------------------------
-  // Liste: /api/sessions/list
-  // -----------------------------
-  async loadSessionsList() {
-    console.log("[sessionStore.loadSessionsList] KALT");
-    set({ loadingList: true, errorList: null });
-    try {
-      const sessions = await fetchSessionsList();
-      console.log(
-        "[sessionStore.loadSessionsList] Ferdig – antall sessions:",
-        sessions.length,
-      );
-      set({
-        sessionsList: sessions,
-        loadingList: false,
-        errorList: null,
-      });
-    } catch (err) {
-      console.error("[sessionStore.loadSessionsList] Feil:", err);
-      set({
-        loadingList: false,
-        errorList: "Klarte ikke å laste økter fra backend.",
-      });
-    }
-  },
-
-  // -----------------------------
-  // Enkelt-økt: POST /api/sessions/{sid}/analyze
-  // -----------------------------
-  async fetchSession(id: string) {
-    console.log("[sessionStore.fetchSession] KALT med id:", id);
-    set({ loading: true, error: null });
+    set({
+      loadingSession: true,
+      loading: true, // alias
+      errorSession: null,
+      error: null, // alias
+    });
 
     let result: FetchSessionResult;
     try {
       result = await apiFetchSession(id);
     } catch (err) {
-      console.error("[sessionStore.fetchSession] Uventet feil:", err);
+      console.error("[sessionStore.loadSession] Uventet feil:", err);
+      const msg = "Klarte ikke å hente analyse for økten.";
       set({
-        loading: false,
-        error: "Klarte ikke å hente analyse for økten.",
+        loadingSession: false,
+        loading: false, // alias
+        currentSession: null,
+        session: null, // alias
+        errorSession: msg,
+        error: msg, // alias
       });
       return;
     }
 
     if (!result.ok) {
       console.warn(
-        "[sessionStore.fetchSession] analyze-feil:",
+        "[sessionStore.loadSession] analyze-feil:",
         result.error,
         "source=",
         result.source,
       );
+      const msg = result.error || "Noe gikk galt ved henting av økt.";
       set({
-        loading: false,
-        error: result.error || "Noe gikk galt ved henting av økt.",
+        loadingSession: false,
+        loading: false, // alias
+        currentSession: null,
+        session: null, // alias
+        errorSession: msg,
+        error: msg, // alias
       });
       return;
     }
 
-    console.log("[sessionStore.fetchSession] OK – har session-data");
+    console.log(
+      "[sessionStore.loadSession] OK – har session-data (source=",
+      result.source,
+      ")",
+    );
+
     set({
-      session: result.data,
-      loading: false,
-      error: null,
+      loadingSession: false,
+      loading: false, // alias
+      errorSession: null,
+      error: null, // alias
+      currentSession: result.data,
+      session: result.data, // alias
     });
-  },
-}));
+  };
+
+  return {
+    // 🚩 Init state – liste
+    sessionsList: null,
+    loadingList: false,
+    errorList: null,
+
+    // 🚩 Init state – enkelt-session (nye)
+    currentSession: null,
+    loadingSession: false,
+    errorSession: null,
+
+    // 🚩 Init state – enkelt-session (aliases)
+    session: null,
+    loading: false,
+    error: null,
+
+    // -----------------------------
+    // Liste: /api/sessions/list
+    // -----------------------------
+    loadSessionsList: async (): Promise<void> => {
+      console.log("[sessionStore.loadSessionsList] KALT");
+      set({ loadingList: true, errorList: null });
+
+      try {
+        const sessions = await fetchSessionsList();
+        console.log(
+          "[sessionStore.loadSessionsList] Ferdig – antall sessions:",
+          sessions.length,
+        );
+        set({
+          sessionsList: sessions,
+          loadingList: false,
+          errorList: null,
+        });
+      } catch (err) {
+        console.error("[sessionStore.loadSessionsList] Feil:", err);
+        set({
+          loadingList: false,
+          errorList: "Klarte ikke å laste økter fra backend.",
+        });
+      }
+    },
+
+    // -----------------------------
+    // Clear (brukes av SessionView)
+    // -----------------------------
+    clearCurrentSession: (): void => {
+      set({
+        currentSession: null,
+        session: null, // alias
+        errorSession: null,
+        error: null, // alias
+        loadingSession: false,
+        loading: false, // alias
+      });
+    },
+
+    // -----------------------------
+    // Ny action (SessionView bruker denne)
+    // -----------------------------
+    loadSession: async (id: string): Promise<void> => {
+      await runLoadSession(id);
+    },
+
+    // -----------------------------
+    // Gammel action (alias til loadSession)
+    // -----------------------------
+    fetchSession: async (id: string): Promise<void> => {
+      await runLoadSession(id);
+    },
+  };
+});

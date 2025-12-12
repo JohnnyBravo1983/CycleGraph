@@ -57,6 +57,72 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 RESULTS_DIR = os.path.join(os.getcwd(), "logs", "results")
 DEBUG_DIR = os.path.join(os.getcwd(), "_debug")
 
+# ==================== PATCH: PERSISTED-FIRST HELPER FUNCTIONS ====================
+
+def _repo_root_from_here() -> Path:
+    """
+    Finn repo-root ved å gå oppover fra denne fila til vi finner en 'logs/' mappe.
+    Robust mot at server starter med "feil" cwd.
+    """
+    p = Path(__file__).resolve().parent
+    for _ in range(0, 10):
+        if (p / "logs").exists():
+            return p
+        if p.parent == p:
+            break
+        p = p.parent
+    return Path.cwd()
+
+def _pick_best_persisted_result_path(sid: str) -> Path | None:
+    root = _repo_root_from_here()
+    logs = root / "logs"
+    fn = f"result_{sid}.json"
+
+    # 1) Foretrukket: latest
+    p1 = logs / "actual10" / "latest" / fn
+    if p1.exists() and p1.stat().st_size > 20_000:
+        return p1
+
+    # 2) Største i actual10/** (typisk full doc)
+    base = logs / "actual10"
+    if base.exists():
+        cands = list(base.rglob(fn))
+        if cands:
+            cands.sort(key=lambda p: p.stat().st_size, reverse=True)
+            for p in cands:
+                if p.exists() and p.stat().st_size > 20_000:
+                    return p
+
+    # 3) (valgfri) fallback til logs/results – men denne er ofte stub (1–2KB),
+    # så vi bruker den IKKE her. Returnér None hvis ikke actual10 finnes.
+    return None
+
+def _is_full_result_doc(doc: dict) -> bool:
+    """
+    "Full" betyr i praksis: har watts-serie eller ikke-null power i metrics.
+    """
+    try:
+        m = doc.get("metrics") or {}
+        pw = m.get("precision_watt")
+        if isinstance(pw, (int, float)) and pw > 0:
+            return True
+
+        watts = doc.get("watts") or []
+        if isinstance(watts, list) and len(watts) > 0:
+            return True
+
+        # Noen docs kan ha v_rel/wind_rel i stedet
+        v_rel = doc.get("v_rel") or []
+        wind_rel = doc.get("wind_rel") or []
+        if isinstance(v_rel, list) and len(v_rel) > 0:
+            return True
+        if isinstance(wind_rel, list) and len(wind_rel) > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+# ==================== ORIGINAL HELPER FUNCTIONS ====================
 
 def _load_result_doc(session_id: str) -> Optional[Dict[str, Any]]:
     """
@@ -655,7 +721,6 @@ async def debug_rb(request: Request):
 
 
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
-# ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
 async def analyze_session(
     sid: str,
@@ -666,6 +731,32 @@ async def analyze_session(
 ):
     want_debug = bool(debug)
     print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}")
+
+    # ==================== PATCH: PERSISTED-FIRST FASTPATH ====================
+    if not force_recompute:
+        persisted_path = _pick_best_persisted_result_path(sid)
+        if persisted_path is not None:
+            try:
+                with persisted_path.open("r", encoding="utf-8-sig") as f:
+                     doc = json.load(f)
+
+                if isinstance(doc, dict) and _is_full_result_doc(doc):
+                    dbg = doc.get("debug") or {}
+                    if isinstance(dbg, dict):
+                        dbg.setdefault("reason", "persisted_hit")
+                        dbg.setdefault("persist_path", str(persisted_path))
+                        doc["debug"] = dbg
+
+                    doc.setdefault("source", "persisted")
+                    print(f"[SVR] persisted_hit sid={sid} path={persisted_path}", file=sys.stderr)
+                    return doc
+                else:
+                    print(f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc", file=sys.stderr)
+
+            except Exception as e:
+                print(f"[SVR] persisted_read_failed sid={sid} path={persisted_path} err={e}", file=sys.stderr)
+
+    # ==================== ORIGINAL ANALYZE LOGIC ====================
 
     # === SAFE BODY READ v2 (med BOM-strip + logging) ===
     try:
