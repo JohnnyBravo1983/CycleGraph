@@ -14,7 +14,7 @@
       "crank_eff_pct": 95.5,
       "device": "strava",
       "notes": "Trinn5 default; rediger fritt.",
-      "profile_version": "v1-883d8daf-20251212"
+      "profile_version": "v1-883d8daf-20251211"
     },
     "rolling_watt": 0.0,
     "total_watt": 0.0,
@@ -37,17 +37,14 @@
   "repr_kind": "object_v3",
   "debug": {
     "reason": "ok",
-    "force_recompute": true,
-    "persist_ignored": true,
-    "ignored_persist": true,
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false,
     "used_fallback": false,
-    "weather_source": "neutral",
-    "estimat_cfg_used": {
-      "force": true
-    }
+    "weather_source": "neutral"
   },
   "weather_source": "open-meteo",
-  "profile_version": "v1-883d8daf-20251212",
+  "profile_version": "v1-883d8daf-20251211",
   "profile_used": {
     "rider_weight_kg": 78.0,
     "bike_weight_kg": 8.0,
@@ -58,6 +55,6 @@
     "crank_eff_pct": 95.5,
     "device": "strava",
     "notes": "Trinn5 default; rediger fritt.",
-    "profile_version": "v1-883d8daf-20251212"
+    "profile_version": "v1-883d8daf-20251211"
   }
 }

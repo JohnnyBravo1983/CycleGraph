@@ -1,153 +1,139 @@
-// frontend/src/types/session.ts
+// frontend/src/state/sessionStore.ts
+import { create } from "zustand";
+import type { SessionListItem, SessionReport } from "../types/session";
+import { fetchSessionsList, fetchSession } from "../lib/api";
 
-/** En linje i sessions-lista (/api/sessions/list) */
-export interface SessionListItem {
-  /** Unik ID for økt på serversiden (kan være lik ride_id, men vi skiller de) */
-  session_id: string;
-  /** Strava- eller internt ride-id */
-  ride_id: string;
+type SessionStore = {
+  // List
+  sessionsList: SessionListItem[] | null;
+  loadingList: boolean;
+  errorList: string | null;
 
-  /** Menneskelig / ISO starttidspunkt */
-  start_time?: string | null;
+  // Single session (SessionView)
+  currentSession: SessionReport | null;
+  loadingSession: boolean;
+  errorSession: string | null;
 
-  /** Total distanse i kilometer */
-  distance_km?: number | null;
-
-  /** Gjennomsnittlig Precision Watt for økta (snitt) */
-  precision_watt_avg?: number | null;
-
-  /** F.eks. "v1-a0c54a9e-20251209" */
-  profile_label?: string | null;
-
-  /** F.eks. "open-meteo" */
-  weather_source?: string | null;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Type-definisjon for SessionReport – tåler HR-only (watts kan mangle/null)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type SessionMode = "indoor" | "outdoor";
-
-export type SessionReport = {
-  schema_version: string; // SemVer
-  avg_hr: number | null; // gjennomsnittspuls
-  calibrated: boolean; // om kalibrering var OK
-  status: string; // f.eks. "ok", "hr_only_demo", "error"
-
-  // Valgfritt – støtter enkelverdi, liste eller null
-  watts?: number | number[] | null;
-
-  // Kan være tall, liste eller null
-  wind_rel?: number | number[] | null;
-  v_rel?: number | number[] | null;
-
-  /**
-   * Precision Watt (PW) – valgfri stub for S8.5
-   * number[]: PW per sample (samme rekkefølge som watts/hr)
-   * null: feltet finnes, men ingen data
-   * undefined: feltet mangler (eldre schema)
-   */
-  precision_watt?: number[] | null;
-
-  /**
-   * PW konfidensintervall per sample [low, high]
-   * Lengde bør matche precision_watt hvis tilstede
-   */
-  precision_watt_ci?: [number, number][] | null;
-
-  /**
-   * Datakilder som har påvirket beregningene (telemetri/modeller)
-   * f.eks. ["powermeter","weather","profile"]
-   */
-  sources?: string[] | null;
-
-  /**
-   * Aerodynamisk dragkoeffisient (valgfritt i S8.5)
-   */
-  cda?: number | null;
-
-  /**
-   * Rullemostand (valgfritt i S8.5)
-   */
-  crr?: number | null;
-
-  /**
-   * Forklaringsfelt/årsaksbeskrivelse for begrenset visning eller valg
-   * f.eks. "short_session" / "hr_only_demo" / "no_power_data"
-   */
-  reason?: string | null;
-
-  /** ───────── S9: Nøkkelmetrikker (alle optional + null-sikret) ───────── */
-  /** Normalized Power (W) */
-  np?: number | null;
-
-  /** Intensity Factor (0–2). Underscore for å unngå kollisjon med reserverte navn */
-  if_?: number | null;
-
-  /** Variability Index (typisk 1.0–2.0+) */
-  vi?: number | null;
-
-  /** Pa:Hr (lagres som ratio, f.eks. 0.035 = 3.5 %). Formatteres til % i UI. */
-  pa_hr?: number | null;
-
-  /** Watt per hjerteslag (W/slag) */
-  w_per_beat?: number | null;
-
-  /** CycleGraph Score (skala 0–100 eller flyttall) */
-  cgs?: number | null;
-
-  /** Precision Watt — aggregert verdi (W), ikke graf i S9 */
-  precision_watt_value?: number | null;
-
-  /** ───────── S9: Indoor/Outdoor + GPS (valgfritt for bakoverkomp) ───────── */
-  /** Eksplisitt modus for visning av chip/badge i UI */
-  mode?: SessionMode;
-
-  /** Om økten hadde GPS-telemetri tilgjengelig (kan brukes for avledning) */
-  has_gps?: boolean;
+  // Actions
+  loadSessionsList: () => Promise<void>;
+  loadSession: (id: string) => Promise<void>;
+  clearCurrentSession: () => void;
 };
 
-// Hjelpetype for å plukke ut nøkkelmetrikker i UI (SessionCard m.m.)
-export type KeyMetrics = Pick<
-  SessionReport,
-  "np" | "if_" | "vi" | "pa_hr" | "w_per_beat" | "cgs" | "precision_watt_value"
->;
-
-/* ────────────────────────────────────────────────────────────────────────────
-   S14: SessionMetrics (lagring/persistens) i tråd med schema/session_metrics.v1.json
-   Dette er aggregerte felter per økt (ikke samme som SessionReport-streams).
-   Alle nye felt er valgfrie for bakoverkompatibilitet.
-──────────────────────────────────────────────────────────────────────────── */
-
-export type PublishState = "none" | "pending" | "published" | "failed";
-
-/** Match mot schema/session_metrics.v1.json */
-export interface SessionMetrics {
-  user_id: string;
-  date: string; // ISO-date (YYYY-MM-DD)
-  avg_watt: number;
-  duration_min: number;
-
-  // S14 – Bike Setup / fysikk
-  bike_type?: string;
-  bike_weight?: number; // kg
-  tire_width?: number; // mm
-  tire_quality?: string; // "Trening" | "Vanlig" | "Ritt" | fri tekst
-  crr_used?: number;
-  rider_weight?: number; // kg
-  bike_name?: string;
-
-  // S14 – Precision Watt (aggregert/lagret per økt)
-  precision_watt?: number;
-  precision_watt_ci?: number;
-
-  // S14 – Publisering til Strava
-  publish_state?: PublishState;
-  publish_hash?: string;
-  published_to_strava?: boolean;
-  publish_time?: string; // ISO date-time
-
-  // Schema-versjon (v0.7.x)
-  schema_version: string;
+function normalizeId(id: unknown): string {
+  if (id === null || id === undefined) return "";
+  return String(id);
 }
+
+/**
+ * Backend har historisk levert litt ulike felt:
+ * - `session_id` (vår foretrukne)
+ * - `id` (noen ganger samme som ride_id)
+ * - `ride_id`
+ *
+ * Vi normaliserer til SessionListItem med `session_id` + `ride_id`.
+ */
+function mapListRow(raw: any): SessionListItem | null {
+  const session_id =
+    normalizeId(raw?.session_id) || normalizeId(raw?.id) || normalizeId(raw?.ride_id);
+
+  const ride_id = normalizeId(raw?.ride_id) || normalizeId(raw?.id) || session_id;
+
+  if (!session_id || !ride_id) return null;
+
+  return {
+    session_id,
+    ride_id,
+    start_time: raw?.start_time ?? null,
+    distance_km: raw?.distance_km ?? null,
+    precision_watt_avg: raw?.precision_watt_avg ?? null,
+    profile_label:
+      raw?.profile_label ??
+      raw?.profile_used ??
+      raw?.profile ??
+      raw?.profile_version ??
+      null,
+    weather_source: raw?.weather_source ?? raw?.weather?.source ?? null,
+  };
+}
+
+export const useSessionStore = create<SessionStore>((set, get) => ({
+  // List
+  sessionsList: null,
+  loadingList: false,
+  errorList: null,
+
+  // Single session
+  currentSession: null,
+  loadingSession: false,
+  errorSession: null,
+
+  loadSessionsList: async () => {
+    // Unngå dobbeltkall (React StrictMode kan trigge)
+    if (get().loadingList) return;
+
+    set({ loadingList: true, errorList: null });
+
+    try {
+      const raw = await fetchSessionsList();
+
+      // fetchSessionsList kan returnere enten:
+      // - en array direkte
+      // - eller en { ok, data }-variant (avhengig av din api.ts)
+      const rows: any[] = Array.isArray(raw) ? raw : (raw as any)?.data ?? [];
+
+      const mapped = rows
+        .map(mapListRow)
+        .filter((x): x is SessionListItem => Boolean(x));
+
+      set({ sessionsList: mapped, loadingList: false, errorList: null });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ sessionsList: [], loadingList: false, errorList: msg });
+    }
+  },
+
+  loadSession: async (id: string) => {
+    if (!id) {
+      set({ currentSession: null, errorSession: "Mangler session-id", loadingSession: false });
+      return;
+    }
+
+    // Unngå dobbeltkall
+    if (get().loadingSession) return;
+
+    set({ loadingSession: true, errorSession: null });
+
+    try {
+      const result = await fetchSession(id);
+
+      if (!result.ok) {
+        set({
+          currentSession: null,
+          errorSession: result.error || "Noe gikk galt ved henting av økt",
+          loadingSession: false,
+        });
+        return;
+      }
+
+      // ✅ PATCH 2 endring: sørg for at error nulles når vi får live data
+      console.log("[SessionStore] LIVE session parsed:", result.data);
+      set({
+        currentSession: result.data,
+        errorSession: null,
+        loadingSession: false,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      set({
+        currentSession: null,
+        errorSession: msg,
+        loadingSession: false,
+      });
+    }
+  },
+
+  clearCurrentSession: () => {
+    set({ currentSession: null, loadingSession: false, errorSession: null });
+  },
+}));

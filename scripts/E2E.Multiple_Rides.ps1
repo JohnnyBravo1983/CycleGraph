@@ -86,7 +86,35 @@ function Format-WeatherUsed($metrics) {
             $p   = $wx.air_pressure_hpa
             $wms = $wx.wind_ms
             $wdd = $wx.wind_dir_deg
-            return "[WX*] used hour=$hr lat=$lat lon=$lon fp=$fp8 -> T=$t C  P=$p hPa  wind_ms=$wms  dir=$wdd deg"
+
+            # Forsøk å hente source/force hvis de finnes
+            $src   = $null
+            $force = $null
+
+            # metrics.weather_source
+            if ($metrics.PSObject.Properties.Name -contains "weather_source" -and $metrics.weather_source) {
+                $src = [string]$metrics.weather_source
+            }
+
+            # fallback: weather_used.meta.source
+            if (-not $src -and $wx.meta -and $wx.meta.PSObject.Properties.Name -contains "source") {
+                $src = [string]$wx.meta.source
+            }
+
+            # fallback: weather_meta.provider
+            if (-not $src -and $meta.PSObject.Properties.Name -contains "provider") {
+                $src = [string]$meta.provider
+            }
+
+            if ($meta.PSObject.Properties.Name -contains "force") {
+                $force = $meta.force
+            }
+
+            if ($src -or $force) {
+                return "[WX*] used hour=$hr lat=$lat lon=$lon fp=$fp8 src=$src force=$force -> T=$t C  P=$p hPa  wind_ms=$wms  dir=$wdd deg"
+            } else {
+                return "[WX*] used hour=$hr lat=$lat lon=$lon fp=$fp8 -> T=$t C  P=$p hPa  wind_ms=$wms  dir=$wdd deg"
+            }
         }
         return $null
     } catch {
@@ -110,7 +138,7 @@ function Build-SessionPayload(
     $g  = @($S.grade_smooth.data)
     $ll = @($S.latlng.data)
     $h  = @()
-    if ($S.PSObject.Properties.Name -contains 'heartrate') {
+    if ($S.PSObject.Properties.Name -contains "heartrate") {
         $h = @($S.heartrate.data)
     }
 
@@ -141,7 +169,7 @@ function Build-SessionPayload(
         if ($headings.Count -ge 2) { $headings[0] = $headings[1] }
         Write-Host ("[GPS] latlng OK - heading_deg beregnet for {0} punkter" -f $headings.Count) -ForegroundColor Green
     } else {
-        Write-Host "[GPS] latlng mangler/skjult - kjører uten heading_deg (vind retningskomp = 0)" -ForegroundColor Yellow
+        Write-Host "[GPS] latlng mangler/skjult - kjorer uten heading_deg (vind retningskomp = 0)" -ForegroundColor Yellow
     }
 
     # Absolutt start (UNIX s) fra activity.start_date (UTC)
@@ -239,7 +267,7 @@ function Analyze-Session($Payload) {
 }
 
 # --- 7) Preflight: verifiser at vi faktisk får latlng og (helst) HR fra Strava ---
-Write-Host "=== Preflight: sjekker latlng/hr på første ID ==="
+Write-Host "=== Preflight: sjekker latlng/hr pa forste ID ==="
 try {
     $pf = Get-StravaStreams $Ids[0]
     $hasLL = ($pf.latlng -and $pf.latlng.data -and $pf.latlng.data.Count -gt 1)
@@ -258,7 +286,7 @@ try {
     Write-Host ("Preflight feilet: {0}" -f $_.Exception.Message) -ForegroundColor Red
 }
 
-# --- 8) Kjør for hver aktivitet ---
+# --- 8) Kjor for hver aktivitet ---
 $out = "_debug"; if (-not (Test-Path $out)) { New-Item -ItemType Directory -Path $out | Out-Null }
 $summary = New-Object 'System.Collections.Generic.List[object]'
 
@@ -327,6 +355,42 @@ foreach ($id in $Ids) {
         # --- Oppsummeringsrad ---
         $wxm = $m.weather_meta
         $wxu = $m.weather_used
+
+        # Les ut værkilde mer robust
+        $wx_source = $null
+        $wx_force  = $null
+
+        # 1) Primært: metrics.weather_source (top-level)
+        if ($m.PSObject.Properties.Name -contains "weather_source" -and $m.weather_source) {
+            $wx_source = [string]$m.weather_source
+        }
+
+        # 2) Hvis ikke satt: prøv weather_used.meta.source
+        if (-not $wx_source -and $wxu -and $wxu.meta -and $wxu.meta.PSObject.Properties.Name -contains "source") {
+            $wx_source = [string]$wxu.meta.source
+        }
+
+        # 3) Hvis fortsatt tomt: prøv weather_meta.provider
+        if (-not $wx_source -and $wxm -and $wxm.PSObject.Properties.Name -contains "provider") {
+            $wx_source = [string]$wxm.provider
+        }
+
+        # (wx_force lar vi stå tomt inntil backend ev. begynner å sende det)
+        if ($wxm -and $wxm.PSObject.Properties.Name -contains "force") {
+            $wx_force = $wxm.force
+        }
+
+        # Definer "mode": server vs inject
+        $wx_mode = "unknown"
+        if ($UseTestWeather) {
+            $wx_mode = "inject"
+        } elseif ($wx_source) {
+            $srcLower = $wx_source.ToLowerInvariant()
+            if ($srcLower -like "*open-meteo*") {
+                $wx_mode = "server"
+            }
+        }
+
         $obj = [PSCustomObject]@{
             id              = $id
             source          = $res.source
@@ -346,6 +410,9 @@ foreach ($id in $Ids) {
             wx_wind_ms      = $(if($wxu){[double]$wxu.wind_ms}else{$null})
             wx_wind_dir     = $(if($wxu){[double]$wxu.wind_dir_deg}else{$null})
             wx_fp           = $m.weather_fp
+            wx_source       = $wx_source
+            wx_force        = $wx_force
+            wx_mode         = $wx_mode
         }
         $summary.Add($obj) | Out-Null
 
@@ -359,4 +426,4 @@ $csvPath = Join-Path $out "weather_summary.csv"
 $summary | Export-Csv -Path $csvPath -NoTypeInformation
 Write-Host ("[OK] Skrev oppsummering: {0}" -f $csvPath) -ForegroundColor Green
 
-"=== Kjøring ferdig ==="
+"=== Kjoring ferdig ==="
