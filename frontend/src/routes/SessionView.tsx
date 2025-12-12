@@ -1,13 +1,11 @@
 // frontend/src/pages/SessionView.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionReport } from "../types/session";
 
 import ErrorBanner from "../components/ErrorBanner";
-import CalibrationGuide from "../components/CalibrationGuide";
-
 import { ROUTES } from "../lib/routes";
 
 const SessionView: React.FC = () => {
@@ -21,23 +19,6 @@ const SessionView: React.FC = () => {
     loadSession,
     clearCurrentSession,
   } = useSessionStore();
-
-  // Calibration modal state
-  const [calOpen, setCalOpen] = useState(false);
-
-  // Én-gangs logging av source (heuristikk for MVP)
-  const loggedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!id) return;
-
-    const src = id === "mock" ? "mock" : "live";
-    const key = `${id}:${src}`;
-
-    if (loggedRef.current !== key) {
-      console.info("[SessionView] source:", src, "id:", id);
-      loggedRef.current = key;
-    }
-  }, [id]);
 
   // Last session via store, og rydd på unmount / ved id-bytt
   useEffect(() => {
@@ -100,34 +81,17 @@ const SessionView: React.FC = () => {
   }
 
   // ─────────────────────────────────────────────────────
-  // Vi har data – DEBUG (nøyaktig hva som ligger hvor)
+  // Vi har data
   // ─────────────────────────────────────────────────────
   const session: SessionReport = currentSession;
 
-  // Dette er “best guess” basert på tidligere struktur.
   const metrics: any = (session as any)?.metrics ?? null;
   const profileUsed: any = metrics?.profile_used ?? null;
   const weatherUsed: any = metrics?.weather_used ?? null;
 
-  // Debug logs (skrives hver render når vi har session)
-  // NB: Hvis dette blir for spammy kan vi senere gate på en queryparam.
-  try {
-    console.log("[SessionView][DEBUG] session keys:", Object.keys(session as any));
-    console.log("[SessionView][DEBUG] session.metrics:", (session as any).metrics);
-    console.log(
-      "[SessionView][DEBUG] metrics keys:",
-      Object.keys((((session as any).metrics ?? {}) as any) || {})
-    );
-    console.log("[SessionView][DEBUG] full session:", session);
-  } catch {
-    // ignore
-  }
-
   const totalWeight: unknown = profileUsed
     ? profileUsed.total_weight_kg ?? profileUsed.weight_kg
     : undefined;
-
-  const isMock = id === "mock";
 
   return (
     <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -294,47 +258,6 @@ const SessionView: React.FC = () => {
             </dl>
           </section>
         )}
-
-        {/* KALIBRERING */}
-        <section className="border rounded-lg p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">Kalibrering</h2>
-            <button
-              type="button"
-              onClick={() => setCalOpen(true)}
-              className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
-            >
-              Åpne guide
-            </button>
-          </div>
-
-          <CalibrationGuide
-            sessionId={id}
-            isOpen={calOpen}
-            onClose={() => setCalOpen(false)}
-            onCalibrated={() => {
-              setCalOpen(false);
-              loadSession(id); // refresh view
-            }}
-            isMock={isMock}
-          />
-        </section>
-
-        {/* DEBUG PANEL (visuelt) */}
-        <section className="border rounded-lg p-4 space-y-2 text-xs">
-          <div className="font-semibold">DEBUG</div>
-          <div>
-            <span className="text-slate-500">session keys:</span>{" "}
-            {Object.keys(session as any).join(", ")}
-          </div>
-          <div>
-            <span className="text-slate-500">metrics exists:</span> {metrics ? "yes" : "no"}
-          </div>
-          <div>
-            <span className="text-slate-500">metrics keys:</span>{" "}
-            {metrics ? Object.keys(metrics as any).join(", ") : "—"}
-          </div>
-        </section>
       </div>
     </div>
   );
