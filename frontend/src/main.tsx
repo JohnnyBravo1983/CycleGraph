@@ -17,6 +17,7 @@ import RidesPage from "./routes/RidesPage";
 import TrendsPage from "./routes/TrendsPage";
 import GoalsPage from "./routes/GoalsPage";
 import ProfilePage from "./routes/ProfilePage";
+import OnboardingPage from "./routes/OnboardingPage";
 
 // Installer dev-rewrite for axios FØR appen starter (kun i dev)
 if (import.meta.env.DEV) {
@@ -37,26 +38,28 @@ const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
-children: [
-  { index: true, element: <LandingPage /> },
+    children: [
+      { index: true, element: <LandingPage /> },
 
-  { path: "login", element: <LoginPage /> },
-  { path: "signup", element: <SignupPage /> },
-  { path: "calibration", element: <CalibrationPage /> },
-  { path: "dashboard", element: <DashboardPage /> },
+      { path: "login", element: <LoginPage /> },
+      { path: "signup", element: <SignupPage /> },
 
-  { path: "rides", element: <RidesPage /> },
-  { path: "trends", element: <TrendsPage /> },
-  { path: "goals", element: <GoalsPage /> },
-  { path: "profile", element: <ProfilePage /> },
+      // NEW: onboarding (må ligge her som "onboarding" pga nested routes)
+      { path: "onboarding", element: <OnboardingPage /> },
 
-  // Legacy truth-økt
-  { path: "session/:id", element: <SessionView /> },
+      { path: "calibration", element: <CalibrationPage /> },
+      { path: "dashboard", element: <DashboardPage /> },
 
-  { path: "*", element: <Navigate to="/" replace /> },
-],
+      { path: "rides", element: <RidesPage /> },
+      { path: "trends", element: <TrendsPage /> },
+      { path: "goals", element: <GoalsPage /> },
+      { path: "profile", element: <ProfilePage /> },
 
+      // Legacy truth-økt
+      { path: "session/:id", element: <SessionView /> },
 
+      { path: "*", element: <Navigate to="/" replace /> },
+    ],
   },
 ]);
 

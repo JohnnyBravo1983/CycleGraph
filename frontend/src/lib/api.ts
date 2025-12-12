@@ -17,6 +17,46 @@ function normalizeBase(url?: string): string | undefined {
   return url.replace(/\/+$/, "");
 }
 
+/**
+ * Hent profile override fra localStorage.
+ * Robust: støtter både "draft" og "profile"-objekt, samt direkte profilform.
+ * Returnerer null hvis profilen ikke ser "ferdig" ut (krever 4 finite tall).
+ */
+function getLocalProfileOverride(): {
+  weight_kg: number;
+  cda: number;
+  crr: number;
+  crank_efficiency: number;
+} | null {
+  try {
+    const raw = localStorage.getItem("cg.profile.v1");
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+
+    // Støtter både "draft" og "profile"-objekt (robust)
+    const src = p?.weight_kg !== undefined ? p : p?.profile ?? p?.draft ?? p;
+
+    const weight_kg = Number(src?.weight_kg);
+    const cda = Number(src?.cda);
+    const crr = Number(src?.crr);
+    const crank_efficiency = Number(src?.crank_efficiency);
+
+    // returner null hvis dette ikke ser ut som en profil ennå
+    if (
+      !Number.isFinite(weight_kg) ||
+      !Number.isFinite(cda) ||
+      !Number.isFinite(crr) ||
+      !Number.isFinite(crank_efficiency)
+    ) {
+      return null;
+    }
+
+    return { weight_kg, cda, crr, crank_efficiency };
+  } catch {
+    return null;
+  }
+}
+
 /** Dev-bryter: ?simulateInvalid i URL for å teste ugyldig/manglende schema_version */
 function shouldSimulateInvalid(): boolean {
   try {
@@ -217,14 +257,19 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
   console.log("[API] fetchSession (LIVE) →", url);
 
   try {
+    const body = {}; // eksisterende body (beholdt minimalistisk)
+    const profile_override = getLocalProfileOverride();
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      // analyze trenger egentlig ikke body, men noen backends liker eksplisitt {}
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        ...body,
+        ...(profile_override ? { profile_override } : {}),
+      }),
     });
 
     if (!res.ok) {
@@ -258,7 +303,7 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
     // Ekstra logging av rå JSON fra backend
     console.log("[API] fetchSession LIVE raw JSON:", json);
 
-    // 🔹 NYTT: tilpass backend-responsen til det schemaet vårt forventer
+    // 🔹 Tilpass backend-responsen til det schemaet vårt forventer
     const adaptedBase = adaptBackendSession(json);
     console.log("[API] fetchSession LIVE adapted for schema:", adaptedBase);
 
