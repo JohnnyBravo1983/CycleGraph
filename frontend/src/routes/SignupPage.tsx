@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getPostAuthRoute } from "../lib/postAuthRoute";
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -14,7 +13,6 @@ export default function SignupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // MVP: ingen ekte signup enda → validerer bare skjema før vi ruter videre
   const canContinue =
     !submitting &&
     fullName.trim().length >= 2 &&
@@ -28,10 +26,9 @@ export default function SignupPage() {
     setError(null);
 
     try {
-      // Når du senere kobler ekte signup, gjør du API-kallet her.
-      // Etter "success": route basert på profil/strava-status.
-      const to = await getPostAuthRoute();
-      navigate(to);
+      // MVP: Ingen ekte signup enda.
+      // Førstegangsbruker skal ALLTID gjennom onboarding.
+      navigate("/onboarding");
     } catch (e) {
       setError((e as Error).message ?? "Ukjent feil ved registrering");
     } finally {
@@ -99,7 +96,7 @@ export default function SignupPage() {
           canContinue ? "bg-slate-900 hover:bg-slate-800" : "bg-slate-400 cursor-not-allowed",
         ].join(" ")}
       >
-        {submitting ? "Fortsetter..." : "Gå videre"}
+        {submitting ? "Fortsetter..." : "Gå videre (Onboarding)"}
       </button>
 
       <div className="text-sm text-slate-600">

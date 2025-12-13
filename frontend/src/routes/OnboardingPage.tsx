@@ -5,21 +5,16 @@ import ProfileForm from "../components/ProfileForm";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
-  const { draft, loading, error, init, setDraft, applyDefaults, commit, profile } =
+  const { draft, loading, error, init, setDraft, applyDefaults, commit } =
     useProfileStore();
 
   useEffect(() => {
     init();
   }, [init]);
 
-  // Hvis profil allerede finnes → hopp rett til app
-  useEffect(() => {
-    if (profile) navigate("/rides");
-  }, [profile, navigate]);
-
   const onFinish = async () => {
     const ok = await commit();
-    if (ok) navigate("/rides");
+    if (ok) navigate("/dashboard");
   };
 
   return (
@@ -39,6 +34,7 @@ export default function OnboardingPage() {
 
       <div className="flex gap-3 pt-2">
         <button
+          type="button"
           onClick={applyDefaults}
           disabled={loading}
           className="px-4 py-2 rounded border"
@@ -47,6 +43,7 @@ export default function OnboardingPage() {
         </button>
 
         <button
+          type="button"
           onClick={onFinish}
           disabled={loading}
           className="px-4 py-2 rounded bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"

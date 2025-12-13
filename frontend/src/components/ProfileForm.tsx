@@ -22,40 +22,45 @@ export default function ProfileForm({ value, onChange, disabled }: Props) {
       </label>
 
       <label className="text-sm">
-        <div className="text-slate-600 mb-1">CdA</div>
+        <div className="text-slate-600 mb-1">CdA (locked in MVP)</div>
         <input
-          disabled={disabled}
+          disabled
           type="number"
           step="0.001"
-          className="border rounded px-3 py-2 w-full"
+          className="border rounded px-3 py-2 w-full bg-slate-100 cursor-not-allowed"
           value={value.cda}
-          onChange={(e) => onChange({ cda: Number(e.target.value) })}
+          readOnly
         />
       </label>
 
       <label className="text-sm">
-        <div className="text-slate-600 mb-1">Crr</div>
+        <div className="text-slate-600 mb-1">Crr (locked in MVP)</div>
         <input
-          disabled={disabled}
+          disabled
           type="number"
           step="0.0001"
-          className="border rounded px-3 py-2 w-full"
+          className="border rounded px-3 py-2 w-full bg-slate-100 cursor-not-allowed"
           value={value.crr}
-          onChange={(e) => onChange({ crr: Number(e.target.value) })}
+          readOnly
         />
       </label>
 
       <label className="text-sm">
-        <div className="text-slate-600 mb-1">Crank efficiency (0–1)</div>
+        <div className="text-slate-600 mb-1">Crank efficiency (locked in MVP)</div>
         <input
-          disabled={disabled}
+          disabled
           type="number"
           step="0.001"
-          className="border rounded px-3 py-2 w-full"
+          className="border rounded px-3 py-2 w-full bg-slate-100 cursor-not-allowed"
           value={value.crank_efficiency}
-          onChange={(e) => onChange({ crank_efficiency: Number(e.target.value) })}
+          readOnly
         />
       </label>
+
+      <p className="text-xs text-slate-500 mt-1">
+        CdA, Crr og krank-effektivitet er låst i MVP for å gi stabile og
+        forståelige analyser. Avansert kalibrering kommer senere.
+      </p>
     </div>
   );
 }
