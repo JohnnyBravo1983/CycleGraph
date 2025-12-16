@@ -1,17 +1,14 @@
 {
   "calibrated": false,
-  "cg_build": "T15-cg_build-20251216",
   "metrics": {
     "core_watts_avg": 199.2314058968074,
     "drag_watt": 131.3010335427908,
-    "eff_used": 0.955,
     "gravity_watt": 65.39073614918036,
     "gravity_watt_pedal": 65.39073614918036,
     "model_watt_crank": 142.12386106883767,
     "model_watt_wheel": 231.2225966984863,
     "model_watt_wheel_pedal": 231.2225966984863,
-    "precision_watt": 231.2225966984863,
-    "precision_watt_crank": 242.11790230207993,
+    "precision_watt": 253.52659926919364,
     "precision_watt_pedal": 242.11790230207993,
     "profile_used": {
       "rider_weight_kg": 103,
@@ -23,13 +20,14 @@
       "crank_eff_pct": 95.5,
       "device": "strava",
       "notes": "Trinn5 default; rediger fritt.",
+      "crank_efficiency": 0.96,
       "profile_version": "v1-778838e3-20251216"
     },
     "rolling_watt": 34.530827006514976,
     "total_watt": 231.2225966984863,
     "total_watt_pedal": 231.2225966984863,
-    "precision_watt_signed": 135.72828732073998,
-    "total_watt_signed": 199.2314058968074,
+    "precision_watt_signed": 142.12386106883767,
+    "total_watt_signed": 135.72828732073998,
     "gravity_watt_signed": -30.103573228565804,
     "model_watt_wheel_signed": 135.72828732073998,
     "weather_used": {
@@ -5685,6 +5683,7 @@
     "crank_eff_pct": 95.5,
     "device": "strava",
     "notes": "Trinn5 default; rediger fritt.",
+    "crank_efficiency": 0.96,
     "profile_version": "v1-778838e3-20251216"
   }
 }

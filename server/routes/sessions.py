@@ -835,7 +835,7 @@ async def debug_rb(request: Request):
     except Exception as e:
         return {"source": "error", "out": "", "probe": False, "err": repr(e)}
 
-
+# ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
 async def analyze_session(
@@ -847,6 +847,61 @@ async def analyze_session(
 ):
     want_debug = bool(debug)
     print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}")
+
+    # ==================== PATCH 1: logg force_recompute tidlig ====================
+    print(
+        f"[SVR] >>> ANALYZE ENTER sid={sid} force_recompute={force_recompute}",
+        file=sys.stderr,
+    )
+    # ============================================================================
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # FINAL OVERRIDE helper: sørg for at UI alltid matcher "wheel"-definisjonen
+    # ─────────────────────────────────────────────────────────────────────────────
+    def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            m = (resp.get("metrics") or {})
+            if not isinstance(m, dict):
+                return resp
+
+            wheel = m.get("model_watt_wheel")
+            if wheel is None:
+                wheel = m.get("total_watt")
+
+            prof = m.get("profile_used") or {}
+            eff = m.get("eff_used")
+            if eff is None:
+                try:
+                    eff = float((prof or {}).get("crank_eff_pct", 95.5)) / 100.0
+                except Exception:
+                    eff = 0.955
+
+            # clamp
+            try:
+                eff = float(eff)
+            except Exception:
+                eff = 0.955
+            eff = max(0.50, min(1.0, eff))
+
+            if wheel is not None:
+                try:
+                    wheel_f = float(wheel)
+                except Exception:
+                    return resp
+
+                # UI-definisjon
+                m["precision_watt"] = wheel_f
+                m["total_watt"] = wheel_f
+
+                # Diagnose/avansert
+                m["precision_watt_crank"] = wheel_f / eff if eff > 0 else wheel_f
+                m["eff_used"] = eff
+
+                resp["metrics"] = m
+        except Exception:
+            # Ikke la override knekke responsen
+            return resp
+        return resp
 
     # ==================== WEATHER LOCK INITIALIZATION ====================
     # ─────────────────────────────────────────────────────────────────────
@@ -872,9 +927,8 @@ async def analyze_session(
         except Exception as e:
             print(f"[SVR] weather_lock_failed sid={sid} err={e}", flush=True)
 
-    # ==================== PATCH: PERSISTED-FIRST FASTPATH ====================
+    # ==================== PATCH 2: persisted hit/bypass logging ====================
     if force_recompute:
-        # Hard bypass: aldri bruk persisted cache når recompute er eksplisitt bedt om
         print(
             f"[SVR] persisted_bypass sid={sid} reason=force_recompute",
             file=sys.stderr,
@@ -898,7 +952,7 @@ async def analyze_session(
                         f"[SVR] persisted_hit sid={sid} path={persisted_path}",
                         file=sys.stderr,
                     )
-                    return doc
+                    return _final_ui_override(doc)
                 else:
                     print(
                         f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc",
@@ -910,6 +964,7 @@ async def analyze_session(
                     f"[SVR] persisted_read_failed sid={sid} path={persisted_path} err={e}",
                     file=sys.stderr,
                 )
+    # ==============================================================================
 
     # ==================== ORIGINAL ANALYZE LOGIC ====================
 
@@ -1115,7 +1170,7 @@ async def analyze_session(
     profile_version = vinfo["profile_version"]
 
     profile_scrubbed = _scrub_profile(profile)
-    
+
     # ==================== PATCH: DEDUPE PROFILE KEYS FOR RUST ====================
     # Fjern duplicate keys før Rust-call for å unngå duplicate key errors i JSON-parser
     profile_scrubbed = _dedupe_profile_keys_for_rust(profile_scrubbed)
@@ -1168,7 +1223,7 @@ async def analyze_session(
         print(
             f"[WX] locked sid={sid} T={wx_used.get('air_temp_c')}°C P={wx_used.get('air_pressure_hpa')}hPa "
             f"wind_ms={wx_used.get('wind_ms')} from={wx_used.get('wind_dir_deg')}° fp={fp[:8] if isinstance(fp,str) else fp}",
-            flush=True
+            flush=True,
         )
     else:
         # Tillat eksplisitt client-vær (dev/test), men ellers hent selv
@@ -1196,9 +1251,7 @@ async def analyze_session(
                 and isinstance(center_lon, (int, float))
                 and isinstance(ts_hour, int)
             ):
-                wx_meta["cache_key"] = (
-                    f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}"
-                )
+                wx_meta["cache_key"] = f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}"
                 wx_fetched = await _fetch_open_meteo_hour_ms(
                     float(center_lat), float(center_lon), int(ts_hour)
                 )
@@ -1329,7 +1382,7 @@ async def analyze_session(
     # =========================================
     # PATCH A — REBUILD ANALYSIS PAYLOAD
     # =========================================
-    
+
     global rs_power_json
     if rs_power_json is None:
         rs_power_json = _load_rs_power_json()
@@ -1357,6 +1410,7 @@ async def analyze_session(
                 },
             }
             err_resp = _ensure_contract_shape(err_resp)
+            err_resp = _final_ui_override(err_resp)
             try:
                 _write_observability(err_resp)
             except Exception as e_log:
@@ -1390,6 +1444,7 @@ async def analyze_session(
                     },
                 }
                 err_resp = _ensure_contract_shape(err_resp)
+                err_resp = _final_ui_override(err_resp)
                 try:
                     _write_observability(err_resp)
                 except Exception as e_log:
@@ -1402,7 +1457,7 @@ async def analyze_session(
 
             # --- Trinn 5: anvend crank_eff_pct korrekt (rider power = wheel power / eta) ---
             metrics = resp.get("metrics") or {}
-            
+
             # ==================== PATCH: PEDAL-BASED WATTS CANONICALIZATION ====================
             # Prefer pedal-based watts if present (avoids negative downhill "free energy" lowering average)
             if isinstance(metrics, dict) and "precision_watt_pedal" in metrics:
@@ -1616,6 +1671,9 @@ async def analyze_session(
                     mm.setdefault("profile_used", {})
                     mm["profile_used"] = dict(mu_top)
 
+                    # ✅ FINAL OVERRIDE rett før vi skriver/returnerer
+                    ensured = _final_ui_override(ensured)
+
                     _write_observability(ensured)
 
                     # Ride-specific result logging
@@ -1636,7 +1694,9 @@ async def analyze_session(
                     return ensured
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
-                    return _ensure_contract_shape(resp)
+                    resp2 = _ensure_contract_shape(resp)
+                    resp2 = _final_ui_override(resp2)
+                    return resp2
             else:
                 # --- PATCH B: RUST ga ikke gyldige metrics (no-fallback) ---
                 print(
@@ -1657,6 +1717,7 @@ async def analyze_session(
                     },
                 }
                 err = _ensure_contract_shape(err)
+                err = _final_ui_override(err)
                 try:
                     _write_observability(err)
                 except Exception as e:
@@ -1664,8 +1725,6 @@ async def analyze_session(
                 return err
 
     # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
-    # Best-effort metrics via Python-implementasjonen, men vi sier fra
-    # når vi faktisk har brukt vær (wx_used) slik at CLI/script kan verifisere det.
     weather_flag = bool(wx_used) and not no_weather
 
     # Bygg profile_used med totalvekt-informasjon for fallback
@@ -1698,7 +1757,6 @@ async def analyze_session(
             fallback_metrics.setdefault("weather_meta", wx_meta)
             fallback_metrics.setdefault("weather_fp", _wx_fp(wx_used))
         except Exception:
-            # observabilitet skal ikke knekke fallback
             pass
 
     # --- Trinn 15: Heuristisk presisjonsindikator for fallback ---
@@ -1718,7 +1776,7 @@ async def analyze_session(
             "reason": "fallback_py",
             "used_fallback": True,
             "weather_source": "neutral",  # oppdateres under
-            "weather_locked": bool(weather_locked),  # <-- Viktig: vis at vær er låst
+            "weather_locked": bool(weather_locked),
             "adapter_resp_keys": [],
             "metrics_seen": list(fallback_metrics.keys()),
         },
@@ -1733,18 +1791,16 @@ async def analyze_session(
         _m["weather_source"] = resp["weather_source"]
         resp["metrics"] = _m
     except Exception:
-        # Hold respons stabil selv om weather_meta mangler
         resp.setdefault("weather_source", "unknown")
         resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
 
     # --- TRINN 10: Profile versioning inject ---
     resp["profile_version"] = profile_version
     mu_top = resp.setdefault("profile_used", {})
-    # Oppdater profile_used med totalvekt-informasjon
     mu_top["rider_weight_kg"] = rider_w
     mu_top["bike_weight_kg"] = bike_w
-    mu_top["weight_kg"] = total_w  # total
-    mu_top["total_weight_kg"] = total_w  # alias for klarhet
+    mu_top["weight_kg"] = total_w
+    mu_top["total_weight_kg"] = total_w
     mu_top.update({**profile, "profile_version": profile_version})
 
     # Trinn 7: kontraktsikre + observability før return
@@ -1754,9 +1810,10 @@ async def analyze_session(
     mu_top = resp.setdefault("profile_used", {})
     mm = resp.setdefault("metrics", {})
     mm.setdefault("profile_used", {})
-    # sørg for identisk speiling
     mm["profile_used"] = dict(mu_top)
-    # --- END TRINN 10 ---
+
+    # ✅ FINAL OVERRIDE rett før vi logger/returnerer fallback
+    resp = _final_ui_override(resp)
 
     try:
         _write_observability(resp)
@@ -1779,6 +1836,7 @@ async def analyze_session(
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
 
     return resp
+
 
 
 @router.get("/{session_id}")

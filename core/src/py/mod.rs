@@ -388,11 +388,7 @@ fn compute_scalar_metrics(
             let prev_t = samples[i - 1].t;
             let this_t = s.t;
             let d = (this_t - prev_t).max(0.01);
-            if d.is_finite() {
-                d
-            } else {
-                1.0
-            }
+            if d.is_finite() { d } else { 1.0 }
         };
 
         dt_series.push(dt);
@@ -503,6 +499,7 @@ fn compute_scalar_metrics(
     )
 }
 
+
 fn enrich_metrics_on_object(
     mut resp: serde_json::Value,
     samples: &Vec<crate::Sample>,
@@ -542,21 +539,36 @@ fn enrich_metrics_on_object(
                 tsum += dt;
             }
         }
-        if tsum > 0.0 {
-            Some(sum / tsum)
-        } else {
-            None
-        }
+        if tsum > 0.0 { Some(sum / tsum) } else { None }
     }
 
     // 1) Skalarer (fallback når core-power mangler).
     // Bruk faktisk vær om repr_kind tilsier objekt-vær, ellers nøytral.
     let neutral = neutral_weather();
-    let wx_for_scalar = if repr_kind == "object" {
-        weather
-    } else {
-        &neutral
-    };
+    let wx_for_scalar = if repr_kind == "object" { weather } else { &neutral };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PATCH 2: Prefer authoritative profile from resp["profile_used"] (core output)
+    // ─────────────────────────────────────────────────────────────────────────
+    let mut prof_for_scalar = profile.clone();
+
+    if let Some(obj) = resp.as_object() {
+        if let Some(pu) = obj.get("profile_used").and_then(|v| v.as_object()) {
+            if prof_for_scalar.weight_kg.is_none() {
+                prof_for_scalar.weight_kg = pu.get("weight_kg").and_then(|v| v.as_f64());
+            }
+            if prof_for_scalar.cda.is_none() {
+                prof_for_scalar.cda = pu.get("cda").and_then(|v| v.as_f64());
+            }
+            if prof_for_scalar.crr.is_none() {
+                prof_for_scalar.crr = pu.get("crr").and_then(|v| v.as_f64());
+            }
+            if prof_for_scalar.crank_eff_pct.is_none() {
+                prof_for_scalar.crank_eff_pct =
+                    pu.get("crank_eff_pct").and_then(|v| v.as_f64());
+            }
+        }
+    }
 
     let (
         _w_drag,
@@ -571,11 +583,10 @@ fn enrich_metrics_on_object(
         avg_grav_pedal,
         avg_model_pedal,
         precision_watt_pedal,
-    ) = compute_scalar_metrics(samples, profile, wx_for_scalar);
+    ) = compute_scalar_metrics(samples, &prof_for_scalar, wx_for_scalar);
 
     // 2) Les ev. tidvektet snitt fra core "power"/"watts" som diagnose
     let mut core_watts_avg: Option<f64> = None;
-
     if let Some(obj) = resp.as_object() {
         if let Some(arr) = obj.get("power").or_else(|| obj.get("watts")) {
             if let Some(ps) = arr.as_array() {
@@ -591,22 +602,33 @@ fn enrich_metrics_on_object(
     // 3) IKKE backsolve gravity. Bruk scalar gravity fra altitude+dt.
     let gravity_watt = gravity_watt_scalar;
 
-    // 4) Merge inn i resp, tving korrekt precision/total, legg til model_watt_wheel + gravity_watt
+    // 4) Merge inn i resp
     if let Some(obj) = resp.as_object_mut() {
         match obj.get_mut("metrics") {
             Some(mv) if mv.is_object() => {
                 let m = mv.as_object_mut().unwrap();
 
-                // keep component metrics
+                // build-stempel for å bekrefte at riktig Rust kjører
+                m.insert(
+                    "cg_build".into(),
+                    json!("T15-canonical-override-TEST-20251216-1636"),
+                );
+
+                // components (fallback hvis core ikke leverer)
                 m.entry("drag_watt").or_insert(json!(drag_watt));
                 m.entry("rolling_watt").or_insert(json!(rolling_watt));
-                m.insert("gravity_watt".into(), json!(gravity_watt));
+                m.entry("gravity_watt").or_insert(json!(gravity_watt));
 
-                // ── Modell på hjul: komponent-sum ─────────────────────────────────────────────
-                let model_watt_wheel = drag_watt + rolling_watt + gravity_watt;
+                // wheel model (bruk gravity som faktisk ligger i metrics hvis satt)
+                let gravity_used = m
+                    .get("gravity_watt")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(gravity_watt);
+
+                let model_watt_wheel = drag_watt + rolling_watt + gravity_used;
                 m.insert("model_watt_wheel".into(), json!(model_watt_wheel));
 
-                // ── Bygg/oppdater profile_used i metrics (vi bruker denne til eff) ───────────
+                // profile_used (for eff)
                 let mut prof = serde_json::Map::new();
                 if let Some(v) = profile.cda {
                     prof.insert("cda".into(), json!(v));
@@ -622,26 +644,27 @@ fn enrich_metrics_on_object(
                 }
                 prof.insert("calibrated".into(), json!(profile.calibrated));
 
-                // NB: Ikke overskriv hvis core allerede har en mer komplett profile_used.
-                // Men vi vil kunne lese crank_eff_pct herfra hvis den finnes.
+                // NB: ikke overskriv hvis core allerede har komplett profile_used
                 let prof_used_val = m.entry("profile_used").or_insert(Value::Object(prof));
                 let eff = prof_used_val
                     .as_object()
                     .map(clamp_eff_from_profile)
                     .unwrap_or(0.955);
 
-                // ── Precision (ved krank): wheel / eff ───────────────────────────────────────
-                let model_watt_crank = model_watt_wheel / eff;
-                m.insert("precision_watt".into(), json!(model_watt_crank));
-                m.insert("total_watt".into(), json!(model_watt_crank));
+                // total_watt: core_watts_avg hvis finnes, ellers wheel
+                let total_watt_ui = core_watts_avg.unwrap_or(model_watt_wheel);
+                m.insert("total_watt".into(), json!(total_watt_ui));
 
-                // Diagnose: core sitt tidvektede snitt hvis tilgjengelig
+                // diagnose / transparens
+                m.insert("precision_watt_crank".into(), json!(model_watt_wheel / eff));
+                m.insert("eff_used".into(), json!(eff));
+                m.insert("model_watt_crank".into(), json!(model_watt_wheel / eff));
+
                 if let Some(avg) = core_watts_avg {
                     m.insert("core_watts_avg".into(), json!(avg));
                 }
 
-                // ── PATCH: additive pedal-metrics ───────────────────────────────────────────
-                // Ikke rør gamle felter — kun legg til nye
+                // pedal (positive-only) behold
                 m.insert("gravity_watt_pedal".into(), json!(avg_grav_pedal));
                 m.insert("model_watt_wheel_pedal".into(), json!(avg_model_pedal));
                 m.insert("total_watt_pedal".into(), json!(avg_model_pedal));
@@ -649,10 +672,8 @@ fn enrich_metrics_on_object(
             }
             _ => {
                 // Opprett metrics-blokk
-
                 let model_watt_wheel = drag_watt + rolling_watt + gravity_watt;
 
-                // bygg profile_used
                 let mut prof = serde_json::Map::new();
                 if let Some(v) = profile.cda {
                     prof.insert("cda".into(), json!(v));
@@ -668,48 +689,79 @@ fn enrich_metrics_on_object(
                 }
                 prof.insert("calibrated".into(), json!(profile.calibrated));
 
-                // Finn eff fra prof hvis den har crank_eff_pct (hvis ikke: 95.5%)
                 let eff = clamp_eff_from_profile(&prof);
-                let model_watt_crank = model_watt_wheel / eff;
+                let total_watt_ui = core_watts_avg.unwrap_or(model_watt_wheel);
 
                 obj.insert(
                     "metrics".into(),
                     json!({
+                        "cg_build": "T15-canonical-override-TEST-20251216-1636",
+
                         "drag_watt": drag_watt,
                         "rolling_watt": rolling_watt,
                         "gravity_watt": gravity_watt,
 
-                        // nytt: hjul-før-drivetrain
                         "model_watt_wheel": model_watt_wheel,
 
-                        // crank-eff er en del av precision
-                        "precision_watt": model_watt_crank,
-                        "total_watt": model_watt_crank,
+                        "total_watt": total_watt_ui,
+
+                        // diagnose
+                        "precision_watt_crank": model_watt_wheel / eff,
+                        "eff_used": eff,
+                        "model_watt_crank": model_watt_wheel / eff,
 
                         "core_watts_avg": core_watts_avg,
                         "profile_used": prof,
 
-                        // PATCH: additive pedal-metrics
+                        // pedal (positive-only)
                         "gravity_watt_pedal": avg_grav_pedal,
-                        "model_watt_wheel_pedal": avg_model_pedal,
                         "total_watt_pedal": avg_model_pedal,
-                        "precision_watt_pedal": precision_watt_pedal
+                        "precision_watt_pedal": precision_watt_pedal,
+                        "model_watt_wheel_pedal": avg_model_pedal
                     }),
                 );
+            }
+        }
+
+        // ── HARD OVERRIDE (siste ord): sørg for definisjonene vi vil ha i UI ─────────
+        if let Some(mv) = obj.get_mut("metrics") {
+            if let Some(m) = mv.as_object_mut() {
+                // wheel = model_watt_wheel hvis den finnes, ellers fallback til komponent-sum
+                let wheel = m
+                    .get("model_watt_wheel")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(drag_watt + rolling_watt + gravity_watt);
+
+                // eff fra profile_used (samme clamp som ellers)
+                let eff = m
+                    .get("profile_used")
+                    .and_then(|v| v.as_object())
+                    .map(clamp_eff_from_profile)
+                    .unwrap_or(0.955);
+
+                // UI: precision_watt = wheel
+                m.insert("precision_watt".into(), json!(wheel));
+
+                // Diagnose: crank = wheel/eff
+                m.insert("precision_watt_crank".into(), json!(wheel / eff));
+                m.insert("eff_used".into(), json!(eff));
+                m.insert("model_watt_crank".into(), json!(wheel / eff));
             }
         }
 
         // Sett metadata om de mangler (ikke overskriv core)
         obj.entry("source").or_insert(Value::from("rust_1arg"));
         obj.entry("weather_applied").or_insert(Value::from(false));
+
+        // DEBUG: build-stamp for å verifisere at ny .pyd faktisk kjører
+        obj.insert("cg_build".into(), Value::from("T15-cg_build-20251216"));
     }
 
     resp
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// TOLERANT PARSER
-// ──────────────────────────────────────────────────────────────────────────────
+
+
 
 fn parse_tolerant(
     json_str: &str,

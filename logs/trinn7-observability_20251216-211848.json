@@ -23,6 +23,7 @@
       "crank_eff_pct": 95.5,
       "device": "strava",
       "notes": "Trinn5 default; rediger fritt.",
+      "crank_efficiency": 0.96,
       "profile_version": "v1-778838e3-20251216"
     },
     "rolling_watt": 32.287572686420226,
@@ -10797,6 +10798,7 @@
     "crank_eff_pct": 95.5,
     "device": "strava",
     "notes": "Trinn5 default; rediger fritt.",
+    "crank_efficiency": 0.96,
     "profile_version": "v1-778838e3-20251216"
   }
 }
