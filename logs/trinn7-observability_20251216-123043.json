@@ -1,0 +1,25 @@
+{
+  "source": "rust_error",
+  "weather_applied": false,
+  "metrics": {
+    "precision_watt": 0.0,
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available",
+    "drag_watt": 0.0,
+    "rolling_watt": 0.0,
+    "total_watt": 0.0,
+    "profile_used": {},
+    "weather_applied": false
+  },
+  "debug": {
+    "reason": "rust-exception",
+    "used_fallback": false,
+    "weather_source": "neutral",
+    "exception": "ValueError('parse error (OBJECT tolerant) at profile: duplicate field `crank_eff_pct`')",
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false
+  },
+  "profile_used": {}
+}

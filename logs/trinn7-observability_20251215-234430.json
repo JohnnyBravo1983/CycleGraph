@@ -1,0 +1,92 @@
+{
+  "source": "fallback_py",
+  "weather_applied": true,
+  "metrics": {
+    "precision_watt": 169.8503170091621,
+    "total_watt": 169.8503170091621,
+    "drag_watt": 129.9881684795449,
+    "rolling_watt": 39.86214852961721,
+    "weather_applied": true,
+    "precision_watt_ci": 0.0,
+    "profile_used": {
+      "rider_weight_kg": 120,
+      "bike_weight_kg": 8.0,
+      "weight_kg": 128.0,
+      "total_weight_kg": 128.0,
+      "cda": 0.3,
+      "crr": 0.004,
+      "crank_eff_pct": 95.5,
+      "device": "strava",
+      "notes": "Trinn5 default; rediger fritt.",
+      "profile_version": "v1-3a4a2cba-20251215"
+    },
+    "weather_used": {
+      "air_temp_c": -1.7,
+      "air_pressure_hpa": 1021.2,
+      "wind_ms": 2.445,
+      "wind_dir_deg": 317.0,
+      "meta": {
+        "windspeed_10m_ms": 3.26,
+        "reduce_factor": 0.75,
+        "source": "open-meteo/era5"
+      },
+      "dir_is_from": true
+    },
+    "weather_meta": {
+      "provider": "open-meteo/era5",
+      "lat_used": 59.4071364897958,
+      "lon_used": 10.354404263694938,
+      "ts_hour": 1762696800,
+      "height": "10m->2m",
+      "unit_wind": "m/s",
+      "cache_key": "om:59.4071:10.3544:1762696800"
+    },
+    "weather_fp": "72abd6068287d021185ef4a06ae055f2bde03997",
+    "estimated_error_pct_range": [
+      null,
+      null
+    ],
+    "precision_quality_hint": "no-heuristics-available",
+    "weather_source": "open-meteo/era5",
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available"
+  },
+  "debug": {
+    "reason": "fallback_py",
+    "used_fallback": true,
+    "weather_source": "neutral",
+    "adapter_resp_keys": [],
+    "metrics_seen": [
+      "precision_watt",
+      "total_watt",
+      "drag_watt",
+      "rolling_watt",
+      "weather_applied",
+      "precision_watt_ci",
+      "profile_used",
+      "weather_used",
+      "weather_meta",
+      "weather_fp",
+      "estimated_error_pct_range",
+      "precision_quality_hint"
+    ],
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false
+  },
+  "weather_source": "open-meteo/era5",
+  "profile_version": "v1-3a4a2cba-20251215",
+  "profile_used": {
+    "rider_weight_kg": 120,
+    "bike_weight_kg": 8.0,
+    "weight_kg": 128.0,
+    "total_weight_kg": 128.0,
+    "cda": 0.3,
+    "crr": 0.004,
+    "crank_eff_pct": 95.5,
+    "device": "strava",
+    "notes": "Trinn5 default; rediger fritt.",
+    "profile_version": "v1-3a4a2cba-20251215"
+  }
+}

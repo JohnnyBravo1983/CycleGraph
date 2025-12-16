@@ -51,6 +51,35 @@ import glob
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional, List
 
+# ─────────────────────────────────────────────────────────────
+# Rust adapter: preferer cyclegraph_core, fallback til cli.rust_bindings
+# ─────────────────────────────────────────────────────────────
+_adapter_import_error = None
+
+def _load_rs_power_json():
+    global _adapter_import_error
+
+    # 1) Native extension (maturin) – foretrukket
+    try:
+        from cyclegraph_core import rs_power_json as _rs
+        _adapter_import_error = None
+        print("[SVR] Using cyclegraph_core.rs_power_json", flush=True)
+        return _rs
+    except Exception as e:
+        _adapter_import_error = f"cyclegraph_core: {e!r}"
+
+    # 2) Fallback: python wrapper (som igjen kan kalle rust internt)
+    try:
+        from cli.rust_bindings import rs_power_json as _rs
+        print("[SVR] Using cli.rust_bindings.rs_power_json", flush=True)
+        return _rs
+    except Exception as e:
+        _adapter_import_error = (_adapter_import_error or "") + f" | cli.rust_bindings: {e!r}"
+        print(f"[SVR] Rust adapter not available: {_adapter_import_error}", flush=True)
+        return None
+
+rs_power_json = _load_rs_power_json()
+
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
@@ -97,6 +126,47 @@ def _pick_best_persisted_result_path(sid: str) -> Path | None:
     # så vi bruker den IKKE her. Returnér None hvis ikke actual10 finnes.
     return None
 
+def _pick_best_session_path(sid: str) -> Path | None:
+    root = _repo_root_from_here()
+    logs = root / "logs"
+    fn = f"session_{sid}.json"
+
+    # 1) Foretrukket: latest
+    p1 = logs / "actual10" / "latest" / fn
+    if p1.exists() and p1.stat().st_size > 1000:  # minst 1KB for å være meningsfull
+        return p1
+
+    # 2) Største i actual10/** (typisk full doc)
+    base = logs / "actual10"
+    if base.exists():
+        cands = list(base.rglob(fn))
+        if cands:
+            cands.sort(key=lambda p: p.stat().st_size, reverse=True)
+            for p in cands:
+                if p.exists() and p.stat().st_size > 1000:
+                    return p
+
+    # 3) Fallback til logs/sessions (hvis vi har en slik mappe)
+    fallback = logs / "sessions" / fn
+    if fallback.exists() and fallback.stat().st_size > 1000:
+        return fallback
+
+    return None
+
+def _load_samples_from_session_file(path: Path) -> list:
+    with path.open('r', encoding='utf-8-sig') as f:
+        doc = json.load(f)
+    # Prøv først "samples", deretter "stream"
+    samples = doc.get("samples")
+    if samples is None:
+        samples = doc.get("stream")
+    if samples is None:
+        return []
+    # Sørg for at det er en liste
+    if isinstance(samples, list):
+        return samples
+    return []
+
 def _is_full_result_doc(doc: dict) -> bool:
     """
     "Full" betyr i praksis: har watts-serie eller ikke-null power i metrics.
@@ -121,6 +191,47 @@ def _is_full_result_doc(doc: dict) -> bool:
     except Exception:
         pass
     return False
+
+# ==================== WEATHER LOCK HELPER FUNCTIONS ====================
+
+def _as_dict(x):
+    return x if isinstance(x, dict) else {}
+
+def _extract_persisted_weather(doc: dict) -> tuple[dict | None, dict | None, str | None]:
+    """
+    Hent weather_used/weather_meta/weather_fp fra persisted result-doc.
+    Returnerer (wx_used, wx_meta, wx_fp) eller (None, None, None) hvis ikke tilgjengelig.
+    """
+    try:
+        metrics = _as_dict(doc.get("metrics"))
+        wx_used = _as_dict(metrics.get("weather_used"))
+        wx_meta = _as_dict(metrics.get("weather_meta"))
+        wx_fp = metrics.get("weather_fp")
+        if not wx_used:
+            return None, None, None
+        return wx_used, wx_meta, wx_fp if isinstance(wx_fp, str) else None
+    except Exception:
+        return None, None, None
+
+# ==================== DEDUPE PROFILE HELPER FUNCTION ====================
+
+def _dedupe_profile_keys_for_rust(p: dict) -> dict:
+    """
+    Rust tolerant-parser feiler på duplicate keys når dict->JSON bygges fra flere kilder.
+    Vi canonicaliserer crank efficiency til ÉN representasjon.
+    """
+    if not isinstance(p, dict):
+        return p
+    out = dict(p)
+
+    # Hvis begge finnes: behold crank_eff_pct som primær, dropp crank_efficiency
+    if "crank_eff_pct" in out and "crank_efficiency" in out:
+        out.pop("crank_efficiency", None)
+
+    # Hvis du har laget to ganger crank_eff_pct via merge, så skjer det typisk ved at
+    # du har en nested/sekundær profil liggende. Pass på å ikke legge inn igjen.
+    # (Hvis du har en slik struktur, fjern den her.)
+    return out
 
 # ==================== ORIGINAL HELPER FUNCTIONS ====================
 
@@ -695,20 +806,25 @@ async def debug_rb(request: Request):
     Forventer OBJECT: {"samples":[...], "profile":{...}, "estimat":{...}}
     Returnerer {"source":"rust"/"error", "out":<str>, "probe": <bool>, "err":<str|None>}
     """
+    global rs_power_json, _adapter_import_error
+
+    # Hvis adapter ikke er lastet (eller reload har tuklet), prøv én gang til
+    if rs_power_json is None:
+        rs_power_json = _load_rs_power_json()
+
     try:
         data = await request.json()
     except Exception as e:
-        return {"source": "error", "out": "", "probe": False, "err": f"json body: {e}"}
+        return {"source": "error", "out": "", "probe": False, "err": f"json body: {e!r}"}
 
     if rs_power_json is None:
-        err_msg = (
-            f"Rust adapter import error: {_adapter_import_error}"
-            if "_adapter_import_error" in globals()
-            else "Rust adapter not available"
-        )
-        return {"source": "error", "out": "", "probe": False, "err": err_msg}
+        return {
+            "source": "error",
+            "out": "",
+            "probe": False,
+            "err": f"Rust adapter not available: {_adapter_import_error}",
+        }
 
-    # Scrub profile for å unngå dubletter/alias i passthrough
     prof = _scrub_profile(data.get("profile") or {})
     sam = data.get("samples") or []
     est = data.get("estimat") or data.get("estimate") or {}
@@ -732,13 +848,43 @@ async def analyze_session(
     want_debug = bool(debug)
     print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}")
 
+    # ==================== WEATHER LOCK INITIALIZATION ====================
+    # ─────────────────────────────────────────────────────────────────────
+    # WEATHER LOCK: ved recompute (profilendring) låser vi vær til persisted
+    # ─────────────────────────────────────────────────────────────────────
+    locked_wx_used = None
+    locked_wx_meta = None
+    locked_wx_fp = None
+    weather_locked = False
+
+    # Selv om vi bypasser persisted *resultat* ved force_recompute,
+    # så ønsker vi å gjenbruke samme vær som fasit/persisted (stabilt).
+    if force_recompute:
+        try:
+            _p = _pick_best_persisted_result_path(sid)
+            if _p is not None and _p.exists():
+                with _p.open("r", encoding="utf-8-sig") as f:
+                    _doc = json.load(f)
+                locked_wx_used, locked_wx_meta, locked_wx_fp = _extract_persisted_weather(_doc)
+                if locked_wx_used:
+                    weather_locked = True
+                    print(f"[SVR] weather_lock sid={sid} path={_p}", flush=True)
+        except Exception as e:
+            print(f"[SVR] weather_lock_failed sid={sid} err={e}", flush=True)
+
     # ==================== PATCH: PERSISTED-FIRST FASTPATH ====================
-    if not force_recompute:
+    if force_recompute:
+        # Hard bypass: aldri bruk persisted cache når recompute er eksplisitt bedt om
+        print(
+            f"[SVR] persisted_bypass sid={sid} reason=force_recompute",
+            file=sys.stderr,
+        )
+    else:
         persisted_path = _pick_best_persisted_result_path(sid)
         if persisted_path is not None:
             try:
                 with persisted_path.open("r", encoding="utf-8-sig") as f:
-                     doc = json.load(f)
+                    doc = json.load(f)
 
                 if isinstance(doc, dict) and _is_full_result_doc(doc):
                     dbg = doc.get("debug") or {}
@@ -748,13 +894,22 @@ async def analyze_session(
                         doc["debug"] = dbg
 
                     doc.setdefault("source", "persisted")
-                    print(f"[SVR] persisted_hit sid={sid} path={persisted_path}", file=sys.stderr)
+                    print(
+                        f"[SVR] persisted_hit sid={sid} path={persisted_path}",
+                        file=sys.stderr,
+                    )
                     return doc
                 else:
-                    print(f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc", file=sys.stderr)
+                    print(
+                        f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc",
+                        file=sys.stderr,
+                    )
 
             except Exception as e:
-                print(f"[SVR] persisted_read_failed sid={sid} path={persisted_path} err={e}", file=sys.stderr)
+                print(
+                    f"[SVR] persisted_read_failed sid={sid} path={persisted_path} err={e}",
+                    file=sys.stderr,
+                )
 
     # ==================== ORIGINAL ANALYZE LOGIC ====================
 
@@ -782,7 +937,10 @@ async def analyze_session(
         try:
             body = json.loads(text)
         except Exception as e:
-            print(f"[SVR] WARN: JSON decode failed, using empty body: {e!r}", flush=True)
+            print(
+                f"[SVR] WARN: JSON decode failed, using empty body: {e!r}",
+                flush=True,
+            )
             body = {}
     else:
         body = {}
@@ -792,6 +950,7 @@ async def analyze_session(
     # Tillat at body kan være dict, list, str/bytes → form til {samples, profile, weather}
     def _coerce_payload(x):
         import json as _json
+
         # 1) str/bytes → parse
         if isinstance(x, (str, bytes, bytearray)):
             try:
@@ -820,6 +979,31 @@ async def analyze_session(
     samples = body["samples"]
     profile_in = body["profile"]
     client_sent_profile = bool(profile_in)
+
+    # === PATCH A: load samples from persisted session_<sid>.json if request omitted them ===
+    if not isinstance(samples, list) or len(samples) == 0:
+        sess_path = _pick_best_session_path(sid)
+        if sess_path is not None:
+            try:
+                loaded = _load_samples_from_session_file(sess_path)
+                body["samples"] = loaded
+                samples = loaded  # <-- KRITISK: oppdater også lokal variabel
+                if want_debug:
+                    dbg = body.get("debug") or {}
+                    if isinstance(dbg, dict):
+                        dbg["used_fallback"] = True
+                        dbg["session_path"] = str(sess_path)
+                        dbg["samples_loaded"] = len(samples)
+                        body["debug"] = dbg
+                print(
+                    f"[SVR] loaded_session_samples sid={sid} n={len(samples)} path={sess_path}",
+                    file=sys.stderr,
+                )
+            except Exception as e:
+                print(
+                    f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
+                    file=sys.stderr,
+                )
 
     if not isinstance(samples, list) or not isinstance(profile_in, dict):
         raise HTTPException(status_code=400, detail="Missing 'samples' or 'profile'")
@@ -852,11 +1036,28 @@ async def analyze_session(
     profile = _ensure_profile_device((body.get("profile") or {}))
     body["profile"] = profile
 
-    # Hvis klient ikke sendte profil, bruk lagret brukerprofil
     if not client_sent_profile:
         up = load_user_profile()
         profile = _ensure_profile_device(up)
         body["profile"] = profile
+
+    # === PATCH B: apply profile_override after base profile is selected ===
+    override = body.get("profile_override") or {}
+    if isinstance(override, dict) and override:
+        # allow weight_kg alias -> rider_weight_kg
+        if "weight_kg" in override and "rider_weight_kg" not in override:
+            override["rider_weight_kg"] = override["weight_kg"]
+        if "total_weight_kg" in override and "rider_weight_kg" not in override:
+            override["rider_weight_kg"] = override["total_weight_kg"]
+
+        profile.update(override)
+        body["profile"] = profile
+        if want_debug:
+            dbg = body.get("debug") or {}
+            if isinstance(dbg, dict):
+                dbg["override_applied"] = True
+                dbg["override_keys"] = sorted(list(override.keys()))
+                body["debug"] = dbg
 
     # --- TRINN 10.1: total weight (rider + bike) ---
     # Vi bevarer rider_weight_kg og bike_weight_kg separat i profile_used,
@@ -878,8 +1079,8 @@ async def analyze_session(
         bike_w = 8.0
 
     total_w = rider_w + bike_w
-    profile["weight_kg"] = total_w          # brukes av kjernen
-    profile["total_weight_kg"] = total_w    # ren speil for tydelighet
+    profile["weight_kg"] = total_w  # brukes av kjernen
+    profile["total_weight_kg"] = total_w  # ren speil for tydelighet
     # --- END TRINN 10.1 ---
 
     # --- TRINN 10: Profile versioning inject ---
@@ -914,6 +1115,11 @@ async def analyze_session(
     profile_version = vinfo["profile_version"]
 
     profile_scrubbed = _scrub_profile(profile)
+    
+    # ==================== PATCH: DEDUPE PROFILE KEYS FOR RUST ====================
+    # Fjern duplicate keys før Rust-call for å unngå duplicate key errors i JSON-parser
+    profile_scrubbed = _dedupe_profile_keys_for_rust(profile_scrubbed)
+    # ==================== END PATCH ====================
 
     # --- Estimat (tredje-argument) ---
     estimat_cfg: Dict[str, Any] = {}
@@ -947,40 +1153,58 @@ async def analyze_session(
         "cache_key": None,
     }
 
-    # Tillat eksplisitt client-vær (dev/test), men ellers hent selv
-    wx_payload = dict((body or {}).get("weather") or {})
-    if wx_payload:
-        w_ms = float(wx_payload.get("wind_ms", 0.0))
-        w_dd = float(wx_payload.get("wind_dir_deg", 0.0))
-        t_c = float(wx_payload.get("air_temp_c", 0.0))
-        p_h = float(wx_payload.get("air_pressure_hpa", 0.0))
-        wx_used = {
-            "wind_ms": w_ms,  # forventet i m/s
-            "wind_dir_deg": w_dd,  # fra-retning
-            "air_temp_c": t_c,
-            "air_pressure_hpa": p_h,
-            "dir_is_from": True,  # eksplisitt semantikk
-            "meta": {
-                "injected_client": True,
-                "reduce_factor": None,
-                "windspeed_10m_ms": None,
-            },
-        }
+    fp = None
+
+    # WEATHER LOCK: bruk låst vær hvis tilgjengelig
+    if weather_locked:
+        # 🔒 Bruk persisted vær nøyaktig (stabilt, "fasit")
+        wx_used = dict(locked_wx_used or {})
+        if isinstance(locked_wx_meta, dict) and locked_wx_meta:
+            wx_meta = dict(locked_wx_meta)
+        fp = locked_wx_fp or _wx_fp(wx_used)
+        # sikre eksplisitt semantikk
+        wx_used.setdefault("dir_is_from", True)
+        wx_used["force"] = True
+        print(
+            f"[WX] locked sid={sid} T={wx_used.get('air_temp_c')}°C P={wx_used.get('air_pressure_hpa')}hPa "
+            f"wind_ms={wx_used.get('wind_ms')} from={wx_used.get('wind_dir_deg')}° fp={fp[:8] if isinstance(fp,str) else fp}",
+            flush=True
+        )
     else:
-        if (
-            isinstance(center_lat, (int, float))
-            and isinstance(center_lon, (int, float))
-            and isinstance(ts_hour, int)
-        ):
-            wx_meta["cache_key"] = (
-                f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}"
-            )
-            wx_fetched = await _fetch_open_meteo_hour_ms(
-                float(center_lat), float(center_lon), int(ts_hour)
-            )
-            if wx_fetched:
-                wx_used = wx_fetched
-                wx_used["dir_is_from"] = True  # eksplisitt semantikk
+        # Tillat eksplisitt client-vær (dev/test), men ellers hent selv
+        wx_payload = dict((body or {}).get("weather") or {})
+        if wx_payload:
+            w_ms = float(wx_payload.get("wind_ms", 0.0))
+            w_dd = float(wx_payload.get("wind_dir_deg", 0.0))
+            t_c = float(wx_payload.get("air_temp_c", 0.0))
+            p_h = float(wx_payload.get("air_pressure_hpa", 0.0))
+            wx_used = {
+                "wind_ms": w_ms,  # forventet i m/s
+                "wind_dir_deg": w_dd,  # fra-retning
+                "air_temp_c": t_c,
+                "air_pressure_hpa": p_h,
+                "dir_is_from": True,  # eksplisitt semantikk
+                "meta": {
+                    "injected_client": True,
+                    "reduce_factor": None,
+                    "windspeed_10m_ms": None,
+                },
+            }
+        else:
+            if (
+                isinstance(center_lat, (int, float))
+                and isinstance(center_lon, (int, float))
+                and isinstance(ts_hour, int)
+            ):
+                wx_meta["cache_key"] = (
+                    f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}"
+                )
+                wx_fetched = await _fetch_open_meteo_hour_ms(
+                    float(center_lat), float(center_lon), int(ts_hour)
+                )
+                if wx_fetched:
+                    wx_used = wx_fetched
+                    wx_used["dir_is_from"] = True  # eksplisitt semantikk
 
     # Bygg third med weather hvis tilgjengelig
     third = dict(estimat_cfg)
@@ -1006,7 +1230,7 @@ async def analyze_session(
 
         # Behold metadata for serverens observabilitet
         third["weather_meta"] = wx_meta
-        fp = _wx_fp(wx_used)
+        fp = fp or _wx_fp(wx_used)
         third["weather_fp"] = fp
         weather_applied = True
 
@@ -1034,9 +1258,7 @@ async def analyze_session(
         if no_weather:
             print("[WX] weather disabled via no_weather flag")
         else:
-            print(
-                "[WX] no weather available (missing lat/lon/ts_hour or fetch failed)"
-            )
+            print("[WX] no weather available (missing lat/lon/ts_hour or fetch failed)")
     # === WX PATCH END ===
 
     # --- Enhetsheuristikk på samples (før mapping/Rust) ---
@@ -1107,11 +1329,10 @@ async def analyze_session(
     # =========================================
     # PATCH A — REBUILD ANALYSIS PAYLOAD
     # =========================================
-    try:
-        from cli.rust_bindings import rs_power_json
-    except ImportError as e:
-        rs_power_json = None
-        print(f"[SVR] Rust adapter ikke tilgjengelig: {e}")
+    
+    global rs_power_json
+    if rs_power_json is None:
+        rs_power_json = _load_rs_power_json()
 
     # ---------- HARD RUST SHORT-CIRCUIT ----------
     if rs_power_json is not None:
@@ -1163,9 +1384,7 @@ async def analyze_session(
                         "used_fallback": False,
                         "weather_source": "neutral",
                         "adapter_raw": (
-                            r.decode()
-                            if isinstance(r, (bytes, bytearray))
-                            else str(r)
+                            r.decode() if isinstance(r, (bytes, bytearray)) else str(r)
                         ),
                         "exception": repr(e),
                     },
@@ -1183,6 +1402,21 @@ async def analyze_session(
 
             # --- Trinn 5: anvend crank_eff_pct korrekt (rider power = wheel power / eta) ---
             metrics = resp.get("metrics") or {}
+            
+            # ==================== PATCH: PEDAL-BASED WATTS CANONICALIZATION ====================
+            # Prefer pedal-based watts if present (avoids negative downhill "free energy" lowering average)
+            if isinstance(metrics, dict) and "precision_watt_pedal" in metrics:
+                metrics.setdefault("precision_watt_signed", metrics.get("precision_watt"))
+                metrics.setdefault("total_watt_signed", metrics.get("total_watt"))
+                metrics.setdefault("gravity_watt_signed", metrics.get("gravity_watt"))
+                metrics.setdefault("model_watt_wheel_signed", metrics.get("model_watt_wheel"))
+
+                metrics["precision_watt"] = metrics.get("precision_watt_pedal")
+                metrics["total_watt"] = metrics.get("total_watt_pedal", metrics.get("model_watt_wheel_pedal"))
+                metrics["gravity_watt"] = metrics.get("gravity_watt_pedal")
+                metrics["model_watt_wheel"] = metrics.get("model_watt_wheel_pedal", metrics.get("model_watt_wheel"))
+            # ==================== END PATCH ====================
+
             try:
                 eff = float(profile.get("crank_eff_pct") or 95.5) / 100.0
             except Exception:
@@ -1204,7 +1438,8 @@ async def analyze_session(
             if weather_applied and wx_used:
                 metrics["weather_used"] = wx_used
                 metrics["weather_meta"] = wx_meta
-                metrics["weather_fp"] = _wx_fp(wx_used)
+                metrics["weather_fp"] = fp if isinstance(fp, str) else _wx_fp(wx_used)
+                metrics["weather_source"] = "locked" if weather_locked else metrics.get("weather_source")
 
             # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
             try:
@@ -1215,9 +1450,7 @@ async def analyze_session(
                 status = "not_available"
                 calibrated = False
 
-                if _pred_series and any(
-                    isinstance(x, (int, float)) for x in _dev_series
-                ):
+                if _pred_series and any(isinstance(x, (int, float)) for x in _dev_series):
                     n = min(len(_pred_series), len(_dev_series))
                     if n >= 3:
                         pred = []
@@ -1243,6 +1476,7 @@ async def analyze_session(
                 metrics["calibration_status"] = status
 
                 if os.getenv("CG_CALIBRATE", "") == "1":
+
                     def _mean(xs):
                         xs2 = [float(x) for x in xs if isinstance(x, (int, float))]
                         return (sum(xs2) / len(xs2)) if xs2 else None
@@ -1264,8 +1498,10 @@ async def analyze_session(
             # --- Trinn 15: heuristisk presisjonsindikator + benchmark-logg ---
             try:
                 profile_used_t15 = (
-                    metrics.get("profile_used") or resp.get("profile_used") or {}
-                ) if isinstance(metrics, dict) else {}
+                    (metrics.get("profile_used") or resp.get("profile_used") or {})
+                    if isinstance(metrics, dict)
+                    else {}
+                )
                 wx_used_t15 = (metrics.get("weather_used") or resp.get("weather_used") or {})
                 est_range, hint, completeness = compute_estimated_error_and_hint(
                     profile_used_t15 or {}, wx_used_t15 or {}
@@ -1276,9 +1512,11 @@ async def analyze_session(
 
                 try:
                     resp_obj = resp if isinstance(resp, dict) else {}
-                    profile_version_bm = resp_obj.get("profile_version") \
-                        or (profile_used_t15.get("profile_version") if isinstance(profile_used_t15, dict) else "") \
+                    profile_version_bm = (
+                        resp_obj.get("profile_version")
+                        or (profile_used_t15.get("profile_version") if isinstance(profile_used_t15, dict) else "")
                         or ""
+                    )
                     samples_in = (body.get("samples") if isinstance(body, dict) else None) or []
                     has_device = _body_has_device_watts(samples_in)
                     calib_mae = metrics.get("calibration_mae")
@@ -1309,9 +1547,7 @@ async def analyze_session(
                 keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
                 if any(k in resp for k in keys):
                     mtmp = {k: resp.pop(k) for k in keys if k in resp}
-                    if "profile_used" in resp and isinstance(
-                        resp["profile_used"], dict
-                    ):
+                    if "profile_used" in resp and isinstance(resp["profile_used"], dict):
                         mtmp.setdefault("profile_used", resp["profile_used"])
                     resp["metrics"] = mtmp
 
@@ -1327,8 +1563,8 @@ async def analyze_session(
             m.setdefault("weather_applied", weather_applied)
             m.setdefault("total_watt", m.get("precision_watt", 0.0))
 
-            # Legg til weather metadata hvis ikke allerede satt
-            if weather_applied and wx_used and "weather_used" not in m:
+            # Legg til weather metadata hvis ikke allerede satt (med weather_lock guard)
+            if not weather_locked and weather_applied and wx_used and "weather_used" not in m:
                 m["weather_used"] = wx_used
                 m["weather_meta"] = wx_meta
                 m["weather_fp"] = _wx_fp(wx_used)
@@ -1339,6 +1575,7 @@ async def analyze_session(
             dbg["persist_ignored"] = bool(force_recompute)
             dbg["ignored_persist"] = bool(force_recompute)
             dbg["used_fallback"] = False
+            dbg["weather_locked"] = bool(weather_locked)  # <-- Viktig: vis at vær er låst
             if not dbg.get("weather_source"):
                 dbg["weather_source"] = "historical" if weather_applied else "neutral"
             if force_recompute:
@@ -1352,19 +1589,13 @@ async def analyze_session(
                 try:
                     _m = resp.get("metrics") or {}
                     _wm = (_m.get("weather_meta") or {})
-                    _prov = (
-                        _wm.get("provider")
-                        or _wm.get("source")
-                        or _wm.get("name")
-                    )
+                    _prov = _wm.get("provider") or _wm.get("source") or _wm.get("name")
                     resp["weather_source"] = _prov or "open-meteo"
                     _m["weather_source"] = resp["weather_source"]
                     resp["metrics"] = _m
                 except Exception:
                     resp.setdefault("weather_source", "unknown")
-                    resp.setdefault("metrics", {}).setdefault(
-                        "weather_source", resp["weather_source"]
-                    )
+                    resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
 
                 # --- TRINN 10: Profile versioning inject ---
                 resp["profile_version"] = profile_version
@@ -1404,9 +1635,7 @@ async def analyze_session(
 
                     return ensured
                 except Exception as e:
-                    print(
-                        f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True
-                    )
+                    print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
                     return _ensure_contract_shape(resp)
             else:
                 # --- PATCH B: RUST ga ikke gyldige metrics (no-fallback) ---
@@ -1422,15 +1651,9 @@ async def analyze_session(
                     "debug": {
                         "reason": "no-metrics-from-rust",
                         "used_fallback": False,
-                        "weather_source": (
-                            "historical" if weather_applied else "neutral"
-                        ),
-                        "adapter_resp_keys": list(resp.keys())
-                        if isinstance(resp, dict)
-                        else [],
-                        "metrics_seen": list((m or {}).keys())
-                        if isinstance(m, dict)
-                        else [],
+                        "weather_source": ("historical" if weather_applied else "neutral"),
+                        "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
+                        "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
                     },
                 }
                 err = _ensure_contract_shape(err)
@@ -1463,13 +1686,13 @@ async def analyze_session(
     # Kall fallback-motoren (Python-fysikk)
     fallback_metrics = _fallback_metrics(
         mapped,
-        profile,                # NB: profile, ikke profile_used
+        profile,  # NB: profile, ikke profile_used
         weather_applied=weather_flag,
         profile_used=profile_used,
     )
 
-    # Hvis vi faktisk har wx_used: speil det inn i metrics slik at CLI kan verifisere
-    if weather_flag and wx_used:
+    # Hvis vi faktisk har wx_used: speil det inn i metrics slik at CLI kan verifisere (med weather_lock guard)
+    if not weather_locked and weather_flag and wx_used:
         try:
             fallback_metrics.setdefault("weather_used", wx_used)
             fallback_metrics.setdefault("weather_meta", wx_meta)
@@ -1480,9 +1703,7 @@ async def analyze_session(
 
     # --- Trinn 15: Heuristisk presisjonsindikator for fallback ---
     try:
-        est_range, hint, completeness = compute_estimated_error_and_hint(
-            profile_used, wx_used or {}
-        )
+        est_range, hint, completeness = compute_estimated_error_and_hint(profile_used, wx_used or {})
         fallback_metrics["estimated_error_pct_range"] = est_range
         fallback_metrics["precision_quality_hint"] = hint
         print(f"[SVR][T15] (fallback) → est_range={est_range} hint={hint}")
@@ -1497,6 +1718,7 @@ async def analyze_session(
             "reason": "fallback_py",
             "used_fallback": True,
             "weather_source": "neutral",  # oppdateres under
+            "weather_locked": bool(weather_locked),  # <-- Viktig: vis at vær er låst
             "adapter_resp_keys": [],
             "metrics_seen": list(fallback_metrics.keys()),
         },
@@ -1513,9 +1735,7 @@ async def analyze_session(
     except Exception:
         # Hold respons stabil selv om weather_meta mangler
         resp.setdefault("weather_source", "unknown")
-        resp.setdefault("metrics", {}).setdefault(
-            "weather_source", resp["weather_source"]
-        )
+        resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
 
     # --- TRINN 10: Profile versioning inject ---
     resp["profile_version"] = profile_version
@@ -1523,8 +1743,8 @@ async def analyze_session(
     # Oppdater profile_used med totalvekt-informasjon
     mu_top["rider_weight_kg"] = rider_w
     mu_top["bike_weight_kg"] = bike_w
-    mu_top["weight_kg"] = total_w          # total
-    mu_top["total_weight_kg"] = total_w    # alias for klarhet
+    mu_top["weight_kg"] = total_w  # total
+    mu_top["total_weight_kg"] = total_w  # alias for klarhet
     mu_top.update({**profile, "profile_version": profile_version})
 
     # Trinn 7: kontraktsikre + observability før return
@@ -1592,8 +1812,6 @@ def get_session(session_id: str) -> Dict[str, Any]:
             debug_error = f"debug read error: {e_any!r}"
             doc = None
 
-
-
     # 2) Hvis vi ikke fikk debug-doc, prøv logs/results som fallback
     if doc is None and results_exists:
         try:
@@ -1649,5 +1867,4 @@ def get_session(session_id: str) -> Dict[str, Any]:
         "results_path": results_path,
         "results_exists": results_exists,
         "debug_error": debug_error,
-
     }

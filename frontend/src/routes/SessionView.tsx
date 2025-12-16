@@ -8,6 +8,45 @@ import type { SessionReport } from "../types/session";
 import ErrorBanner from "../components/ErrorBanner";
 import { ROUTES } from "../lib/routes";
 
+// ─────────────────────────────────────────────────────────────
+// Helpers (tåler number og string med komma/punktum)
+// ─────────────────────────────────────────────────────────────
+function num(x: unknown): number | null {
+  if (typeof x === "number") return Number.isFinite(x) ? x : null;
+  if (typeof x === "string") {
+    // tåler både "225.82" og "225,82"
+    const s = x.trim().replace(",", ".");
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function fmtW(x: unknown): string {
+  const n = num(x);
+  return n === null ? "—" : `${n.toFixed(1)} W`;
+}
+
+function fmtKg(x: unknown): string {
+  const n = num(x);
+  return n === null ? "—" : `${n.toFixed(1)} kg`;
+}
+
+function fmtHpa(x: unknown): string {
+  const n = num(x);
+  return n === null ? "—" : `${n.toFixed(0)} hPa`;
+}
+
+function fmtMs(x: unknown): string {
+  const n = num(x);
+  return n === null ? "—" : `${n.toFixed(1)} m/s`;
+}
+
+function fmtC(x: unknown): string {
+  const n = num(x);
+  return n === null ? "—" : `${n.toFixed(1)} °C`;
+}
+
 const SessionView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
@@ -35,6 +74,72 @@ const SessionView: React.FC = () => {
 
   const title = useMemo(() => (id ? `Økt #${id}` : "Økt"), [id]);
   const sourceLabel = id === "mock" ? "MOCK (lokale testdata)" : "LIVE fra backend";
+
+  // ─────────────────────────────────────────────────────────────
+  // Patch: localStorage profile override (kun rider_weight_kg)
+  // Legg rett etter sourceLabel (som du ba om)
+  // ─────────────────────────────────────────────────────────────
+function readLocalProfileOverride(): any | null {
+  try {
+    const raw = localStorage.getItem("cg.profile.v1");
+    if (!raw) return null;
+
+    const p = JSON.parse(raw);
+
+    // Vi ønsker å sende rider_weight_kg til backend (ikke total weight_kg).
+    // Mange steder lagrer UI bare weight_kg → map til rider_weight_kg.
+    const rider =
+      typeof p.rider_weight_kg === "number"
+        ? p.rider_weight_kg
+        : typeof p.weight_kg === "number"
+        ? p.weight_kg
+        : undefined;
+
+    const bike =
+      typeof p.bike_weight_kg === "number" ? p.bike_weight_kg : undefined;
+
+    const out: any = {};
+
+    if (typeof rider === "number") out.rider_weight_kg = rider;
+    if (typeof bike === "number") out.bike_weight_kg = bike;
+
+    // ta med aero/rulle hvis de finnes
+    if (typeof p.cda === "number") out.cda = p.cda;
+    if (typeof p.crr === "number") out.crr = p.crr;
+
+    // crank-eff kan du sende om du vil, men ikke nødvendig for denne feilen
+    if (typeof p.crank_efficiency === "number") out.crank_efficiency = p.crank_efficiency;
+    if (typeof p.crank_eff_pct === "number") out.crank_eff_pct = p.crank_eff_pct;
+
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+
+  // ─────────────────────────────────────────────────────
+  // Patch: state + handler for Re-analyze
+  // (plassert her etter store-hooken; state er OK her siden hooken er over)
+  // ─────────────────────────────────────────────────────
+  const [reAnalyzing, setReAnalyzing] = React.useState(false);
+
+  async function reAnalyzeNow() {
+    if (!id) return;
+    const override = readLocalProfileOverride();
+    if (!override) {
+      console.warn("[SessionView] no local profile override found");
+      return;
+    }
+
+    setReAnalyzing(true);
+    try {
+      // Viktig: krever at loadSession støtter opts: { forceRecompute, profileOverride }
+      await loadSession(id, { forceRecompute: true, profileOverride: override } as any);
+    } finally {
+      setReAnalyzing(false);
+    }
+  }
 
   // ─────────────────────────────────────────────────────
   // Tydelig rendering state – ingen silent fallback
@@ -86,6 +191,13 @@ const SessionView: React.FC = () => {
   const session: SessionReport = currentSession;
 
   const metrics: any = (session as any)?.metrics ?? null;
+  console.log(
+    "[SessionView] metrics.precision_watt =",
+    metrics?.precision_watt,
+    "type=",
+    typeof metrics?.precision_watt
+  );
+
   const profileUsed: any = metrics?.profile_used ?? null;
   const weatherUsed: any = metrics?.weather_used ?? null;
 
@@ -106,15 +218,36 @@ const SessionView: React.FC = () => {
           )}
         </div>
 
-        <div className="text-right">
-          <Link
-            to={ROUTES.RIDES}
-            className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
-          >
-            ← Tilbake til økter
-          </Link>
-        </div>
-      </header>
+      <div className="text-right">
+  <div className="flex items-center justify-end">
+    <Link
+      to={ROUTES.RIDES}
+      className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
+    >
+      ← Tilbake til økter
+    </Link>
+
+    {/* Patch: Re-analyze-knapp (med hard logging) */}
+    <button
+      onClick={() => {
+        const override = readLocalProfileOverride();
+        console.log("[SessionView] reAnalyzeNow override =", override);
+        console.log(
+          "[SessionView] reAnalyzeNow rider_weight_kg =",
+          override?.rider_weight_kg
+        );
+        reAnalyzeNow();
+      }}
+      disabled={reAnalyzing}
+      className="ml-2 inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
+      title="Re-analyser økta med rider_weight_kg fra localStorage (cg.profile.v1)"
+    >
+      {reAnalyzing ? "Re-analyserer…" : "Re-analyser med ny vekt"}
+    </button>
+  </div>
+</div>
+</header>
+
 
       {/* HOVEDINNHOLD */}
       <div className="space-y-6">
@@ -122,58 +255,45 @@ const SessionView: React.FC = () => {
         {metrics ? (
           <section className="border rounded-lg p-4 space-y-3">
             <h2 className="text-lg font-semibold">Analyse – Precision Watt</h2>
+
+            {/* Debug-linje (kan fjernes senere) */}
+            <div className="text-xs text-slate-400">
+              precision_watt type: {String(typeof metrics?.precision_watt)} · raw:{" "}
+              <span className="font-mono">{String(metrics?.precision_watt)}</span>
+            </div>
+
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
               <div>
                 <dt className="text-slate-500">Precision watt (snitt)</dt>
-                <dd className="font-medium">
-                  {typeof metrics.precision_watt === "number"
-                    ? `${metrics.precision_watt.toFixed(1)} W`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtW(metrics.precision_watt)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Total watt</dt>
-                <dd className="font-medium">
-                  {typeof metrics.total_watt === "number"
-                    ? `${metrics.total_watt.toFixed(1)} W`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtW(metrics.total_watt)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Drag watt</dt>
-                <dd className="font-medium">
-                  {typeof metrics.drag_watt === "number"
-                    ? `${metrics.drag_watt.toFixed(1)} W`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtW(metrics.drag_watt)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Rolling watt</dt>
-                <dd className="font-medium">
-                  {typeof metrics.rolling_watt === "number"
-                    ? `${metrics.rolling_watt.toFixed(1)} W`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtW(metrics.rolling_watt)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Gravity watt</dt>
-                <dd className="font-medium">
-                  {typeof (metrics as any).gravity_watt === "number"
-                    ? `${(metrics as any).gravity_watt.toFixed(1)} W`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtW((metrics as any).gravity_watt)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Kalibrert mot wattmåler</dt>
                 <dd className="font-medium">
                   {metrics.calibrated ? "Ja" : "Nei"}
-                  {typeof metrics.calibration_mae === "number"
-                    ? ` (MAE ≈ ${metrics.calibration_mae.toFixed(1)} W)`
+                  {num(metrics.calibration_mae) !== null
+                    ? ` (MAE ≈ ${num(metrics.calibration_mae)!.toFixed(1)} W)`
                     : ""}
                 </dd>
               </div>
@@ -198,9 +318,7 @@ const SessionView: React.FC = () => {
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
               <div>
                 <dt className="text-slate-500">Totalvekt (rider + sykkel)</dt>
-                <dd className="font-medium">
-                  {typeof totalWeight === "number" ? `${totalWeight.toFixed(1)} kg` : "—"}
-                </dd>
+                <dd className="font-medium">{fmtKg(totalWeight)}</dd>
               </div>
 
               <div>
@@ -229,31 +347,21 @@ const SessionView: React.FC = () => {
               <div>
                 <dt className="text-slate-500">Vind</dt>
                 <dd className="font-medium">
-                  {typeof weatherUsed.wind_ms === "number"
-                    ? `${weatherUsed.wind_ms.toFixed(1)} m/s`
-                    : "—"}{" "}
-                  {typeof weatherUsed.wind_dir_deg === "number"
-                    ? `fra ${weatherUsed.wind_dir_deg.toFixed(0)}°`
+                  {fmtMs(weatherUsed.wind_ms)}{" "}
+                  {num(weatherUsed.wind_dir_deg) !== null
+                    ? `fra ${num(weatherUsed.wind_dir_deg)!.toFixed(0)}°`
                     : ""}
                 </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Temperatur</dt>
-                <dd className="font-medium">
-                  {typeof weatherUsed.air_temp_c === "number"
-                    ? `${weatherUsed.air_temp_c.toFixed(1)} °C`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtC(weatherUsed.air_temp_c)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Lufttrykk</dt>
-                <dd className="font-medium">
-                  {typeof weatherUsed.air_pressure_hpa === "number"
-                    ? `${weatherUsed.air_pressure_hpa.toFixed(0)} hPa`
-                    : "—"}
-                </dd>
+                <dd className="font-medium">{fmtHpa(weatherUsed.air_pressure_hpa)}</dd>
               </div>
             </dl>
           </section>

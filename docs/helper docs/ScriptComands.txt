@@ -16,3 +16,4 @@ Viktige Comands
 
 # venv kommando
 .venv\Scripts\Activate.ps1
+

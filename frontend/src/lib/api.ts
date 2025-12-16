@@ -18,6 +18,32 @@ function normalizeBase(url?: string): string | undefined {
 }
 
 /**
+ * Robust URL-builder:
+ * - Tåler at BASE er "http://localhost:5175" ELLER "http://localhost:5175/api"
+ * - Du kan alltid sende inn path som starter med "/api/..."
+ */
+function buildApiUrl(base: string, pathStartingWithApi: string): URL {
+  const b = normalizeBase(base) ?? base;
+  const baseEndsWithApi = b.endsWith("/api");
+
+  // Hvis base allerede slutter på /api, fjern "/api" fra pathen for å unngå dobbel.
+  const effectivePath = baseEndsWithApi
+    ? pathStartingWithApi.replace(/^\/api\b/, "")
+    : pathStartingWithApi;
+
+  // Sørg for trailing slash i base når vi bruker URL-konstruktør med relativ path
+  const baseForUrl = b.endsWith("/") ? b : `${b}/`;
+  const rel = effectivePath.startsWith("/") ? effectivePath.slice(1) : effectivePath;
+
+  return new URL(rel, baseForUrl);
+}
+
+type FetchSessionOpts = {
+  forceRecompute?: boolean;
+  profileOverride?: Record<string, any>;
+};
+
+/**
  * Hent profile override fra localStorage.
  * Robust: støtter både "draft" og "profile"-objekt, samt direkte profilform.
  * Returnerer null hvis profilen ikke ser "ferdig" ut (krever 4 finite tall).
@@ -201,10 +227,13 @@ function adaptBackendSession(raw: unknown): any {
 /**
  * Hent en session:
  * - hvis id === "mock" → bruk mockSession (kilde: "mock")
- * - ellers krever vi VITE_BACKEND_URL og kaller POST {BASE}/sessions/{id}/analyze (kilde: "live")
+ * - ellers krever vi VITE_BACKEND_URL og kaller POST {BASE}/api/sessions/{id}/analyze (kilde: "live")
  * Validerer alltid med Zod + semver.
  */
-export async function fetchSession(id: string): Promise<FetchSessionResult> {
+export async function fetchSession(
+  id: string,
+  opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> }
+): Promise<FetchSessionResult> {
   const base = normalizeBase(BASE);
 
   // 1) Eksplisitt mock-modus: /session/mock
@@ -252,24 +281,37 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
   }
 
   // 3) LIVE-kall mot backend (analyze)
-  // Merk: base forventes å allerede inkludere "/api" (f.eks. "http://localhost:5175/api")
-  const url = `${base}/api/sessions/${encodeURIComponent(id)}/analyze`;
-  console.log("[API] fetchSession (LIVE) →", url);
+  // Bygg URL robust: BASE kan være med eller uten "/api"
+  const url = buildApiUrl(
+    base,
+    `/api/sessions/${encodeURIComponent(id)}/analyze`
+  );
+
+  if (opts?.forceRecompute) {
+    url.searchParams.set("force_recompute", "1");
+  }
+
+  console.log("[API] fetchSession (LIVE) →", url.toString());
 
   try {
-    const body = {}; // eksisterende body (beholdt minimalistisk)
-    const profile_override = getLocalProfileOverride();
+    // Default: eksisterende body (beholdt minimalistisk)
+    const body: Record<string, any> = {};
 
-    const res = await fetch(url, {
+    // Prioritet: opts.profileOverride > localStorage override
+    const profile_override = opts?.profileOverride ?? null;
+
+    const payload =
+      profile_override != null
+        ? { ...body, profile_override }
+        : { ...body };
+
+    const res = await fetch(url.toString(), {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        ...body,
-        ...(profile_override ? { profile_override } : {}),
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -289,10 +331,7 @@ export async function fetchSession(id: string): Promise<FetchSessionResult> {
 
     const json = await parseJsonSafe(res);
     if (typeof json === "string") {
-      console.error(
-        "[API] fetchSession → backend svarte ikke med JSON",
-        json
-      );
+      console.error("[API] fetchSession → backend svarte ikke med JSON", json);
       return {
         ok: false,
         error: "Kunne ikke parse JSON fra backend.",

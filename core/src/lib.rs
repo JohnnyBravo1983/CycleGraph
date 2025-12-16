@@ -24,7 +24,6 @@ mod defaults;
 use serde_json::json;
 
 // ───────── Re-exports (pure Rust) ─────────
-use crate::weather::{normalize_rho, normalize_wind_angle_deg};
 pub use crate::calibration::{fit_cda_crr, CalibrationResult};
 pub use crate::metrics::{compute_np, w_per_beat};
 pub use crate::models::{Profile, Sample, Weather};
@@ -33,6 +32,7 @@ pub use crate::physics::{
     PowerOutputs, RoundTo,
 };
 pub use crate::storage::{load_profile, save_profile};
+use crate::weather::{normalize_rho, normalize_wind_angle_deg};
 
 // ───────── Rust-only helper (ingen PyO3) ─────────
 pub fn compute_power_with_wind_json(
@@ -70,7 +70,11 @@ fn analyze_session_core(
     let device_watts_false = device_watts == Some(false);
 
     if no_power_stream || device_watts_false {
-        let reason = if no_power_stream { "no_power_stream" } else { "device_watts_false" };
+        let reason = if no_power_stream {
+            "no_power_stream"
+        } else {
+            "device_watts_false"
+        };
         let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
 
         return Ok(json!({
@@ -95,8 +99,18 @@ fn analyze_session_core(
     let avg_watt = watts.iter().copied().sum::<f64>() / watts.len() as f64;
     let avg_pulse = pulses.iter().copied().sum::<f64>() / pulses.len() as f64;
     let np = compute_np(&watts);
-    let eff = if avg_pulse == 0.0 { 0.0 } else { avg_watt / avg_pulse };
-    let status = if eff < 1.0 { "Lav effekt" } else if avg_pulse > 170.0 { "Høy puls" } else { "OK" };
+    let eff = if avg_pulse == 0.0 {
+        0.0
+    } else {
+        avg_watt / avg_pulse
+    };
+    let status = if eff < 1.0 {
+        "Lav effekt"
+    } else if avg_pulse > 170.0 {
+        "Høy puls"
+    } else {
+        "OK"
+    };
 
     let calibration = CalibrationResult {
         cda: 0.30,
@@ -154,8 +168,12 @@ mod m7_tests {
     use crate::metrics;
     use std::{iter, path::PathBuf, time::Instant};
 
-    fn const_series(val: f32, n: usize) -> Vec<f32> { iter::repeat(val).take(n).collect() }
-    fn ramp_series(start: f32, step: f32, n: usize) -> Vec<f32> { (0..n).map(|i| start + step * (i as f32)).collect() }
+    fn const_series(val: f32, n: usize) -> Vec<f32> {
+        iter::repeat(val).take(n).collect()
+    }
+    fn ramp_series(start: f32, step: f32, n: usize) -> Vec<f32> {
+        (0..n).map(|i| start + step * (i as f32)).collect()
+    }
 
     #[test]
     fn np_if_vi_constant_power() {
@@ -190,7 +208,10 @@ mod m7_tests {
 
     // ---------- IO structs for golden (Uten serde_derive) ----------
     #[derive(Debug, Clone, Copy)]
-    struct ExpField { value: f32, tol: f32 }
+    struct ExpField {
+        value: f32,
+        tol: f32,
+    }
 
     #[derive(Debug, Clone)]
     struct Expected {
@@ -203,41 +224,63 @@ mod m7_tests {
         w_per_beat: Option<ExpField>,
     }
 
-    fn manifest_path(p: &str) -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p) }
+    fn manifest_path(p: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p)
+    }
 
     // Robust delimiter-sjekk (komma vs semikolon)
     fn sniff_delimiter(s: &str) -> u8 {
         let commas = s.matches(',').count();
         let semis = s.matches(';').count();
-        if semis > commas { b';' } else { b',' }
+        if semis > commas {
+            b';'
+        } else {
+            b','
+        }
     }
 
     // Robust tall-parser (1,23 / 1.23 / "200 W")
     fn parse_num(s: &str) -> Option<f32> {
         let t = s.trim();
-        if t.is_empty() { return None; }
+        if t.is_empty() {
+            return None;
+        }
         let t = t.trim_matches(|c| c == '"' || c == '\'').replace(',', ".");
         let mut buf = String::new();
         let mut seen_digit = false;
         for ch in t.chars() {
-            if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E' {
+            if ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E'
+            {
                 buf.push(ch);
-                if ch.is_ascii_digit() { seen_digit = true; }
-            } else if seen_digit { break; }
+                if ch.is_ascii_digit() {
+                    seen_digit = true;
+                }
+            } else if seen_digit {
+                break;
+            }
         }
-        if buf.is_empty() { return None; }
+        if buf.is_empty() {
+            return None;
+        }
         buf.parse::<f32>().ok()
     }
 
     fn find_col(headers: &csv::StringRecord, candidates: &[&str]) -> Option<usize> {
-        let lower: Vec<String> = headers.iter().map(|h| h.trim().to_ascii_lowercase()).collect();
+        let lower: Vec<String> = headers
+            .iter()
+            .map(|h| h.trim().to_ascii_lowercase())
+            .collect();
         for key in candidates {
             let k = key.to_ascii_lowercase();
-            if let Some((idx, _)) = lower.iter().enumerate().find(|(_, h)| **h == k) { return Some(idx); }
+            if let Some((idx, _)) = lower.iter().enumerate().find(|(_, h)| **h == k) {
+                return Some(idx);
+            }
         }
         for key in candidates {
             let k = key.to_ascii_lowercase();
-            if let Some((idx, _)) = lower.iter().enumerate().find(|(_, h)| h.contains(&k)) { return Some(idx); }
+            if let Some((idx, _)) = lower.iter().enumerate().find(|(_, h)| h.contains(&k)) {
+                return Some(idx);
+            }
         }
         None
     }
@@ -252,9 +295,14 @@ mod m7_tests {
             .flexible(true)
             .from_reader(content.as_bytes());
         let headers = rdr.headers().expect("headers").clone();
-        let i_hr = find_col(&headers, &["hr","heartrate","heart_rate","bpm","pulse"]).expect("no HR column in golden csv");
-        let i_pw = find_col(&headers, &["device_watts","watts","power","power_w","pwr"]).expect("no power column in golden csv");
-        let i_mask = find_col(&headers, &["moving","in_segment","valid","ok"]);
+        let i_hr = find_col(&headers, &["hr", "heartrate", "heart_rate", "bpm", "pulse"])
+            .expect("no HR column in golden csv");
+        let i_pw = find_col(
+            &headers,
+            &["device_watts", "watts", "power", "power_w", "pwr"],
+        )
+        .expect("no power column in golden csv");
+        let i_mask = find_col(&headers, &["moving", "in_segment", "valid", "ok"]);
         let mut hr = Vec::<f32>::new();
         let mut p = Vec::<f32>::new();
         for rec in rdr.records() {
@@ -262,13 +310,19 @@ mod m7_tests {
             if let Some(mi) = i_mask {
                 if let Some(mv) = r.get(mi) {
                     let t = mv.trim().to_ascii_lowercase();
-                    if !matches!(t.as_str(),"1"|"true"|"yes"|"y"|"ok") { continue; }
+                    if !matches!(t.as_str(), "1" | "true" | "yes" | "y" | "ok") {
+                        continue;
+                    }
                 }
             }
             let hr_opt = r.get(i_hr).and_then(parse_num);
             let pw_opt = r.get(i_pw).and_then(parse_num);
-            let (Some(h), Some(w)) = (hr_opt, pw_opt) else { continue };
-            if w <= 0.0 { continue; }
+            let (Some(h), Some(w)) = (hr_opt, pw_opt) else {
+                continue;
+            };
+            if w <= 0.0 {
+                continue;
+            }
             hr.push(h);
             p.push(w);
         }
@@ -278,7 +332,9 @@ mod m7_tests {
     fn parse_expected(json_text: &str) -> Expected {
         let v: serde_json::Value = serde_json::from_str(json_text).unwrap();
         let gf = |obj: &serde_json::Value, key: &str| -> Option<ExpField> {
-            let o = obj.get(key)?; let val = o.get("value")?.as_f64()? as f32; let tol = o.get("tol")?.as_f64()? as f32;
+            let o = obj.get(key)?;
+            let val = o.get("value")?.as_f64()? as f32;
+            let tol = o.get("tol")?.as_f64()? as f32;
             Some(ExpField { value: val, tol })
         };
         Expected {
@@ -294,9 +350,18 @@ mod m7_tests {
     #[test]
     fn golden_sessions_match_with_tolerance() {
         let cases = [
-            ("tests/golden/data/sess01_streams.csv","tests/golden/expected/sess01_expected.json"),
-            ("tests/golden/data/sess02_streams.csv","tests/golden/expected/sess02_expected.json"),
-            ("tests/golden/data/sess03_streams.csv","tests/golden/expected/sess03_expected.json"),
+            (
+                "tests/golden/data/sess01_streams.csv",
+                "tests/golden/expected/sess01_expected.json",
+            ),
+            (
+                "tests/golden/data/sess02_streams.csv",
+                "tests/golden/expected/sess02_expected.json",
+            ),
+            (
+                "tests/golden/data/sess03_streams.csv",
+                "tests/golden/expected/sess03_expected.json",
+            ),
         ];
         for (csv_path, json_path) in cases {
             let (p, hr) = read_streams(csv_path);
@@ -311,22 +376,58 @@ mod m7_tests {
             let pa = crate::metrics::pa_hr(&hr, &p, hz);
             let wpb = crate::metrics::w_per_beat(&p, &hr);
 
-            let expected: Expected = parse_expected(&std::fs::read_to_string(manifest_path(json_path)).unwrap());
+            let expected: Expected =
+                parse_expected(&std::fs::read_to_string(manifest_path(json_path)).unwrap());
 
             let f = expected.w_per_beat.as_ref().unwrap();
-            assert!((wpb - f.value).abs() <= f.tol, "WpB {} vs {}±{} ({})", wpb, f.value, f.tol, csv_path);
+            assert!(
+                (wpb - f.value).abs() <= f.tol,
+                "WpB {} vs {}±{} ({})",
+                wpb,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.np.as_ref().unwrap();
-            assert!((np - f.value).abs() <= f.tol, "NP {} vs {}±{} ({})", np, f.value, f.tol, csv_path);
+            assert!(
+                (np - f.value).abs() <= f.tol,
+                "NP {} vs {}±{} ({})",
+                np,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.i_f.as_ref().unwrap();
-            assert!((iff - f.value).abs() <= f.tol, "IF {} vs {}±{} ({})", iff, f.value, f.tol, csv_path);
+            assert!(
+                (iff - f.value).abs() <= f.tol,
+                "IF {} vs {}±{} ({})",
+                iff,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.vi.as_ref().unwrap();
-            assert!((vi - f.value).abs() <= f.tol, "VI {} vs {}±{} ({})", vi, f.value, f.tol, csv_path);
+            assert!(
+                (vi - f.value).abs() <= f.tol,
+                "VI {} vs {}±{} ({})",
+                vi,
+                f.value,
+                f.tol,
+                csv_path
+            );
 
             let f = expected.pa_hr.as_ref().unwrap();
-            assert!((pa - f.value).abs() <= f.tol, "PaHR {} vs {}±{} ({})", pa, f.value, f.tol, csv_path);
+            assert!(
+                (pa - f.value).abs() <= f.tol,
+                "PaHR {} vs {}±{} ({})",
+                pa,
+                f.value,
+                f.tol,
+                csv_path
+            );
         }
     }
 
@@ -343,8 +444,16 @@ mod m7_tests {
         let _pa = crate::metrics::pa_hr(&hr, &p, hz);
         let _wb = crate::metrics::w_per_beat(&p, &hr);
         let dt = t0.elapsed();
-        let limit_ms: u128 = std::env::var("CG_PERF_MS").ok().and_then(|s| s.parse::<u128>().ok()).unwrap_or(200);
-        assert!(dt.as_millis() <= limit_ms, "perf guard: {} ms > {} ms", dt.as_millis(), limit_ms);
+        let limit_ms: u128 = std::env::var("CG_PERF_MS")
+            .ok()
+            .and_then(|s| s.parse::<u128>().ok())
+            .unwrap_or(200);
+        assert!(
+            dt.as_millis() <= limit_ms,
+            "perf guard: {} ms > {} ms",
+            dt.as_millis(),
+            limit_ms
+        );
     }
 }
 

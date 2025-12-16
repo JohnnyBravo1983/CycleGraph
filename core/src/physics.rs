@@ -8,7 +8,9 @@ pub const G: f64 = 9.80665;
 #[inline]
 pub fn wrap360(mut x: f64) -> f64 {
     x %= 360.0;
-    if x < 0.0 { x += 360.0; }
+    if x < 0.0 {
+        x += 360.0;
+    }
     x
 }
 #[inline]
@@ -17,45 +19,61 @@ pub fn deg_to_rad(d: f64) -> f64 {
 }
 
 // Kompatible alias brukt i tester/annet kode
-#[inline] pub fn cg_wrap360(x: f64) -> f64 { wrap360(x) }
-#[inline] pub fn cg_deg2rad(d: f64) -> f64 { deg_to_rad(d) }
+#[inline]
+pub fn cg_wrap360(x: f64) -> f64 {
+    wrap360(x)
+}
+#[inline]
+pub fn cg_deg2rad(d: f64) -> f64 {
+    deg_to_rad(d)
+}
 
 // Enkle defaults lokalt (slipper import av bike::cda_for)
 fn cda_for(bike_type: Option<&str>) -> f64 {
     match bike_type.unwrap_or("").to_ascii_lowercase().as_str() {
         "tt" | "tri" | "time_trial" => 0.21,
-        "road" | "racer"            => 0.25,
-        "gravel"                    => 0.28,
-        "mtb"                       => 0.35,
-        "city" | "commuter"         => 0.40,
-        _                           => 0.30,
+        "road" | "racer" => 0.25,
+        "gravel" => 0.28,
+        "mtb" => 0.35,
+        "city" | "commuter" => 0.40,
+        _ => 0.30,
     }
 }
 
 // ===============================
 // Avhengige typer (hos deg i crate-roten)
 // ===============================
-use crate::{Sample, Profile, Weather};
-use crate::smoothing; // smooth_altitude(samples)
+use crate::smoothing;
+use crate::{Profile, Sample, Weather}; // smooth_altitude(samples)
 
 // -------------------------------
 // Vindgeometri – utilities (brukes i tester)
 // -------------------------------
 #[inline]
 pub fn cg_along_wind_component(bike_heading_deg: f64, wind_from_deg: f64, wind_ms: f64) -> f64 {
-    let wind_to_deg = wrap360(wind_from_deg + 180.0);      // meteorologisk "FRA" → "TIL"
+    let wind_to_deg = wrap360(wind_from_deg + 180.0); // meteorologisk "FRA" → "TIL"
     let delta = deg_to_rad(wrap360(bike_heading_deg - wind_to_deg));
     wind_ms.max(0.0) * delta.cos()
 }
 
 #[inline]
-pub fn cg_relative_air_speed(v_ms: f64, bike_heading_deg: f64, wind_from_deg: f64, wind_ms: f64) -> f64 {
+pub fn cg_relative_air_speed(
+    v_ms: f64,
+    bike_heading_deg: f64,
+    wind_from_deg: f64,
+    wind_ms: f64,
+) -> f64 {
     let along = cg_along_wind_component(bike_heading_deg, wind_from_deg, wind_ms);
     (v_ms - along).max(0.1)
 }
 
 #[inline]
-pub fn apparent_air_speed(v_ms: f64, bike_heading_deg: f64, wind_from_deg: f64, wind_ms: f64) -> f64 {
+pub fn apparent_air_speed(
+    v_ms: f64,
+    bike_heading_deg: f64,
+    wind_from_deg: f64,
+    wind_ms: f64,
+) -> f64 {
     cg_relative_air_speed(v_ms, bike_heading_deg, wind_from_deg, wind_ms)
 }
 
@@ -65,13 +83,15 @@ pub fn apparent_air_speed(v_ms: f64, bike_heading_deg: f64, wind_from_deg: f64, 
 #[inline]
 fn air_density(air_temp_c: f64, air_pressure_hpa: f64) -> f64 {
     let p_pa = air_pressure_hpa * 100.0; // hPa → Pa
-    let t_k  = air_temp_c + 273.15;      // °C → K
-    let r = 287.05_f64;                  // J/(kg·K)
+    let t_k = air_temp_c + 273.15; // °C → K
+    let r = 287.05_f64; // J/(kg·K)
     (p_pa / (r * t_k)).clamp(0.9, 1.4)
 }
 
 // ------------------------------------------------------
 // Gravity component (Sprint 14.7 – isolert testversjon)
+// ------------------------------------------------------
+// Gravity component (Sprint 14.7 – verifiserbar versjon)
 // ------------------------------------------------------
 pub fn compute_gravity_component(
     mass_kg: f64,
@@ -82,17 +102,34 @@ pub fn compute_gravity_component(
     let mut out = Vec::with_capacity(n);
     let win: usize = 2;
 
+    // ── ÉN gang: logg globale verdier slik at vi vet hva som faktisk brukes
+    if n > 1 {
+        let dh_total = altitude_series[n - 1] - altitude_series[0];
+        let dt_total = dt_series.iter().sum::<f64>().max(0.01);
+        let dh_dt_avg = dh_total / dt_total;
+
+        eprintln!(
+            "[DBG_GRAV] mass_kg={:.2} n={} dh_total={:.3} dt_total={:.3} dh_dt_avg={:.6}",
+            mass_kg, n, dh_total, dt_total, dh_dt_avg
+        );
+    }
+
     for i in 0..n {
         let prev_i = if i >= win { i - win } else { 0 };
         let next_i = if i + win < n { i + win } else { n - 1 };
+
         let dh = altitude_series[next_i] - altitude_series[prev_i];
         let dt_sum = dt_series[prev_i..=next_i].iter().sum::<f64>().max(0.01);
+
         let dh_dt = dh / dt_sum;
         let p_g = mass_kg * G * dh_dt;
 
         #[cfg(debug_assertions)]
-        if i < 20 {
-            eprintln!("[DBG] sample={} dh/dt={:.4}  grav={:.2} W", i, dh_dt, p_g);
+        if i < 10 {
+            eprintln!(
+                "[DBG_GRAV_SAMPLE] i={} dh/dt={:.6} grav={:.2} W",
+                i, dh_dt, p_g
+            );
         }
 
         out.push(p_g);
@@ -100,7 +137,6 @@ pub fn compute_gravity_component(
 
     out
 }
-
 // -------------------------------
 // Outputs
 // -------------------------------
@@ -138,13 +174,19 @@ pub fn compute_power_with_wind(
 ) -> PowerOutputs {
     let n = samples.len();
     if n == 0 {
-        return PowerOutputs { power: vec![], wind_rel: vec![], v_rel: vec![] };
+        return PowerOutputs {
+            power: vec![],
+            wind_rel: vec![],
+            v_rel: vec![],
+        };
     }
 
     // Profilparametre (robuste defaults)
     let mass = profile.total_weight.unwrap_or(75.0);
-    let crr  = profile.crr.unwrap_or(0.005);
-    let cda  = profile.cda.unwrap_or_else(|| cda_for(profile.bike_type.as_deref()));
+    let crr = profile.crr.unwrap_or(0.005);
+    let cda = profile
+        .cda
+        .unwrap_or_else(|| cda_for(profile.bike_type.as_deref()));
 
     // Glatt høyde for robust stigning
     let alt = smoothing::smooth_altitude(samples);
@@ -160,14 +202,34 @@ pub fn compute_power_with_wind(
     }
     let g_raw = compute_gravity_component(mass, &alt, &dt_series);
     let first5_len = g_raw.len().min(5);
-    eprintln!("[DBG] gravity_probe n={} first5={:?}", g_raw.len(), &g_raw[..first5_len]);
+    eprintln!(
+        "[DBG] gravity_probe n={} first5={:?}",
+        g_raw.len(),
+        &g_raw[..first5_len]
+    );
 
     // --- Lufttetthet (T/P → rho) ---
     // Weather-feltene er f64 hos deg. Bruk fornuftige defaults ved ikke-finite.
-    let t_c   = if weather.air_temp_c.is_finite()      { weather.air_temp_c }      else { 15.0 };
-    let p_hpa = if weather.air_pressure_hpa.is_finite(){ weather.air_pressure_hpa } else { 1013.25 };
-    let w_ms  = if weather.wind_ms.is_finite()         { weather.wind_ms }         else { 0.0 };
-    let w_deg = if weather.wind_dir_deg.is_finite()    { weather.wind_dir_deg }    else { 0.0 };
+    let t_c = if weather.air_temp_c.is_finite() {
+        weather.air_temp_c
+    } else {
+        15.0
+    };
+    let p_hpa = if weather.air_pressure_hpa.is_finite() {
+        weather.air_pressure_hpa
+    } else {
+        1013.25
+    };
+    let w_ms = if weather.wind_ms.is_finite() {
+        weather.wind_ms
+    } else {
+        0.0
+    };
+    let w_deg = if weather.wind_dir_deg.is_finite() {
+        weather.wind_dir_deg
+    } else {
+        0.0
+    };
 
     let rho = air_density(t_c, p_hpa);
 
@@ -177,9 +239,9 @@ pub fn compute_power_with_wind(
         t_c, p_hpa, w_ms, w_deg, rho
     );
 
-    let mut power_out    = Vec::with_capacity(n);
+    let mut power_out = Vec::with_capacity(n);
     let mut wind_rel_out = Vec::with_capacity(n);
-    let mut v_rel_out    = Vec::with_capacity(n);
+    let mut v_rel_out = Vec::with_capacity(n);
 
     for i in 0..n {
         let s = samples[i];
@@ -214,10 +276,10 @@ pub fn compute_power_with_wind(
         let v_rel = (v - wind_along).max(0.1);
 
         // Komponenter
-        let p_roll = mass * G * crr * v_mid;               // rullewatt bruker bakketempo
-        let p_aero = 0.5 * rho * cda * v_rel.powi(3);      // *** drag bruker v_rel^3 ***
+        let p_roll = mass * G * crr * v_mid; // rullewatt bruker bakketempo
+        let p_aero = 0.5 * rho * cda * v_rel.powi(3); // *** drag bruker v_rel^3 ***
         let p_grav = g_raw[i].max(0.0);
-        let p_acc  = (mass * a * v_mid).max(0.0);
+        let p_acc = (mass * a * v_mid).max(0.0);
 
         let p = p_roll + p_aero + p_grav + p_acc;
 
@@ -226,7 +288,11 @@ pub fn compute_power_with_wind(
         v_rel_out.push(v_rel);
     }
 
-    PowerOutputs { power: power_out, wind_rel: wind_rel_out, v_rel: v_rel_out }
+    PowerOutputs {
+        power: power_out,
+        wind_rel: wind_rel_out,
+        v_rel: v_rel_out,
+    }
 }
 
 // Bakoverkompatibel wrapper
@@ -241,7 +307,9 @@ pub fn compute_indoor_power(sample: &Sample, profile: &Profile) -> f64 {
     }
 
     let v = sample.v_ms.max(0.0);
-    let cda = profile.cda.unwrap_or_else(|| cda_for(profile.bike_type.as_deref()));
+    let cda = profile
+        .cda
+        .unwrap_or_else(|| cda_for(profile.bike_type.as_deref()));
     let crr = profile.crr.unwrap_or(0.004);
     let mass = profile.total_weight.unwrap_or(75.0);
 
@@ -253,8 +321,8 @@ pub fn compute_indoor_power(sample: &Sample, profile: &Profile) -> f64 {
 }
 
 /* -------------------------------------------------------------------------
-   Nye komponent-beregninger (drag/rolling/climb) for tidsserier.
-   ------------------------------------------------------------------------- */
+Nye komponent-beregninger (drag/rolling/climb) for tidsserier.
+------------------------------------------------------------------------- */
 #[derive(Debug, Clone)]
 pub struct Components {
     pub total: Vec<f64>,
@@ -264,7 +332,9 @@ pub struct Components {
 
 fn gradient_from_alt(alt: &Vec<f64>, vel_len: usize, vel: &Vec<f64>) -> Vec<f64> {
     let n = vel_len.min(alt.len());
-    if n == 0 { return Vec::new(); }
+    if n == 0 {
+        return Vec::new();
+    }
     let mut grad = vec![0.0; n];
     for i in 1..n {
         let v_mid = 0.5 * (vel[i].max(0.0) + vel[i - 1].max(0.0));
@@ -329,12 +399,24 @@ pub fn compute_components(
         let p_climb = (mass * G * v * grad[i]).max(0.0);
         let p = p_drag + p_roll + p_climb;
 
-        drag.push(if p_drag.is_finite() { p_drag.max(0.0) } else { 0.0 });
-        rolling.push(if p_roll.is_finite() { p_roll.max(0.0) } else { 0.0 });
+        drag.push(if p_drag.is_finite() {
+            p_drag.max(0.0)
+        } else {
+            0.0
+        });
+        rolling.push(if p_roll.is_finite() {
+            p_roll.max(0.0)
+        } else {
+            0.0
+        });
         total.push(if p.is_finite() { p.max(0.0) } else { 0.0 });
     }
 
-    Components { total, drag, rolling }
+    Components {
+        total,
+        drag,
+        rolling,
+    }
 }
 
 // ---------------------------------------
@@ -348,10 +430,10 @@ pub fn estimate_crr(bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> 
     // Grunnverdi basert på sykkeltype (enkle, konservative heuristikker)
     let mut crr: f64 = match bt.as_str() {
         "tt" | "tri" | "time_trial" => 0.0035_f64,
-        "road" | "racer"            => 0.0045_f64,
-        "gravel"                    => 0.0065_f64,
-        "mtb"                       => 0.0090_f64,
-        _                           => 0.0055_f64,
+        "road" | "racer" => 0.0045_f64,
+        "gravel" => 0.0065_f64,
+        "mtb" => 0.0090_f64,
+        _ => 0.0055_f64,
     };
 
     // ----- Bredde-guard -----
@@ -364,8 +446,11 @@ pub fn estimate_crr(bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> 
 
     // Breddejustering (kun for landevei/TT)
     if matches!(bt.as_str(), "road" | "racer" | "tt" | "tri" | "time_trial") {
-        if w_eff >= 28.0 { crr -= 0.0003_f64; }
-        else if w_eff <= 23.0 { crr += 0.0002_f64; }
+        if w_eff >= 28.0 {
+            crr -= 0.0003_f64;
+        } else if w_eff <= 23.0 {
+            crr += 0.0002_f64;
+        }
     }
 
     // ----- Kvalitet -----
@@ -373,17 +458,19 @@ pub fn estimate_crr(bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> 
 
     // Utvidet fallback: tolker ALT som inneholder disse ordene som "vanlig/ukjent" → 1.0
     let only_non_alpha = tq_raw.chars().all(|c| !c.is_alphabetic());
-    let is_unknown_or_vanlig =
-        tq_raw.is_empty()
+    let is_unknown_or_vanlig = tq_raw.is_empty()
         || only_non_alpha
         || tq_raw.contains("ukjent")
         || tq_raw.contains("unknown")
         || tq_raw.contains("vanlig")
         || tq_raw.contains("standard")
         || tq_raw.contains("normal")
-        || tq_raw == "1" || tq_raw == "1.0"
+        || tq_raw == "1"
+        || tq_raw == "1.0"
         || tq_raw.contains("default")
-        || tq_raw == "none" || tq_raw == "n/a" || tq_raw == "na";
+        || tq_raw == "none"
+        || tq_raw == "n/a"
+        || tq_raw == "na";
 
     if is_unknown_or_vanlig {
         return crr.clamp(0.0025_f64, 0.0120_f64);
@@ -433,13 +520,23 @@ pub fn estimate_crr(bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> 
 
 // Match analyze_session-signaturen: (rider_weight_kg, bike_weight_kg)
 pub fn total_mass(rider_weight_kg: f64, bike_weight_kg: f64) -> f64 {
-    let rw = if rider_weight_kg.is_finite() { rider_weight_kg } else { 70.0 };
-    let bw = if bike_weight_kg.is_finite()  { bike_weight_kg }  else { 9.0  };
+    let rw = if rider_weight_kg.is_finite() {
+        rider_weight_kg
+    } else {
+        70.0
+    };
+    let bw = if bike_weight_kg.is_finite() {
+        bike_weight_kg
+    } else {
+        9.0
+    };
     (rw + bw).max(40.0)
 }
 
 // Rounding-trait som ofte importeres fra physics
-pub trait RoundTo { fn round_to(self, decimals: u32) -> f64; }
+pub trait RoundTo {
+    fn round_to(self, decimals: u32) -> f64;
+}
 impl RoundTo for f64 {
     fn round_to(self, decimals: u32) -> f64 {
         let p = 10f64.powi(decimals as i32);

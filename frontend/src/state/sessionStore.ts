@@ -7,6 +7,11 @@ import {
   type FetchSessionResult,
 } from "../lib/api";
 
+type LoadSessionOpts = {
+  forceRecompute?: boolean;
+  profileOverride?: Record<string, any>;
+};
+
 interface SessionState {
   // ─────────────────────────────────────────────────────────────
   // Listevisning (/api/sessions/list)
@@ -23,7 +28,7 @@ interface SessionState {
   loadingSession: boolean;
   errorSession: string | null;
 
-  loadSession: (id: string) => Promise<void>;
+  loadSession: (id: string, opts?: LoadSessionOpts) => Promise<void>;
   clearCurrentSession: () => void;
 
   // ─────────────────────────────────────────────────────────────
@@ -33,13 +38,13 @@ interface SessionState {
   loading: boolean;
   error: string | null;
 
-  fetchSession: (id: string) => Promise<void>;
+  fetchSession: (id: string, opts?: LoadSessionOpts) => Promise<void>;
 }
 
 export const useSessionStore = create<SessionState>((set) => {
   // ✅ Intern helper: unngår self-reference til useSessionStore i initializer
-  const runLoadSession = async (id: string): Promise<void> => {
-    console.log("[sessionStore.loadSession] KALT med id:", id);
+  const runLoadSession = async (id: string, opts?: LoadSessionOpts): Promise<void> => {
+    console.log("[sessionStore.loadSession] KALT med id:", id, "opts:", opts);
 
     set({
       loadingSession: true,
@@ -50,7 +55,9 @@ export const useSessionStore = create<SessionState>((set) => {
 
     let result: FetchSessionResult;
     try {
-      result = await apiFetchSession(id);
+      // Viktig: apiFetchSession må støtte opts (eller ignorerer dem).
+      // Vi bruker `as any` for å holde dette kompatibelt inntil api.ts er oppdatert.
+      result = await (apiFetchSession as any)(id, opts);
     } catch (err) {
       console.error("[sessionStore.loadSession] Uventet feil:", err);
       const msg = "Klarte ikke å hente analyse for økten.";
@@ -160,15 +167,21 @@ export const useSessionStore = create<SessionState>((set) => {
     // -----------------------------
     // Ny action (SessionView bruker denne)
     // -----------------------------
-    loadSession: async (id: string): Promise<void> => {
-      await runLoadSession(id);
+    loadSession: async (
+      id: string,
+      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> },
+    ): Promise<void> => {
+      await runLoadSession(id, opts);
     },
 
     // -----------------------------
     // Gammel action (alias til loadSession)
     // -----------------------------
-    fetchSession: async (id: string): Promise<void> => {
-      await runLoadSession(id);
+    fetchSession: async (
+      id: string,
+      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> },
+    ): Promise<void> => {
+      await runLoadSession(id, opts);
     },
   };
 });

@@ -1,0 +1,51 @@
+{
+  "calibrated": false,
+  "metrics": {
+    "drag_watt": 0.0,
+    "gravity_watt": 0.0,
+    "precision_watt": 0.0,
+    "profile_used": {
+      "rider_weight_kg": 85.8,
+      "bike_weight_kg": 8.0,
+      "weight_kg": 93.8,
+      "total_weight_kg": 93.8,
+      "cda": 0.3,
+      "crr": 0.004,
+      "crank_eff_pct": 0.96,
+      "crank_efficiency": 0.96,
+      "device": "strava",
+      "profile_version": "v1-883d8daf-20251215"
+    },
+    "rolling_watt": 0.0,
+    "total_watt": 0.0,
+    "weather_applied": false,
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available"
+  },
+  "source": "rust_1arg",
+  "v_rel": [],
+  "watts": [],
+  "weather_applied": false,
+  "wind_rel": [],
+  "repr_kind": "object_v3",
+  "profile_version": "v1-883d8daf-20251215",
+  "profile_used": {
+    "rider_weight_kg": 85.8,
+    "bike_weight_kg": 8.0,
+    "weight_kg": 93.8,
+    "total_weight_kg": 93.8,
+    "cda": 0.3,
+    "crr": 0.004,
+    "crank_eff_pct": 0.96,
+    "crank_efficiency": 0.96,
+    "device": "strava",
+    "profile_version": "v1-883d8daf-20251215"
+  },
+  "debug": {
+    "reason": "ok",
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false
+  }
+}

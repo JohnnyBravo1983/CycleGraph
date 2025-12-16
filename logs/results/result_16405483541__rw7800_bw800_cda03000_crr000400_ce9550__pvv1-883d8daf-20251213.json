@@ -1,0 +1,57 @@
+{
+  "calibrated": false,
+  "metrics": {
+    "drag_watt": 0.0,
+    "gravity_watt": 0.0,
+    "precision_watt": 0.0,
+    "profile_used": {
+      "rider_weight_kg": 78.0,
+      "bike_weight_kg": 8.0,
+      "weight_kg": 86.0,
+      "total_weight_kg": 86.0,
+      "cda": 0.3,
+      "crr": 0.004,
+      "crank_eff_pct": 95.5,
+      "device": "strava",
+      "notes": "Trinn5 default; rediger fritt.",
+      "profile_version": "v1-883d8daf-20251213"
+    },
+    "rolling_watt": 0.0,
+    "total_watt": 0.0,
+    "weather_applied": false,
+    "weather_source": "open-meteo",
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available"
+  },
+  "source": "rust_1arg",
+  "v_rel": [],
+  "watts": [],
+  "weather_applied": false,
+  "wind_rel": [],
+  "repr_kind": "object_v3",
+  "profile_version": "v1-883d8daf-20251213",
+  "cache_key": "16405483541__rw78.00_bw8.00_cda0.3000_crr0.00400_ce95.50__pvv1-883d8daf-20251213",
+  "debug": {
+    "reason": "ok",
+    "force_recompute": false,
+    "used_fallback": false,
+    "cache_key": "16405483541__rw78.00_bw8.00_cda0.3000_crr0.00400_ce95.50__pvv1-883d8daf-20251213",
+    "weather_source": "neutral",
+    "persist_ignored": false,
+    "ignored_persist": false
+  },
+  "weather_source": "open-meteo",
+  "profile_used": {
+    "rider_weight_kg": 78.0,
+    "bike_weight_kg": 8.0,
+    "weight_kg": 86.0,
+    "total_weight_kg": 86.0,
+    "cda": 0.3,
+    "crr": 0.004,
+    "crank_eff_pct": 95.5,
+    "device": "strava",
+    "notes": "Trinn5 default; rediger fritt.",
+    "profile_version": "v1-883d8daf-20251213"
+  }
+}

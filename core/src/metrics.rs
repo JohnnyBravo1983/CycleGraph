@@ -18,7 +18,11 @@ pub struct WeatherContext {
 #[inline]
 pub fn weather_adjustment_factor(weather: &WeatherContext) -> f32 {
     let humidity_factor = if weather.humidity > 80.0 { 0.95 } else { 1.0 };
-    let temp_factor = if weather.temperature > 25.0 { 0.97 } else { 1.0 };
+    let temp_factor = if weather.temperature > 25.0 {
+        0.97
+    } else {
+        1.0
+    };
     let pressure_factor = if weather.pressure < 1000.0 { 0.98 } else { 1.0 };
     humidity_factor * temp_factor * pressure_factor
 }
