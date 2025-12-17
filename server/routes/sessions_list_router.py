@@ -1,7 +1,9 @@
 # server/routes/sessions_list_router.py
 from __future__ import annotations
 
+import csv
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,11 +16,10 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+_RE_RESULT_SID = re.compile(r"^result_(\d+)")
+
+
 def _repo_root_from_here() -> Path:
-    """
-    Robust mot at server kjører med “feil” cwd.
-    Går oppover fra denne fila til vi finner en "logs/"-mappe.
-    """
     p = Path(__file__).resolve().parent
     for _ in range(0, 10):
         if (p / "logs").exists():
@@ -29,170 +30,268 @@ def _repo_root_from_here() -> Path:
     return Path.cwd()
 
 
-def _read_json_utf8_sig(path: Path) -> Dict[str, Any]:
-    """Tåler UTF-8 BOM."""
-    with path.open("r", encoding="utf-8-sig") as f:
-        return json.load(f)
+def _read_json_utf8_sig(path: Path) -> Any:
+    try:
+        with path.open("r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _normalize_doc(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        for k in ("result", "analysis", "data", "doc"):
+            v = raw.get(k)
+            if isinstance(v, dict):
+                return v
+        return raw
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                return item
+    return {}
+
+
+def _extract_session_id(doc: Dict[str, Any]) -> Optional[str]:
+    for k in ("session_id", "ride_id", "id"):
+        v = doc.get(k)
+        if v is not None:
+            return str(v)
+
+    for path in (
+        ("info", "session_id"),
+        ("info", "ride_id"),
+        ("meta", "session_id"),
+        ("meta", "ride_id"),
+        ("session", "id"),
+        ("ride", "id"),
+    ):
+        cur: Any = doc
+        ok = True
+        for p in path:
+            if isinstance(cur, dict) and p in cur:
+                cur = cur[p]
+            else:
+                ok = False
+                break
+        if ok and cur is not None:
+            return str(cur)
+
+    return None
+
+
+def _sid_from_filename(p: Path) -> Optional[str]:
+    """
+    Fallback: bruk filnavnet result_<digits>*.json som session_id.
+    Eksempel: result_16127771071_direct.json -> 16127771071
+    """
+    m = _RE_RESULT_SID.match(p.stem)
+    return m.group(1) if m else None
 
 
 def _to_float(x: Any) -> Optional[float]:
-    return float(x) if isinstance(x, (int, float)) else None
-
-
-def _numeric_session_id_from_stem(stem: str) -> Optional[str]:
-    """
-    Tar inn f.eks. "result_16127771071" og returnerer "16127771071"
-    Returnerer None for f.eks. "result_16127771071__backup"
-    """
-    if not stem.startswith("result_"):
+    try:
+        if x is None:
+            return None
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip()
+        if s == "":
+            return None
+        return float(s)
+    except Exception:
         return None
-    sid = stem.replace("result_", "", 1)
-    return sid if sid.isdigit() else None
 
 
-def _extract_profile_label(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[str]:
-    # profil-label (robust)
-    profile_used_doc = doc.get("profile_used") or {}
-    if not isinstance(profile_used_doc, dict):
-        profile_used_doc = {}
+def _trend_sessions_lookup_start_time(session_id: str) -> Optional[str]:
+    try:
+        root = _repo_root_from_here()
+        path = root / "logs" / "trend_sessions.csv"
+        if not path.exists():
+            return None
 
-    profile_used_metrics = metrics.get("profile_used") or {}
-    if not isinstance(profile_used_metrics, dict):
-        profile_used_metrics = {}
-
-    return (
-        doc.get("profile_version")
-        or profile_used_doc.get("profile_version")
-        or profile_used_metrics.get("profile_version")
-    )
-
-
-def _extract_weather_source(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[str]:
-    # weather_source (robust)
-    weather_used = metrics.get("weather_used") or {}
-    if not isinstance(weather_used, dict):
-        weather_used = {}
-
-    meta = weather_used.get("meta") or {}
-    if not isinstance(meta, dict):
-        meta = {}
-
-    return (
-        doc.get("weather_source")
-        or metrics.get("weather_source")
-        or meta.get("source")
-        or weather_used.get("source")
-        or weather_used.get("provider")
-    )
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            r = csv.reader(f)
+            _ = next(r, None)
+            for row in r:
+                if not row:
+                    continue
+                if row[0].strip() == str(session_id):
+                    ts = (row[1] or "").strip() if len(row) > 1 else ""
+                    return ts or None
+        return None
+    except Exception:
+        return None
 
 
-def _row_from_doc(sid: str, doc: Dict[str, Any]) -> Dict[str, Any]:
-    metrics = doc.get("metrics") or {}
-    if not isinstance(metrics, dict):
-        metrics = {}
+def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
+    m = doc.get("metrics")
+    return m if isinstance(m, dict) else {}
 
-    precision = _to_float(metrics.get("precision_watt"))
-    if precision is None:
-        # ekstra fallback om noen docs har feltet utenfor metrics
-        precision = _to_float(doc.get("precision_watt"))
-    if precision is None:
-        precision = _to_float(doc.get("precision_watt_avg"))
 
-    return {
-        "session_id": str(sid),
-        "ride_id": str(sid),
+def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
+    """
+    Bygger rad. Bruker fallback_sid hvis doc mangler id.
+    """
+    metrics = _safe_get_metrics(doc)
+
+    distance_km = _to_float(doc.get("distance_km"))
+    if distance_km is None:
+        dm = _to_float(doc.get("distance_m"))
+        if dm is not None:
+            distance_km = dm / 1000.0
+
+    pw_avg = _to_float(doc.get("precision_watt_avg"))
+    if pw_avg is None:
+        pw_avg = _to_float(metrics.get("precision_watt_avg"))
+    if pw_avg is None:
+        pw_avg = _to_float(metrics.get("precision_watt"))
+
+    sid = str(doc.get("session_id") or doc.get("ride_id") or doc.get("id") or fallback_sid)
+
+    row: Dict[str, Any] = {
+        "session_id": sid,
+        "ride_id": str(doc.get("ride_id")) if doc.get("ride_id") is not None else sid,
         "start_time": doc.get("start_time"),
-        "distance_km": doc.get("distance_km"),
-        "precision_watt_avg": precision,
-        "profile_label": _extract_profile_label(doc, metrics),
-        "weather_source": _extract_weather_source(doc, metrics),
+        "distance_km": distance_km,
+        "precision_watt_avg": pw_avg,
+        "profile_label": doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label"),
+        "weather_source": doc.get("weather_source") or (doc.get("weather") or {}).get("source"),
+        "debug_source_path": str(source_path).replace("\\", "/"),
     }
+
+    # PATCH C-final (safe): never break listing
+    try:
+        if row.get("start_time") in (None, "",):
+            sid2 = row.get("session_id") or row.get("ride_id")
+            if sid2:
+                st = _trend_sessions_lookup_start_time(str(sid2))
+                if st:
+                    row["start_time"] = st
+    except Exception:
+        pass
+
+    return row
+
+
+def _gather_result_files(root: Path) -> List[Path]:
+    files: List[Path] = []
+
+    dbg = root / "_debug"
+    if dbg.exists():
+        # FIX: filtrer bort "_direct" så vi ikke får dobbelt/rare varianter
+        files.extend(sorted([p for p in dbg.glob("result_*.json") if "_direct" not in p.name]))
+
+    lr = root / "logs" / "results"
+    if lr.exists():
+        files.extend(sorted(lr.glob("result_*.json")))
+
+    out = root / "out"
+    if out.exists():
+        files.extend(sorted(out.glob("result_*.json")))
+
+    return files
+
+
+def _prefer_path(a: Path, b: Path) -> Path:
+    def tier(p: Path) -> int:
+        s = str(p).replace("\\", "/")
+        if "/_debug/" in s:
+            return 0
+        if "/logs/results/" in s:
+            return 1
+        if "/out/" in s:
+            return 2
+        return 9
+
+    ta, tb = tier(a), tier(b)
+    if ta != tb:
+        return a if ta < tb else b
+
+    try:
+        return a if a.stat().st_mtime >= b.stat().st_mtime else b
+    except Exception:
+        return a
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/list")
-@router.get("/list/all")  # kompatibilitet med eksisterende frontend-calls
-def list_sessions() -> List[Dict[str, Any]]:
+@router.get("/list/all")
+async def list_all() -> List[Dict[str, Any]]:
+    import sys
+
     root = _repo_root_from_here()
-    logs = root / "logs"
+    files = _gather_result_files(root)
+
+    print(f"[list_all] __file__={__file__}", file=sys.stderr)
+    print(f"[list_all] root={root} files={len(files)}", file=sys.stderr)
+
+    best_by_sid: Dict[str, Path] = {}
+    sid_from_doc = 0
+    sid_from_name = 0
+    sid_missing = 0
+
+    for p in files:
+        try:
+            raw = _read_json_utf8_sig(p)
+            doc = _normalize_doc(raw)
+
+            sid = _extract_session_id(doc)
+            if sid is not None:
+                sid_from_doc += 1
+            else:
+                sid = _sid_from_filename(p)
+                if sid is not None:
+                    sid_from_name += 1
+                else:
+                    sid_missing += 1
+                    continue
+
+            if sid not in best_by_sid:
+                best_by_sid[sid] = p
+            else:
+                best_by_sid[sid] = _prefer_path(best_by_sid[sid], p)
+        except Exception:
+            continue
+
+    print(
+        f"[list_all] sid_from_doc={sid_from_doc} sid_from_name={sid_from_name} sid_missing={sid_missing} unique={len(best_by_sid)}",
+        file=sys.stderr,
+    )
 
     rows: List[Dict[str, Any]] = []
+    for sid, p in best_by_sid.items():
+        try:
+            raw = _read_json_utf8_sig(p)
+            doc = _normalize_doc(raw)
+            row = _row_from_doc(doc, p, fallback_sid=sid)
+            rows.append(row)
+        except Exception:
+            continue
 
-    # 1) Prioritet: logs/actual10/latest (full analyse)
-    latest_dir = logs / "actual10" / "latest"
-    if latest_dir.exists():
-        for p in latest_dir.glob("result_*.json"):
-            sid = _numeric_session_id_from_stem(p.stem)
-            if not sid:
-                continue
-            try:
-                doc = _read_json_utf8_sig(p)
-            except Exception:
-                continue
-            if isinstance(doc, dict):
-                rows.append(_row_from_doc(sid, doc))
+    # FIX: dropp helt tomme placeholder-resultater (typisk 0.0 i logs/results)
+    rows = [r for r in rows if (_to_float(r.get("precision_watt_avg")) or 0.0) > 0.0]
 
-    # 2) Fallback: logs/results (ofte stub, men ok hvis latest ikke finnes)
-    if not rows:
-        res_dir = logs / "results"
-        if res_dir.exists():
-            for p in res_dir.glob("result_*.json"):
-                sid = _numeric_session_id_from_stem(p.stem)
-                if not sid:
-                    continue
-                try:
-                    doc = _read_json_utf8_sig(p)
-                except Exception:
-                    continue
-                if isinstance(doc, dict):
-                    rows.append(_row_from_doc(sid, doc))
+    rows.sort(key=lambda r: str(r.get("start_time") or ""), reverse=True)
 
-    # (Valgfritt) sorter litt penere: nyeste først hvis start_time finnes, ellers id desc
-    def _sort_key(r: Dict[str, Any]):
-        st = r.get("start_time")
-        return (st is not None, st or "", r.get("session_id") or "")
+    # FIX: stabil UI (midlertidig) -> topp 9
+    rows = rows[:9]
 
-    rows.sort(key=_sort_key, reverse=True)
+    print(f"[list_all] rows={len(rows)}", file=sys.stderr)
     return rows
 
 
-from fastapi import HTTPException
-from fastapi.responses import JSONResponse
-
-@router.get("/{session_id}/analyze")
-def get_session_analyze(session_id: str):
-    """
-    MVP: Returner persisted analyze-result direkte fra fil,
-    slik at SessionView ikke henger på “live analyze”-pipeline.
-    Prioritet:
-      1) logs/actual10/latest/result_{id}.json
-      2) logs/results/result_{id}.json
-    """
+@router.get("/list/_debug_paths")
+async def _debug_paths() -> Dict[str, Any]:
     root = _repo_root_from_here()
-    logs = root / "logs"
+    files = _gather_result_files(root)
 
-    candidates = [
-        logs / "actual10" / "latest" / f"result_{session_id}.json",
-        logs / "results" / f"result_{session_id}.json",
-    ]
-
-    for p in candidates:
-        if not p.exists():
-            continue
-        try:
-            doc = _read_json_utf8_sig(p)
-            # sørg for at session_id/ride_id finnes (noen docs mangler)
-            if isinstance(doc, dict):
-                doc.setdefault("session_id", str(session_id))
-                doc.setdefault("ride_id", str(session_id))
-            return JSONResponse(content=doc)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Kunne ikke lese {p}: {repr(e)}")
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Fant ingen persisted result for id={session_id} (prøvde: {candidates})",
-    )
+    return {
+        "router_file": str(Path(__file__).resolve()),
+        "cwd": str(Path.cwd().resolve()),
+        "root_from_here": str(root.resolve()),
+        "files_from_here": len(files),
+        "sample_files_from_here": [str(p).replace("\\", "/") for p in files[:8]],
+    }

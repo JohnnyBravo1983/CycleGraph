@@ -213,6 +213,70 @@ def _extract_persisted_weather(doc: dict) -> tuple[dict | None, dict | None, str
     except Exception:
         return None, None, None
 
+# ==================== PATCH C: BASIC RIDE FIELDS HELPER (MED TREND CSV) ====================
+
+def _trend_sessions_lookup_start_time(sid: str) -> str | None:
+    """
+    Returnerer start_time fra logs/trend_sessions.csv hvis den finnes.
+    Forventer at 1. kolonne er sid og 2. kolonne er dato/timestamp.
+    """
+    try:
+        root = _repo_root_from_here()
+        path = root / "logs" / "trend_sessions.csv"
+        if not path.exists():
+            return None
+
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            r = csv.reader(f)
+            for row in r:
+                if not row:
+                    continue
+                if row[0].strip() == str(sid):
+                    if len(row) >= 2:
+                        v = (row[1] or "").strip()
+                        return v or None
+    except Exception:
+        return None
+    return None
+
+def _set_basic_ride_fields(resp: Dict[str, Any], sid: str) -> Dict[str, Any]:
+    """
+    Fyll top-level start_time og distance_km for UI.
+    start_time: kan hentes fra trend_sessions.csv i dev/local.
+    distance_km: blir foreløpig bare satt hvis det finnes et sted i doc/resp,
+                 senere kan vi hente fra Strava activity summary når OAuth er live.
+    """
+    try:
+        if not isinstance(resp, dict):
+            return resp
+
+        # 1) start_time: hvis mangler → prøv trend_sessions.csv
+        if not resp.get("start_time"):
+            st = _trend_sessions_lookup_start_time(sid)
+            if st:
+                resp["start_time"] = st
+
+        # 2) distance_km: behold konservativt – sett bare hvis vi faktisk har tall
+        if resp.get("distance_km") is None:
+            # prøv fra resp direkte
+            for key in ("distance_km",):
+                if isinstance(resp.get(key), (int, float)):
+                    resp["distance_km"] = float(resp[key])
+                    return resp
+
+            # prøv fra metrics
+            m = resp.get("metrics") or {}
+            if isinstance(m, dict):
+                if isinstance(m.get("distance_km"), (int, float)):
+                    resp["distance_km"] = float(m["distance_km"])
+                elif isinstance(m.get("distance_m"), (int, float)):
+                    resp["distance_km"] = float(m["distance_m"]) / 1000.0
+
+    except Exception:
+        return resp
+
+    return resp
+
 # ==================== DEDUPE PROFILE HELPER FUNCTION ====================
 
 def _dedupe_profile_keys_for_rust(p: dict) -> dict:
@@ -322,6 +386,15 @@ def list_sessions() -> List[Dict[str, Any]]:
             # 6) start_time / distance_km – hvis/ når vi begynner å lagre dette
             start_time = result_doc.get("start_time")
             distance_km = result_doc.get("distance_km")
+
+            # 7) PATCH C-final: Hvis start_time mangler, prøv trend_sessions.csv
+            if not start_time:
+                try:
+                    st = _trend_sessions_lookup_start_time(str(ride_id))
+                    if st:
+                        start_time = st
+                except Exception:
+                    pass
 
             rows.append(
                 {
@@ -870,9 +943,6 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(resp, dict):
             return resp
 
-        # Always stamp version so we can verify code-path is running (even without debug dict)
-        resp["_ui_override_ver"] = "A5-2025-12-17"
-
         m = resp.get("metrics") or {}
         if not isinstance(m, dict):
             m = {}
@@ -911,11 +981,9 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
                 dbg["ui_override_ver"] = "A5-2025-12-17"
 
     except Exception:
-        # keep resp as-is on any override error
         return resp
 
     return resp
-
 
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
@@ -974,6 +1042,12 @@ async def analyze_session(
                     doc = json.load(f)
 
                 if isinstance(doc, dict) and _is_full_result_doc(doc):
+                    # PATCH C: Legg til start_time fra trend_sessions.csv hvis mangler
+                    if not doc.get("start_time"):
+                        st = _trend_sessions_lookup_start_time(sid)
+                        if st:
+                            doc["start_time"] = st
+                    
                     dbg = doc.get("debug") or {}
                     if isinstance(dbg, dict):
                         dbg.setdefault("reason", "persisted_hit")
@@ -1445,6 +1519,7 @@ async def analyze_session(
             }
             err_resp = _ensure_contract_shape(err_resp)
             err_resp = _final_ui_override(err_resp)
+            err_resp = _set_basic_ride_fields(err_resp, sid)
             try:
                 _write_observability(err_resp)
             except Exception as e_log:
@@ -1479,6 +1554,7 @@ async def analyze_session(
                 }
                 err_resp = _ensure_contract_shape(err_resp)
                 err_resp = _final_ui_override(err_resp)
+                err_resp = _set_basic_ride_fields(err_resp, sid)
                 try:
                     _write_observability(err_resp)
                 except Exception as e_log:
@@ -1708,6 +1784,9 @@ async def analyze_session(
                     # ✅ FINAL OVERRIDE rett før vi skriver/returnerer
                     ensured = _final_ui_override(ensured)
 
+                    # Legg til start_time og distance_km hvis tilgjengelig
+                    ensured = _set_basic_ride_fields(ensured, sid)
+
                     _write_observability(ensured)
 
                     # Ride-specific result logging
@@ -1715,13 +1794,16 @@ async def analyze_session(
                     safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
                     outdir = Path("logs") / "results"
                     outdir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Skriv resultatfilen
+                    result_data = json.dumps(
+                        ensured,
+                        ensure_ascii=False,
+                        indent=2,
+                        separators=(",", ": "),
+                    )
                     (outdir / f"result_{safe}.json").write_text(
-                        json.dumps(
-                            ensured,
-                            ensure_ascii=False,
-                            indent=2,
-                            separators=(",", ": "),
-                        ),
+                        result_data,
                         encoding="utf-8",
                     )
 
@@ -1730,6 +1812,7 @@ async def analyze_session(
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
                     resp2 = _ensure_contract_shape(resp)
                     resp2 = _final_ui_override(resp2)
+                    resp2 = _set_basic_ride_fields(resp2, sid)
                     return resp2
             else:
                 # --- PATCH B: RUST ga ikke gyldige metrics (no-fallback) ---
@@ -1752,6 +1835,7 @@ async def analyze_session(
                 }
                 err = _ensure_contract_shape(err)
                 err = _final_ui_override(err)
+                err = _set_basic_ride_fields(err, sid)
                 try:
                     _write_observability(err)
                 except Exception as e:
@@ -1849,6 +1933,9 @@ async def analyze_session(
     # ✅ FINAL OVERRIDE rett før vi logger/returnerer fallback
     resp = _final_ui_override(resp)
 
+    # Legg til start_time og distance_km hvis tilgjengelig
+    resp = _set_basic_ride_fields(resp, sid)
+
     try:
         _write_observability(resp)
 
@@ -1920,6 +2007,12 @@ def get_session(session_id: str) -> Dict[str, Any]:
         precision_watt = metrics.get("precision_watt")
         precision_watt_ci = metrics.get("precision_watt_ci")
 
+        # PATCH C: Legg til start_time fra trend_sessions.csv hvis mangler
+        if not doc.get("start_time"):
+            st = _trend_sessions_lookup_start_time(session_id)
+            if st:
+                doc["start_time"] = st
+
         return {
             "session_id": session_id,
             "precision_watt": precision_watt,
@@ -1929,6 +2022,8 @@ def get_session(session_id: str) -> Dict[str, Any]:
             "publish_time": doc.get("publish_time"),
             "publish_hash": doc.get("publish_hash", ""),
             "publish_error": doc.get("publish_error"),
+            "start_time": doc.get("start_time"),
+            "distance_km": doc.get("distance_km"),
             # ekstra debug-felt
             "analysis_source": source,
             "raw_has_metrics": bool(metrics),
@@ -1950,6 +2045,8 @@ def get_session(session_id: str) -> Dict[str, Any]:
         "publish_time": None,
         "publish_hash": "",
         "publish_error": None,
+        "start_time": None,
+        "distance_km": None,
         # ekstra debug-felt
         "analysis_source": None,
         "raw_has_metrics": False,
