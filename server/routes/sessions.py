@@ -835,7 +835,88 @@ async def debug_rb(request: Request):
     except Exception as e:
         return {"source": "error", "out": "", "probe": False, "err": repr(e)}
 
-# ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
+# ==================== PATCH A5: CANONICAL WHEEL RESOLUTION ====================
+
+def _resolve_canonical_wheel(m: dict) -> tuple[float | None, str]:
+    """
+    A5 canonical wheel resolution:
+    1) If components exist (numeric): wheel = drag + rolling + gravity  (wins)
+    2) Else fallback: model_watt_wheel -> precision_watt -> total_watt
+    Returns (wheel, source_tag)
+    """
+    try:
+        d = m.get("drag_watt")
+        r = m.get("rolling_watt")
+        g = m.get("gravity_watt")
+        if all(isinstance(x, (int, float)) for x in (d, r, g)):
+            return float(d) + float(r) + float(g), "components"
+    except Exception:
+        pass
+
+    for k in ("model_watt_wheel", "precision_watt", "total_watt"):
+        v = m.get(k)
+        if isinstance(v, (int, float)):
+            return float(v), k
+
+    return None, "none"
+
+# ----------------- FINAL UI OVERRIDE -----------------
+
+def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    FINAL OVERRIDE helper: sørg for at UI alltid matcher "wheel"-definisjonen.
+    """
+    try:
+        if not isinstance(resp, dict):
+            return resp
+
+        # Always stamp version so we can verify code-path is running (even without debug dict)
+        resp["_ui_override_ver"] = "A5-2025-12-17"
+
+        m = resp.get("metrics") or {}
+        if not isinstance(m, dict):
+            m = {}
+
+        # eff (canonical: from profile_used.crank_eff_pct)
+        prof = m.get("profile_used") or {}
+        eff = None
+        if isinstance(prof, dict):
+            ce = prof.get("crank_eff_pct")
+            if isinstance(ce, (int, float)):
+                eff = float(ce)
+        if eff is None:
+            eff = 0.955
+        eff = max(0.50, min(1.0, eff))
+
+        wheel, wheel_src = _resolve_canonical_wheel(m)
+        if isinstance(wheel, (int, float)):
+            wheel_f = float(wheel)
+
+            # Canonical UI fields
+            m["model_watt_wheel"] = wheel_f
+            m["precision_watt"] = wheel_f
+            m["total_watt"] = wheel_f
+            m["precision_watt_crank"] = wheel_f / eff
+            m["eff_used"] = eff
+
+            resp["metrics"] = m
+
+            # list view
+            resp["precision_watt_avg"] = wheel_f
+
+            # optional debug (safe)
+            dbg = resp.get("debug")
+            if isinstance(dbg, dict):
+                dbg["wheel_resolved_from"] = wheel_src
+                dbg["ui_override_ver"] = "A5-2025-12-17"
+
+    except Exception:
+        # keep resp as-is on any override error
+        return resp
+
+    return resp
+
+
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
 async def analyze_session(
@@ -854,54 +935,6 @@ async def analyze_session(
         file=sys.stderr,
     )
     # ============================================================================
-
-    # ─────────────────────────────────────────────────────────────────────────────
-    # FINAL OVERRIDE helper: sørg for at UI alltid matcher "wheel"-definisjonen
-    # ─────────────────────────────────────────────────────────────────────────────
-    def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            m = (resp.get("metrics") or {})
-            if not isinstance(m, dict):
-                return resp
-
-            wheel = m.get("model_watt_wheel")
-            if wheel is None:
-                wheel = m.get("total_watt")
-
-            prof = m.get("profile_used") or {}
-            eff = m.get("eff_used")
-            if eff is None:
-                try:
-                    eff = float((prof or {}).get("crank_eff_pct", 95.5)) / 100.0
-                except Exception:
-                    eff = 0.955
-
-            # clamp
-            try:
-                eff = float(eff)
-            except Exception:
-                eff = 0.955
-            eff = max(0.50, min(1.0, eff))
-
-            if wheel is not None:
-                try:
-                    wheel_f = float(wheel)
-                except Exception:
-                    return resp
-
-                # UI-definisjon
-                m["precision_watt"] = wheel_f
-                m["total_watt"] = wheel_f
-
-                # Diagnose/avansert
-                m["precision_watt_crank"] = wheel_f / eff if eff > 0 else wheel_f
-                m["eff_used"] = eff
-
-                resp["metrics"] = m
-        except Exception:
-            # Ikke la override knekke responsen
-            return resp
-        return resp
 
     # ==================== WEATHER LOCK INITIALIZATION ====================
     # ─────────────────────────────────────────────────────────────────────
@@ -948,11 +981,12 @@ async def analyze_session(
                         doc["debug"] = dbg
 
                     doc.setdefault("source", "persisted")
+                    doc = _final_ui_override(doc)
                     print(
                         f"[SVR] persisted_hit sid={sid} path={persisted_path}",
                         file=sys.stderr,
                     )
-                    return _final_ui_override(doc)
+                    return doc
                 else:
                     print(
                         f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc",

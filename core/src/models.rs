@@ -31,9 +31,12 @@ pub struct Weather {
     pub air_pressure_hpa: f64, // hPa
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Profile {
+    /// Total system weight (rider + bike). Used by physics.
+    /// Backwards-compatible: we accept multiple legacy keys on deserialize.
     pub total_weight: Option<f64>,
+
     pub bike_type: Option<String>,
     pub crr: Option<f64>,
     pub cda: Option<f64>,
@@ -54,6 +57,64 @@ impl Default for Profile {
             calibration_mae: None,
             estimat: true,
         }
+    }
+}
+
+// Tolerant Deserialize som håndterer at flere legacy keys kan være tilstede samtidig.
+// Prioritet: total_weight > total_weight_kg > weight_kg > weight
+impl<'de> Deserialize<'de> for Profile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Debug, Deserialize, Default)]
+        struct RawProfile {
+            // --- v1 / nåværende ---
+            #[serde(default)]
+            total_weight: Option<f64>,
+
+            // --- legacy keys (kan forekomme samtidig uten å feile) ---
+            #[serde(default)]
+            total_weight_kg: Option<f64>,
+            #[serde(default)]
+            weight_kg: Option<f64>,
+            #[serde(default)]
+            weight: Option<f64>,
+
+            // --- øvrige felt ---
+            #[serde(default)]
+            bike_type: Option<String>,
+            #[serde(default)]
+            crr: Option<f64>,
+            #[serde(default)]
+            cda: Option<f64>,
+
+            // booleans med defaults
+            #[serde(default)]
+            calibrated: Option<bool>,
+            #[serde(default)]
+            calibration_mae: Option<f64>,
+            #[serde(default)]
+            estimat: Option<bool>,
+        }
+
+        let raw = RawProfile::deserialize(deserializer)?;
+
+        let total_weight = raw
+            .total_weight
+            .or(raw.total_weight_kg)
+            .or(raw.weight_kg)
+            .or(raw.weight);
+
+        Ok(Profile {
+            total_weight,
+            bike_type: raw.bike_type,
+            crr: raw.crr,
+            cda: raw.cda,
+            calibrated: raw.calibrated.unwrap_or(false),
+            calibration_mae: raw.calibration_mae,
+            estimat: raw.estimat.unwrap_or(true),
+        })
     }
 }
 
