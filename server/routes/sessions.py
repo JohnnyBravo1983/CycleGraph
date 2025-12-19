@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
 from server.utils.versioning import compute_version, load_profile
+from datetime import datetime, timezone
 
 import os
 import sys
@@ -54,11 +55,65 @@ import math
 import time
 import os
 import csv
-import datetime
+import datetime as dt
 import re
 import glob
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional, List
+
+# ==================== PATCH: Robust ts_hour parsing helper ====================
+def _parse_ts_hour_to_epoch(ts_hour: object) -> int | None:
+    """
+    Godtar:
+      - int/float epoch-sekunder
+      - ISO-strenger: '2025-11-19T00:00', '2025-11-19T00:00:00', '2025-11-19 00:00'
+      - ISO med 'Z'
+    Returnerer epoch-sekunder (UTC) eller None.
+    """
+    if ts_hour is None:
+        return None
+
+    # 1) Epoch direkte
+    if isinstance(ts_hour, (int, float)):
+        v = int(ts_hour)
+        return v if v > 0 else None
+
+    # 2) String: prøv robust iso-parse først
+    if isinstance(ts_hour, str):
+        s = ts_hour.strip()
+        if not s:
+            return None
+
+        # Tåler 'Z'
+        if s.endswith("Z"):
+            s = s[:-1]
+
+        # Prøv fromisoformat (tåler 'YYYY-MM-DDTHH:MM', 'YYYY-MM-DD HH:MM', med/uten sek)
+        try:
+            dt_obj = datetime.fromisoformat(s)
+            if dt_obj.tzinfo is None:
+                dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+            return int(dt_obj.timestamp())
+        except Exception:
+            pass
+
+        # Fallback: flere kjente varianter (inkl fikset %m-%d)
+        fmts = [
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:00",   # hvis noen ganger lagres på '...T00:00' uten minutter
+        ]
+        for fmt in fmts:
+            try:
+                dt_obj = dt.datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+                return int(dt_obj.timestamp())
+            except Exception:
+                continue
+
+    return None
+# ==================== END PATCH ====================
 
 # ─────────────────────────────────────────────────────────────
 # Rust adapter: preferer cyclegraph_core, fallback til cli.rust_bindings
@@ -676,7 +731,7 @@ def _t6_calib_csv_append(sid, n, calibrated, status, mae, mean_pred, mean_dev):
 def _write_observability(resp: dict) -> None:
     """Intern Trinn7-helper for JSON+CSV observability logging."""
     os.makedirs("logs", exist_ok=True)
-    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    ts = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
     # Full JSON-dump (én per run)
     jpath = f"logs/trinn7-observability_{ts}.json"
@@ -743,10 +798,15 @@ def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[
 
 def _iso_hour_from_unix(ts_hour: int) -> str:
     # UNIX → "YYYY-MM-DDTHH:00"
-    return datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-dT%H:00")
+    return dt.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
 
 def _unix_from_iso_hour(s: str) -> int:
-    return int(datetime.datetime.strptime(s, "%Y-%m-dT%H:00").replace(tzinfo=datetime.timezone.utc).timestamp())
+    # ==================== PATCH: Bruk robust parsing i stedet ====================
+    ts_epoch = _parse_ts_hour_to_epoch(s)
+    if ts_epoch is None:
+        raise ValueError(f"bad ts_hour: {s!r}")
+    return ts_epoch
+    # ==================== END PATCH ====================
 
 async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Optional[Dict[str, float]]:
     """
@@ -791,7 +851,7 @@ async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Opt
             idx = times.index(wanted_iso)
         except ValueError:
             # Fallback: nærmeste time
-            idx = min(range(len(times)), key=lambda i: abs(_unix_from_iso_hour(times[i]) - ts_hour))
+            idx = min(range(len(times)), key=lambda i: abs(_parse_ts_hour_to_epoch(times[i]) - ts_hour))
 
         # Les verdier
         t_c    = float(t2m[idx])
@@ -1605,16 +1665,34 @@ async def analyze_session(
     if ts_hour is None:
         ts_hour = hint.get("ts_hour")
 
+    # ==================== PATCH: Robust ts_hour parsing ====================
+    ts_epoch = None
+    if ts_hour is not None:
+        ts_epoch = _parse_ts_hour_to_epoch(ts_hour)
+        if ts_epoch is None:
+            print(f"[WX] WARN: Could not parse ts_hour: {ts_hour!r}", flush=True)
+    # ==================== END PATCH ====================
+
     wx_used: Optional[Dict[str, float]] = None
     wx_meta: Dict[str, Any] = {
         "provider": "open-meteo/era5",
         "lat_used": float(center_lat) if isinstance(center_lat, (int, float)) else None,
         "lon_used": float(center_lon) if isinstance(center_lon, (int, float)) else None,
-        "ts_hour": int(ts_hour) if isinstance(ts_hour, (int, float)) else None,
+        "ts_hour": int(ts_epoch) if isinstance(ts_epoch, (int, float)) else None,
         "height": "10m->2m",
         "unit_wind": "m/s",
         "cache_key": None,
     }
+
+    # ==================== PATCH: Debug logging for ts_hour ====================
+    if want_debug:
+        dbg = body.get("debug") or {}
+        if not isinstance(dbg, dict):
+            dbg = {}
+        dbg["wx_ts_hour_in"] = ts_hour
+        dbg["wx_ts_epoch"] = ts_epoch
+        body["debug"] = dbg
+    # ==================== END PATCH ====================
 
     fp = None
 
@@ -1654,11 +1732,11 @@ async def analyze_session(
             if (
                 isinstance(center_lat, (int, float))
                 and isinstance(center_lon, (int, float))
-                and isinstance(ts_hour, int)
+                and isinstance(ts_epoch, int)
             ):
-                wx_meta["cache_key"] = f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}"
+                wx_meta["cache_key"] = f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_epoch}"
                 wx_fetched = await _fetch_open_meteo_hour_ms(
-                    float(center_lat), float(center_lon), int(ts_hour)
+                    float(center_lat), float(center_lon), int(ts_epoch)
                 )
                 if wx_fetched:
                     wx_used = wx_fetched
