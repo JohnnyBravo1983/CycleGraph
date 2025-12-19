@@ -317,6 +317,25 @@ fn mean(xs: &[f64]) -> f64 {
     }
 }
 
+// Time-weighted mean for skalarer - konsekvent bruk i compute_scalar_metrics
+fn tw_mean_f64(power: &[f64], samples: &Vec<crate::Sample>) -> f64 {
+    if power.is_empty() || samples.is_empty() || power.len() != samples.len() {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    let mut tsum = 0.0f64;
+    for i in 0..samples.len() {
+        let t_cur = samples[i].t;
+        let t_prev = if i > 0 { samples[i - 1].t } else { t_cur };
+        let dt = (t_cur - t_prev).max(0.0);
+        if dt > 0.0 {
+            sum += power[i] * dt;
+            tsum += dt;
+        }
+    }
+    if tsum > 0.0 { sum / tsum } else { 0.0 }
+}
+
 fn clamp_eff_pct_from_profile_tol(p: &ProfileInTol) -> f64 {
     // prefer pct, fallback 95.5
     let raw = p.crank_eff_pct.unwrap_or(95.5);
@@ -372,15 +391,13 @@ fn compute_scalar_metrics(
     let mut device_watts: Vec<f64> = Vec::new();
 
     // ───────────────────────────────────────────────
-    // 1) Precompute dt-serie og gravity per sample fra altitude + dt
-    //    (robust: dt>=0.01)
+    // 1) Precompute dt-serie og gravity per sample fra SMOOTHED altitude + dt
+    //    Bruk smooth_altitude for å redusere GPS-jitter/drift
     // ───────────────────────────────────────────────
-    let mut altitude_series: Vec<f64> = Vec::with_capacity(n);
+    let altitude_series = crate::smoothing::smooth_altitude(samples);
     let mut dt_series: Vec<f64> = Vec::with_capacity(n);
 
     for (i, s) in samples.iter().enumerate() {
-        altitude_series.push(s.altitude_m);
-
         // dt: differanse i tid mellom samples (sekunder)
         let dt = if i == 0 {
             1.0
@@ -394,7 +411,7 @@ fn compute_scalar_metrics(
         dt_series.push(dt);
     }
 
-    // Bruk din physics.rs (Sprint 14.7) gravity-funksjon
+    // Bruk din physics.rs (Sprint 14.7) gravity-funksjon med smoothed altitude
     let grav_vec = crate::physics::compute_gravity_component(weight, &altitude_series, &dt_series);
 
     // ───────────────────────────────────────────────
@@ -422,8 +439,13 @@ fn compute_scalar_metrics(
         // Rullemotstand
         let w_r = crr * weight * G * v;
 
-        // Gravity per sample fra altitude+dt (kan være negativ ved nedover)
-        let w_g = *grav_vec.get(i).unwrap_or(&0.0);
+        // Gravity per sample fra smoothed altitude+dt (kan være negativ ved nedover)
+        let raw_g = *grav_vec.get(i).unwrap_or(&0.0);
+
+        // Hvis vi ikke beveger oss: sett gravity=0 for å unngå alt-jitter -> fake dh/dt power.
+        // (moving-flagget + en liten v-threshold som ekstra sikkerhet)
+        let moving = s.moving && s.v_ms.is_finite() && s.v_ms > 0.5;
+        let w_g = if moving { raw_g } else { 0.0 };
 
         // Modellert total (signert grav)
         let w_m = w_d + w_r + w_g;
@@ -449,35 +471,40 @@ fn compute_scalar_metrics(
     }
 
     // ───────────────────────────────────────────────
-    // 4) Scalar (mean) metrics (existing)
+    // 4) Scalar (time-weighted mean) metrics (PATCH G1)
     // ───────────────────────────────────────────────
-    let drag_watt = mean(&w_drag);
-    let rolling_watt = mean(&w_roll);
-    let gravity_watt = mean(&w_grav);
+    let drag_watt = tw_mean_f64(&w_drag, samples);
+    let rolling_watt = tw_mean_f64(&w_roll, samples);
+    let gravity_watt = tw_mean_f64(&w_grav, samples);
 
     // eksisterende "precision" fallback (wheel, signert grav)
     let precision_watt = drag_watt + rolling_watt + gravity_watt;
 
     let total_watt = if !device_watts.is_empty() {
-        mean(&device_watts)
+        // Bruk tidvektet gjennomsnitt for device_watts (samme lengde som samples)
+        // Vi må lage en vektor med samme lengde som samples for tw_mean_f64
+        let mut device_watts_full = Vec::with_capacity(n);
+        for s in samples {
+            if let Some(w) = s.device_watts {
+                if w.is_finite() {
+                    device_watts_full.push(w);
+                } else {
+                    device_watts_full.push(0.0);
+                }
+            } else {
+                device_watts_full.push(0.0);
+            }
+        }
+        tw_mean_f64(&device_watts_full, samples)
     } else {
         precision_watt
     };
 
     // ───────────────────────────────────────────────
-    // 5) PATCH: pedal averages
+    // 5) PATCH: pedal averages (time-weighted)
     // ───────────────────────────────────────────────
-    let avg_grav_pedal = if n > 0 {
-        w_grav_pedal.iter().sum::<f64>() / (n as f64)
-    } else {
-        0.0
-    };
-
-    let avg_model_pedal = if n > 0 {
-        w_model_pedal.iter().sum::<f64>() / (n as f64)
-    } else {
-        0.0
-    };
+    let avg_grav_pedal = tw_mean_f64(&w_grav_pedal, samples);
+    let avg_model_pedal = tw_mean_f64(&w_model_pedal, samples);
 
     let crank_eff_pct = clamp_eff_pct_from_profile_tol(profile);
     let eff = (crank_eff_pct / 100.0).clamp(0.50, 1.0);
@@ -599,7 +626,7 @@ fn enrich_metrics_on_object(
         }
     }
 
-    // 3) IKKE backsolve gravity. Bruk scalar gravity fra altitude+dt.
+    // 3) IKKE backsolve gravity. Bruk scalar gravity fra smoothed altitude+dt.
     let gravity_watt = gravity_watt_scalar;
 
     // 4) Merge inn i resp

@@ -1,0 +1,79 @@
+{
+  "calibrated": false,
+  "cg_build": "T15-cg_build-20251216",
+  "metrics": {
+    "cg_build": "T15-canonical-override-TEST-20251216-1636",
+    "core_watts_avg": null,
+    "drag_watt": 0.0,
+    "eff_used": 0.955,
+    "gravity_watt": 0.0,
+    "gravity_watt_pedal": 0.0,
+    "model_watt_crank": 0.0,
+    "model_watt_wheel": 0.0,
+    "model_watt_wheel_pedal": 0.0,
+    "precision_watt": 0.0,
+    "precision_watt_crank": 0.0,
+    "precision_watt_pedal": 0.0,
+    "profile_used": {
+      "rider_weight_kg": 103,
+      "bike_weight_kg": 8,
+      "weight_kg": 111.0,
+      "total_weight_kg": 111.0,
+      "cda": 0.3,
+      "crr": 0.004,
+      "crank_eff_pct": 95.5,
+      "device": "strava",
+      "notes": "Trinn5 default; rediger fritt.",
+      "profile_version": "v1-fe10ba69-20251218"
+    },
+    "rolling_watt": 0.0,
+    "total_watt": 0.0,
+    "total_watt_pedal": 0.0,
+    "precision_watt_signed": 0.0,
+    "total_watt_signed": 0.0,
+    "gravity_watt_signed": 0.0,
+    "model_watt_wheel_signed": 0.0,
+    "calibration_mae": null,
+    "calibrated": false,
+    "calibration_status": "not_available",
+    "estimated_error_pct_range": [
+      null,
+      null
+    ],
+    "precision_quality_hint": "no-heuristics-available",
+    "weather_applied": false,
+    "weather_source": "open-meteo"
+  },
+  "source": "rust_1arg",
+  "v_rel": [],
+  "watts": [],
+  "weather_applied": false,
+  "wind_rel": [],
+  "repr_kind": "object_v3",
+  "debug": {
+    "reason": "ok",
+    "force_recompute": true,
+    "persist_ignored": true,
+    "ignored_persist": true,
+    "used_fallback": false,
+    "weather_locked": false,
+    "weather_source": "neutral",
+    "estimat_cfg_used": {
+      "force": true
+    }
+  },
+  "weather_source": "open-meteo",
+  "profile_version": "v1-fe10ba69-20251218",
+  "profile_used": {
+    "rider_weight_kg": 103,
+    "bike_weight_kg": 8,
+    "weight_kg": 111.0,
+    "total_weight_kg": 111.0,
+    "cda": 0.3,
+    "crr": 0.004,
+    "crank_eff_pct": 95.5,
+    "device": "strava",
+    "notes": "Trinn5 default; rediger fritt.",
+    "profile_version": "v1-fe10ba69-20251218"
+  }
+}

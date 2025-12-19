@@ -531,27 +531,27 @@ def api_get_session(sid: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"load_session feilet: {e}")
 
-@app.post("/api/sessions/{sid}/analyze")
-def api_analyze_session(
+# -----------------------------------------------------------------------------
+# PATCH 1: Endre navnet for å unngå kollisjon med sessions.py
+# OBS: Denne funksjonen må IKKE kalle seg selv rekursivt
+# -----------------------------------------------------------------------------
+
+@app.post("/api/sessions/{sid}/analyze_apppy")
+def api_analyze_session_apppy(
     sid: str,
     body: Optional[AnalyzeRequest2] = Body(None),
     force_recompute_q: Optional[bool] = Query(None, alias="force"),
     x_cyclegraph_force: Optional[int] = Header(None),
 ):
     """
-    Støtter to datakilder:
-    1) Inline timeserie (samples/records) dersom ANALYZE_ALLOW_INLINE=1
-    2) Persistert session (tidligere oppførsel)
-    Fallback: stub-resultat dersom USE_STUB_FALLBACK=1 og ingen data finnes.
-
-    PATCH: Prioriter "full persisted result" fra logs/actual10/latest (eller største i logs/actual10/**)
-    uavhengig av working directory (vi finner repo-root via __file__).
+    PATCH: Denne er NAVNENDRET til /analyze_apppy for å unngå kollisjon med sessions.py.
+    Den skal IKKE kalle seg selv rekursivt.
     """
     global PROFILE_USED_TOTAL, PROFILE_MISSING_TOTAL
 
     print("DEBUG MARK: top of analyze handler", file=sys.stderr)
     print(f"DEBUG WHO: module={__name__} file={__file__}", file=sys.stderr)
-
+    print(f"[HIT] api_analyze_session_apppy from app.py sid={sid}", file=sys.stderr)
     # Hent toggles
     settings = get_settings_cached()
     allow_inline = False
@@ -705,7 +705,7 @@ def api_analyze_session(
                 else:
                     print(f"[persisted_skip] sid={sid} path={best_path} reason=not_full_doc", file=sys.stderr)
             except Exception as e:
-                print(f"[api_analyze_session] persisted read failed sid={sid} path={best_path}: {e}", file=sys.stderr)
+                print(f"[api_analyze_session_apppy] persisted read failed sid={sid} path={best_path}: {e}", file=sys.stderr)
 
     # --- Last session (persist) hvis ikke inline
     if inline_session is not None:
@@ -1078,7 +1078,6 @@ def api_analyze_session(
         },
         "profile": profile_used,
     }
-
 
 @app.post("/api/sessions/{sid}/publish")
 def api_publish(sid: str):

@@ -268,10 +268,7 @@ export async function fetchSession(
 
   // 2) For alle "ekte" id-er krever vi backend-URL
   if (!base) {
-    console.error(
-      "[API] fetchSession (LIVE) mangler VITE_BACKEND_URL for id=",
-      id
-    );
+    console.error("[API] fetchSession (LIVE) mangler VITE_BACKEND_URL for id=", id);
     return {
       ok: false,
       error:
@@ -281,11 +278,7 @@ export async function fetchSession(
   }
 
   // 3) LIVE-kall mot backend (analyze)
-  // Bygg URL robust: BASE kan være med eller uten "/api"
-  const url = buildApiUrl(
-    base,
-    `/api/sessions/${encodeURIComponent(id)}/analyze`
-  );
+  const url = buildApiUrl(base, `/api/sessions/${encodeURIComponent(id)}/analyze`);
 
   if (opts?.forceRecompute) {
     url.searchParams.set("force_recompute", "1");
@@ -301,9 +294,7 @@ export async function fetchSession(
     const profile_override = opts?.profileOverride ?? null;
 
     const payload =
-      profile_override != null
-        ? { ...body, profile_override }
-        : { ...body };
+      profile_override != null ? { ...body, profile_override } : { ...body };
 
     const res = await fetch(url.toString(), {
       method: "POST",
@@ -316,12 +307,7 @@ export async function fetchSession(
 
     if (!res.ok) {
       const text = await safeReadText(res);
-      console.error(
-        "[API] fetchSession LIVE feilet:",
-        res.status,
-        res.statusText,
-        text
-      );
+      console.error("[API] fetchSession LIVE feilet:", res.status, res.statusText, text);
       return {
         ok: false,
         error: `Kunne ikke hente session analyze (${res.status} ${res.statusText})`,
@@ -347,18 +333,13 @@ export async function fetchSession(
     console.log("[API] fetchSession LIVE adapted for schema:", adaptedBase);
 
     const maybeInvalid =
-      shouldSimulateInvalid() &&
-      adaptedBase &&
-      typeof adaptedBase === "object"
+      shouldSimulateInvalid() && adaptedBase && typeof adaptedBase === "object"
         ? invalidateSchemaForTest(adaptedBase)
         : adaptedBase;
 
     const parsed = safeParseSession(maybeInvalid);
     if (!parsed.ok) {
-      console.error(
-        "[API] fetchSession LIVE → schema-validering feilet",
-        parsed.error
-      );
+      console.error("[API] fetchSession LIVE → schema-validering feilet", parsed.error);
       return {
         ok: false,
         error: `Backend-data validerte ikke: ${parsed.error}`,
@@ -407,6 +388,7 @@ type RawSession = {
   id?: string | number;
   session_id?: string | number;
   ride_id?: string | number;
+  sid?: string | number;
 
   // mulige feltnavn for tid/dato
   start_time?: string | null;
@@ -421,16 +403,17 @@ type RawSession = {
 
   // watt / precision
   precision_watt_avg?: number | null;
-  avg_watt?: number | null;
+  avg_watt?: number | null; // finnes kanskje i backend, men SKAL IKKE brukes
   precision_watt?: number | null;
   metrics?: {
     precision_watt?: number | null;
+    model_watt_wheel?: number | null;
   } | null;
 
   profile_label?: string | null;
   profile_used?: string | null;
   profile?: string | null;
-  profile_version?: string | null; // 👈 lagt til
+  profile_version?: string | null;
 
   weather_source?: string | null;
   weather?: { source?: string | null } | null;
@@ -438,9 +421,7 @@ type RawSession = {
 
 export async function fetchSessionsList(): Promise<SessionListItem[]> {
   if (!BASE) {
-    console.log(
-      "[api.fetchSessionsList] Mangler VITE_BACKEND_URL – returnerer tom liste."
-    );
+    console.log("[api.fetchSessionsList] Mangler VITE_BACKEND_URL – returnerer tom liste.");
     return [];
   }
 
@@ -495,18 +476,19 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
 
   const mapped: SessionListItem[] = rawList
     .map((raw, idx): SessionListItem | null => {
-      const rideId = raw.ride_id ?? raw.session_id ?? raw.id;
-      if (rideId === undefined || rideId === null) {
+      // IMPORTANT: map backend session_id -> frontend sid (robust)
+      const sid = String(raw.session_id ?? raw.ride_id ?? raw.sid ?? raw.id ?? "");
+
+      if (!sid) {
         console.warn(
-          `[api.fetchSessionsList] Hopper over entry uten ride_id/session_id (index ${idx}):`,
+          `[api.fetchSessionsList] Hopper over entry uten session_id/ride_id (index ${idx}):`,
           raw
         );
         return null;
       }
 
       // 🔹 Velg beste kandidat for start_time
-      const startTime =
-        raw.start_time ?? raw.started_at ?? raw.start ?? raw.date ?? null;
+      const startTime = raw.start_time ?? raw.started_at ?? raw.start ?? raw.date ?? null;
 
       // 🔹 Distanse: km hvis mulig, ellers m → km
       const distanceKm =
@@ -518,30 +500,28 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
           ? raw.distance_m / 1000
           : null;
 
-      // 🔹 Precision Watt snitt: prøv flere felter
+      // ✅ Listevisning: alltid wheel avg fra backend (ALDRI avg_watt)
       const precisionAvg =
         typeof raw.precision_watt_avg === "number"
           ? raw.precision_watt_avg
-          : typeof raw.avg_watt === "number"
-          ? raw.avg_watt
-          : typeof raw.precision_watt === "number"
-          ? raw.precision_watt
           : typeof raw.metrics?.precision_watt === "number"
           ? raw.metrics.precision_watt
+          : typeof raw.metrics?.model_watt_wheel === "number"
+          ? raw.metrics.model_watt_wheel
           : null;
 
       const profileLabel =
         raw.profile_label ??
         raw.profile_used ??
         raw.profile ??
-        raw.profile_version ?? // 👈 ny kandidat
+        raw.profile_version ??
         null;
 
       const weatherSource = raw.weather_source ?? raw.weather?.source ?? null;
 
       return {
-        session_id: String(raw.session_id ?? rideId),
-        ride_id: String(rideId),
+        session_id: sid,
+        ride_id: String(raw.ride_id ?? raw.session_id ?? sid),
         start_time: startTime,
         distance_km: distanceKm,
         precision_watt_avg: precisionAvg,

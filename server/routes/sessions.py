@@ -1,9 +1,22 @@
-﻿# server/routes/sessions.py
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
 from server.utils.versioning import compute_version, load_profile
+
+import os
+import sys
+print(f"[CG] sessions.py __file__={__file__}", file=sys.stderr)
+print(f"[CG] cwd={os.getcwd()}", file=sys.stderr)
+
+def _fallback_compute_estimated_error_and_hint(profile_used, weather_used):
+    """
+    Fallback-heuristikk:
+    - est_range: [None, None]
+    - hint: enkel tekst
+    - completeness: 0.0 (ingen profilscore)
+    """
+    return [None, None], "no-heuristics-available", 0.0
 
 # Prøv å importere heuristikk-modul (Trinn 15). Hvis den ikke finnes, bruk trygge fallbacks.
 try:
@@ -12,14 +25,10 @@ try:
         append_benchmark_candidate,
     )
 except Exception:
-    def compute_estimated_error_and_hint(profile_used, weather_used):
-        """
-        Fallback-heuristikk:
-        - est_range: [None, None]
-        - hint: enkel tekst
-        - completeness: 0.0 (ingen profilscore)
-        """
-        return [None, None], "no-heuristics-available", 0.0
+    compute_estimated_error_and_hint = _fallback_compute_estimated_error_and_hint
+    append_benchmark_candidate = None
+
+
 
     def append_benchmark_candidate(
         ride_id,
@@ -80,6 +89,96 @@ def _load_rs_power_json():
 
 rs_power_json = _load_rs_power_json()
 
+# --- PIPELINE INTEGRITY HELPERS ----------------------------------------------
+
+def _repo_root() -> str:
+    # sessions.py ligger i server/routes/ → repo root = 2 nivå opp
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+def _paths_for_sid(sid: str) -> dict:
+    root = _repo_root()
+    return {
+        "debug_session": os.path.join(root, "_debug", f"session_{sid}.json"),
+        "debug_result":  os.path.join(root, "_debug", f"result_{sid}.json"),
+        "results":       os.path.join(root, "logs", "results", f"result_{sid}.json"),
+        "inline_samples":os.path.join(root, "logs", f"inline_samples_{sid}.json"),
+        "raw_streams":   os.path.join(root, "data", "raw", f"streams_{sid}.json"),
+        "raw_activity":  os.path.join(root, "data", "raw", f"activity_{sid}.json"),
+        "gpx":           os.path.join(root, "data", "gpx", f"{sid}.gpx"),
+    }
+
+def _input_availability(sid: str) -> dict:
+    p = _paths_for_sid(sid)
+    exists = {k: os.path.exists(v) for k, v in p.items()}
+    # "input" betyr at vi kan bygge samples på nytt
+    has_any_input = (
+        exists["debug_session"]
+        or exists["inline_samples"]
+        or exists["raw_streams"]
+        or exists["gpx"]
+    )
+    return {"paths": p, "exists": exists, "has_any_input": bool(has_any_input)}
+
+def _http409_missing_input(sid: str, dbg: dict) -> None:
+    # Bruk 409 Conflict: "du ber meg recompute, men input finnes ikke lokalt"
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": "missing_input_data",
+            "sid": sid,
+            "debug": dbg,
+        },
+    )
+
+# --- STREAMS PROBE HELPER ---------------------------------------------------
+
+def _probe_streams_file(path: str) -> dict:
+    """
+    Les streams.json og returner diagnostisk informasjon om innholdet.
+    Brukes kun når samples_len == 0 for å forstå hvorfor builder feiler.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8-sig') as f:
+            data = json.load(f)
+        
+        if not isinstance(data, dict):
+            return {"error": "not_a_dict", "type": str(type(data))}
+        
+        streams_top_keys = list(data.keys())
+        streams_has_data_keys = []
+        lens = {}
+        sample_of_paths = {}
+        
+        for key, value in data.items():
+            # Sjekk om stream har .data
+            if isinstance(value, dict) and 'data' in value:
+                streams_has_data_keys.append(key)
+                data_field = value['data']
+                if isinstance(data_field, list):
+                    lens[key] = len(data_field)
+            
+            # Lagre type-informasjon
+            sample_of_paths[f"{key}_type"] = str(type(value))
+            if isinstance(value, dict):
+                sample_of_paths[f"{key}_keys"] = list(value.keys())
+        
+        return {
+            "streams_top_keys": streams_top_keys,
+            "streams_has_data_keys": streams_has_data_keys,
+            "lens": lens,
+            "sample_of_paths": sample_of_paths,
+            "has_velocity_smooth": "velocity_smooth" in data,
+            "has_latlng": "latlng" in data,
+            "has_time": "time" in data,
+            "has_altitude": "altitude" in data,
+            "has_distance": "distance" in data,
+            "file_size_bytes": os.path.getsize(path) if os.path.exists(path) else 0,
+        }
+    except json.JSONDecodeError as e:
+        return {"error": "json_decode_error", "message": str(e), "path": path}
+    except Exception as e:
+        return {"error": "unexpected_error", "message": str(e), "path": path}
+
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
@@ -127,13 +226,24 @@ def _pick_best_persisted_result_path(sid: str) -> Path | None:
     return None
 
 def _pick_best_session_path(sid: str) -> Path | None:
-    root = _repo_root_from_here()
-    logs = root / "logs"
+    logs = _repo_root_from_here() / "logs"
+    debug_dir = _repo_root_from_here() / "_debug"
     fn = f"session_{sid}.json"
+
+    def _ok(p: Path) -> bool:
+        try:
+            return p.exists() and p.stat().st_size > 1000
+        except Exception:
+            return False
+
+    # 0) NEW: _debug (ofte fasit i dev)
+    p0 = debug_dir / fn
+    if _ok(p0):
+        return p0
 
     # 1) Foretrukket: latest
     p1 = logs / "actual10" / "latest" / fn
-    if p1.exists() and p1.stat().st_size > 1000:  # minst 1KB for å være meningsfull
+    if _ok(p1):
         return p1
 
     # 2) Største i actual10/** (typisk full doc)
@@ -143,12 +253,12 @@ def _pick_best_session_path(sid: str) -> Path | None:
         if cands:
             cands.sort(key=lambda p: p.stat().st_size, reverse=True)
             for p in cands:
-                if p.exists() and p.stat().st_size > 1000:
+                if _ok(p):
                     return p
 
     # 3) Fallback til logs/sessions (hvis vi har en slik mappe)
     fallback = logs / "sessions" / fn
-    if fallback.exists() and fallback.stat().st_size > 1000:
+    if _ok(fallback):
         return fallback
 
     return None
@@ -633,10 +743,10 @@ def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[
 
 def _iso_hour_from_unix(ts_hour: int) -> str:
     # UNIX → "YYYY-MM-DDTHH:00"
-    return datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
+    return datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-dT%H:00")
 
 def _unix_from_iso_hour(s: str) -> int:
-    return int(datetime.datetime.strptime(s, "%Y-%m-%dT%H:00").replace(tzinfo=datetime.timezone.utc).timestamp())
+    return int(datetime.datetime.strptime(s, "%Y-%m-dT%H:00").replace(tzinfo=datetime.timezone.utc).timestamp())
 
 async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Optional[Dict[str, float]]:
     """
@@ -934,56 +1044,132 @@ def _resolve_canonical_wheel(m: dict) -> tuple[float | None, str]:
     return None, "none"
 
 # ----------------- FINAL UI OVERRIDE -----------------
-
 def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
     """
-    FINAL OVERRIDE helper: sørg for at UI alltid matcher "wheel"-definisjonen.
+    FINAL UI OVERRIDE (canonicalization safety-net + fingerprint)
+
+    Canonical truth for UI:
+      - precision_watt := wheel truth (model_watt_wheel)
+      - total_watt     := wheel truth (same as precision_watt for UI list/view)
+      - precision_watt_crank := wheel / eff_used
+      - model_watt_crank     := same as precision_watt_crank (optional consistency)
+
+    Fingerprint goes into resp["debug"] so we can verify it ran on EVERY return path.
     """
     try:
-        if not isinstance(resp, dict):
-            return resp
-
         m = resp.get("metrics") or {}
         if not isinstance(m, dict):
-            m = {}
-
-        # eff (canonical: from profile_used.crank_eff_pct)
-        prof = m.get("profile_used") or {}
-        eff = None
-        if isinstance(prof, dict):
-            ce = prof.get("crank_eff_pct")
-            if isinstance(ce, (int, float)):
-                eff = float(ce)
-        if eff is None:
-            eff = 0.955
-        eff = max(0.50, min(1.0, eff))
-
-        wheel, wheel_src = _resolve_canonical_wheel(m)
-        if isinstance(wheel, (int, float)):
-            wheel_f = float(wheel)
-
-            # Canonical UI fields
-            m["model_watt_wheel"] = wheel_f
-            m["precision_watt"] = wheel_f
-            m["total_watt"] = wheel_f
-            m["precision_watt_crank"] = wheel_f / eff
-            m["eff_used"] = eff
-
-            resp["metrics"] = m
-
-            # list view
-            resp["precision_watt_avg"] = wheel_f
-
-            # optional debug (safe)
-            dbg = resp.get("debug")
+            # fingerprint even if metrics missing
+            dbg = resp.setdefault("debug", {})
             if isinstance(dbg, dict):
-                dbg["wheel_resolved_from"] = wheel_src
-                dbg["ui_override_ver"] = "A5-2025-12-17"
+                dbg["ui_override_ver"] = "A5-F-2025-12-18"
+                dbg["ui_override_applied"] = True
+                dbg["ui_override_eff"] = None
+                dbg["ui_override_model_wheel"] = None
+                dbg["ui_override_precision_watt"] = None
+                dbg["ui_override_model_crank"] = None
+            return resp
 
-    except Exception:
+        # ─────────────────────────────────────────────────────────────────────
+        # 1) Normalize eff_used to ratio (0..1), default 0.955
+        # ─────────────────────────────────────────────────────────────────────
+        pu = m.get("profile_used") or {}
+        if not isinstance(pu, dict):
+            pu = {}
+
+        eff = (
+            m.get("eff_used")
+            or pu.get("crank_eff_pct")
+            or pu.get("crank_efficiency")
+            or pu.get("crank_eff")
+            or 95.5
+        )
+        try:
+            eff = float(eff)
+        except Exception:
+            eff = 95.5
+
+        # pct -> ratio
+        if eff > 1.5:
+            eff = eff / 100.0
+
+        # clamp + sane fallback
+        if eff <= 0:
+            eff = 0.955
+        if eff < 0.5:
+            eff = 0.5
+        if eff > 1.0:
+            eff = 1.0
+
+        m["eff_used"] = eff
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 2) Resolve wheel truth: prefer model_watt_wheel, else reconstruct
+        # ─────────────────────────────────────────────────────────────────────
+        mw_wheel = m.get("model_watt_wheel")
+
+        if mw_wheel is None:
+            d = m.get("drag_watt")
+            r = m.get("rolling_watt")
+            g = m.get("gravity_watt")
+            if all(isinstance(x, (int, float)) for x in (d, r, g)):
+                mw_wheel = float(d) + float(r) + float(g)
+                m["model_watt_wheel"] = mw_wheel
+
+        # last resort fallback: if wheel still missing, keep stable numeric fallback
+        if mw_wheel is None:
+            cand = m.get("model_watt_wheel_signed")
+            if isinstance(cand, (int, float)):
+                mw_wheel = float(cand)
+                m["model_watt_wheel"] = mw_wheel
+
+        if mw_wheel is None:
+            mw_wheel = 0.0
+            m.setdefault("model_watt_wheel", mw_wheel)
+
+        wheel_f = float(mw_wheel)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 3) PATCH F: FORCE canonical mapping every time
+        #    precision_watt MUST be wheel (never crank)
+        # ─────────────────────────────────────────────────────────────────────
+        m["precision_watt"] = wheel_f
+        m["total_watt"] = wheel_f
+
+        crank_f = wheel_f / float(m["eff_used"])
+        m["precision_watt_crank"] = crank_f
+        m["model_watt_crank"] = crank_f  # optional consistency; never used as canonical source
+
+        # Top-level list safety-net
+        resp["precision_watt_avg"] = wheel_f
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 4) PATCH H: Fingerprint into debug
+        # ─────────────────────────────────────────────────────────────────────
+        dbg = resp.setdefault("debug", {})
+        if isinstance(dbg, dict):
+            dbg["ui_override_ver"] = "A5-F-2025-12-18"
+            dbg["ui_override_applied"] = True
+            dbg["ui_override_eff"] = m.get("eff_used")
+            dbg["ui_override_model_wheel"] = m.get("model_watt_wheel")
+            dbg["ui_override_precision_watt"] = m.get("precision_watt")
+            dbg["ui_override_model_crank"] = m.get("model_watt_crank")
+
+        resp["metrics"] = m
         return resp
 
-    return resp
+    except Exception:
+        # never crash the response because of UI override
+        try:
+            dbg = resp.setdefault("debug", {})
+            if isinstance(dbg, dict):
+                dbg["ui_override_ver"] = "A5-F-2025-12-18"
+                dbg["ui_override_applied"] = False
+                dbg["ui_override_error"] = True
+        except Exception:
+            pass
+        return resp
+
 
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
@@ -994,8 +1180,21 @@ async def analyze_session(
     force_recompute: bool = Query(False),
     debug: int = Query(0),
 ):
+    
     want_debug = bool(debug)
-    print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}")
+    print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}", file=sys.stderr)
+    print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
+
+    # ==================== PATCH 1: HARD INPUT GATE ====================
+    avail = _input_availability(sid)
+    if force_recompute and not avail["has_any_input"]:
+        dbg = _base_debug(force_recompute=True, used_fallback=False)
+        dbg["reason"] = "missing_input_data"
+        dbg["missing_input"] = True
+        dbg["input_exists"] = avail["exists"]
+        dbg["input_paths"] = avail["paths"]
+        _http409_missing_input(sid, dbg)
+    # ==================================================================
 
     # ==================== PATCH 1: logg force_recompute tidlig ====================
     print(
@@ -1003,6 +1202,15 @@ async def analyze_session(
         file=sys.stderr,
     )
     # ============================================================================
+
+    # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
+    def _RET(x: Dict[str, Any]):
+        try:
+            x = _final_ui_override(x)
+        except Exception:
+            pass
+        return x
+    # ===========================================================================================
 
     # ==================== WEATHER LOCK INITIALIZATION ====================
     # ─────────────────────────────────────────────────────────────────────
@@ -1047,7 +1255,7 @@ async def analyze_session(
                         st = _trend_sessions_lookup_start_time(sid)
                         if st:
                             doc["start_time"] = st
-                    
+
                     dbg = doc.get("debug") or {}
                     if isinstance(dbg, dict):
                         dbg.setdefault("reason", "persisted_hit")
@@ -1055,12 +1263,11 @@ async def analyze_session(
                         doc["debug"] = dbg
 
                     doc.setdefault("source", "persisted")
-                    doc = _final_ui_override(doc)
                     print(
                         f"[SVR] persisted_hit sid={sid} path={persisted_path}",
                         file=sys.stderr,
                     )
-                    return doc
+                    return _RET(doc)
                 else:
                     print(
                         f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc",
@@ -1143,6 +1350,37 @@ async def analyze_session(
     profile_in = body["profile"]
     client_sent_profile = bool(profile_in)
 
+    # ==================== PATCH A: INPUT DISCOVERY + DEBUG SYNLIGHET ====================
+    # --- Opprett input discovery debug info ---
+    input_debug_info = {
+        "input_candidates": avail["paths"],
+        "input_exists": avail["exists"],
+        "input_used": None,
+        "samples_len": 0,
+        "streams_probe": None,  # Nytt felt for streams probe
+    }
+    
+    # Definer input kandidater i prioritert rekkefølge
+    input_candidates = [
+        avail["paths"]["debug_session"],
+        avail["paths"]["inline_samples"],
+        avail["paths"]["raw_streams"],
+        avail["paths"]["raw_activity"],
+        avail["paths"]["gpx"],
+    ]
+    
+    input_used = None
+    # Sjekk om vi bruker request body samples
+    if isinstance(samples, list) and len(samples) > 0:
+        input_used = "request_body"
+        input_debug_info["samples_len"] = len(samples)
+    else:
+        # Prøv å finne første eksisterende input fil
+        for candidate in input_candidates:
+            if os.path.exists(candidate):
+                input_used = candidate
+                break
+    
     # === PATCH A: load samples from persisted session_<sid>.json if request omitted them ===
     if not isinstance(samples, list) or len(samples) == 0:
         sess_path = _pick_best_session_path(sid)
@@ -1151,13 +1389,21 @@ async def analyze_session(
                 loaded = _load_samples_from_session_file(sess_path)
                 body["samples"] = loaded
                 samples = loaded  # <-- KRITISK: oppdater også lokal variabel
-                if want_debug:
-                    dbg = body.get("debug") or {}
-                    if isinstance(dbg, dict):
-                        dbg["used_fallback"] = True
-                        dbg["session_path"] = str(sess_path)
-                        dbg["samples_loaded"] = len(samples)
-                        body["debug"] = dbg
+                if not input_used:  # Bare sett hvis vi ikke allerede har en input
+                    input_used = str(sess_path)
+                input_debug_info["samples_len"] = len(samples)
+                
+                # ==================== PATCH B2.1: Alltid sett debug info ====================
+                # sørg for at vi har dbg-dict (både i body og senere i resp)
+                dbg = body.get("debug") or {}
+                if not isinstance(dbg, dict):
+                    dbg = {}
+
+                dbg["session_path"] = str(sess_path)
+                dbg["samples_loaded"] = len(samples)
+                body["debug"] = dbg
+                # ==================== END PATCH B2.1 ====================
+                
                 print(
                     f"[SVR] loaded_session_samples sid={sid} n={len(samples)} path={sess_path}",
                     file=sys.stderr,
@@ -1167,6 +1413,67 @@ async def analyze_session(
                     f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
                     file=sys.stderr,
                 )
+    
+    # Oppdater input debug info
+    input_debug_info["input_used"] = input_used
+    if "samples_len" not in input_debug_info or input_debug_info["samples_len"] == 0:
+        input_debug_info["samples_len"] = len(samples) if isinstance(samples, list) else 0
+    
+    # ==================== PATCH A: STREAMS PROBE NÅR SAMPLES_LEN == 0 ====================
+    # Kjør streams probe bare når samples_len == 0 og vi er i debug-modus eller har streams-fil
+    if input_debug_info["samples_len"] == 0 and (want_debug or input_used is not None):
+        # Sjekk om input_used er en streams.json fil
+        if input_used and isinstance(input_used, str) and "streams_" in input_used and input_used.endswith(".json"):
+            try:
+                streams_probe = _probe_streams_file(input_used)
+                input_debug_info["streams_probe"] = streams_probe
+                print(f"[SVR][PROBE] streams probe for {sid}: {streams_probe}", file=sys.stderr)
+            except Exception as e:
+                input_debug_info["streams_probe_error"] = str(e)
+                print(f"[SVR][PROBE] streams probe failed for {sid}: {e}", file=sys.stderr)
+        # Sjekk også om body har streams (for request body case)
+        elif isinstance(body, dict) and "streams" in body and isinstance(body["streams"], dict):
+            # Analyser streams direkte fra body
+            streams_data = body["streams"]
+            streams_top_keys = list(streams_data.keys())
+            streams_has_data_keys = []
+            lens = {}
+            sample_of_paths = {}
+            
+            for key, value in streams_data.items():
+                if isinstance(value, dict) and 'data' in value:
+                    streams_has_data_keys.append(key)
+                    data_field = value['data']
+                    if isinstance(data_field, list):
+                        lens[key] = len(data_field)
+                
+                sample_of_paths[f"{key}_type"] = str(type(value))
+                if isinstance(value, dict):
+                    sample_of_paths[f"{key}_keys"] = list(value.keys())
+            
+            input_debug_info["streams_probe"] = {
+                "source": "request_body",
+                "streams_top_keys": streams_top_keys,
+                "streams_has_data_keys": streams_has_data_keys,
+                "lens": lens,
+                "sample_of_paths": sample_of_paths,
+                "has_velocity_smooth": "velocity_smooth" in streams_data,
+                "has_latlng": "latlng" in streams_data,
+                "has_time": "time" in streams_data,
+                "has_altitude": "altitude" in streams_data,
+                "has_distance": "distance" in streams_data,
+            }
+    
+    # Legg til streams_keys hvis body har streams
+    if isinstance(body, dict) and "streams" in body and isinstance(body["streams"], dict):
+        input_debug_info["streams_keys"] = list(body["streams"].keys())
+    
+    # Sett reason basert på input status
+    if input_used is None:
+        input_debug_info["reason"] = "no_input_found"
+    elif input_debug_info["samples_len"] == 0:
+        input_debug_info["reason"] = "samples_empty"
+    # ==================== END PATCH A ====================
 
     if not isinstance(samples, list) or not isinstance(profile_in, dict):
         raise HTTPException(status_code=400, detail="Missing 'samples' or 'profile'")
@@ -1182,7 +1489,6 @@ async def analyze_session(
             LOGS = Path(__file__).resolve().parents[2] / "logs"
             LOGS.mkdir(exist_ok=True)
             dump_path = LOGS / "_t8_baseline_payload.json"
-            # Lag et minimalt, trygt snapshot (samples + profile + weather + optional debug)
             payload_snapshot = {
                 "samples": samples,
                 "profile": profile_in or {},
@@ -1192,7 +1498,6 @@ async def analyze_session(
             with dump_path.open("w", encoding="utf-8") as f:
                 json.dump(payload_snapshot, f, ensure_ascii=False)
     except Exception:
-        # Ikke la capture feile requesten
         pass
 
     # --- Profil-normalisering (Patch A) ---
@@ -1207,7 +1512,6 @@ async def analyze_session(
     # === PATCH B: apply profile_override after base profile is selected ===
     override = body.get("profile_override") or {}
     if isinstance(override, dict) and override:
-        # allow weight_kg alias -> rider_weight_kg
         if "weight_kg" in override and "rider_weight_kg" not in override:
             override["rider_weight_kg"] = override["weight_kg"]
         if "total_weight_kg" in override and "rider_weight_kg" not in override:
@@ -1223,8 +1527,6 @@ async def analyze_session(
                 body["debug"] = dbg
 
     # --- TRINN 10.1: total weight (rider + bike) ---
-    # Vi bevarer rider_weight_kg og bike_weight_kg separat i profile_used,
-    # men 'weight_kg' som går til kjernen skal være SUM.
     try:
         rider_w = float(
             (
@@ -1242,12 +1544,11 @@ async def analyze_session(
         bike_w = 8.0
 
     total_w = rider_w + bike_w
-    profile["weight_kg"] = total_w  # brukes av kjernen
-    profile["total_weight_kg"] = total_w  # ren speil for tydelighet
+    profile["weight_kg"] = total_w
+    profile["total_weight_kg"] = total_w
     # --- END TRINN 10.1 ---
 
     # --- TRINN 10: Profile versioning inject ---
-    # 1) hent subset for versjonering: klient → ellers disk
     profile_in = dict((body or {}).get("profile") or {})
     if profile_in:
         subset = {
@@ -1274,13 +1575,13 @@ async def analyze_session(
                 "device",
             )
         }
-    vinfo = compute_version(subset)  # {"version_hash","profile_version","version_at"}
+
+    vinfo = compute_version(subset)
     profile_version = vinfo["profile_version"]
 
     profile_scrubbed = _scrub_profile(profile)
 
     # ==================== PATCH: DEDUPE PROFILE KEYS FOR RUST ====================
-    # Fjern duplicate keys før Rust-call for å unngå duplicate key errors i JSON-parser
     profile_scrubbed = _dedupe_profile_keys_for_rust(profile_scrubbed)
     # ==================== END PATCH ====================
 
@@ -1294,7 +1595,6 @@ async def analyze_session(
         estimat_cfg.update(body["estimate"])
 
     # === WX PATCH START ===
-    # --- WEATHER: finn anker (lat/lon + ts_hour) ---
     hint = dict((body or {}).get("weather_hint") or {})
     center_lat, center_lon, ts_hour = _center_latlon_and_hour_from_samples(samples)
 
@@ -1320,12 +1620,10 @@ async def analyze_session(
 
     # WEATHER LOCK: bruk låst vær hvis tilgjengelig
     if weather_locked:
-        # 🔒 Bruk persisted vær nøyaktig (stabilt, "fasit")
         wx_used = dict(locked_wx_used or {})
         if isinstance(locked_wx_meta, dict) and locked_wx_meta:
             wx_meta = dict(locked_wx_meta)
         fp = locked_wx_fp or _wx_fp(wx_used)
-        # sikre eksplisitt semantikk
         wx_used.setdefault("dir_is_from", True)
         wx_used["force"] = True
         print(
@@ -1334,7 +1632,6 @@ async def analyze_session(
             flush=True,
         )
     else:
-        # Tillat eksplisitt client-vær (dev/test), men ellers hent selv
         wx_payload = dict((body or {}).get("weather") or {})
         if wx_payload:
             w_ms = float(wx_payload.get("wind_ms", 0.0))
@@ -1342,11 +1639,11 @@ async def analyze_session(
             t_c = float(wx_payload.get("air_temp_c", 0.0))
             p_h = float(wx_payload.get("air_pressure_hpa", 0.0))
             wx_used = {
-                "wind_ms": w_ms,  # forventet i m/s
-                "wind_dir_deg": w_dd,  # fra-retning
+                "wind_ms": w_ms,
+                "wind_dir_deg": w_dd,
                 "air_temp_c": t_c,
                 "air_pressure_hpa": p_h,
-                "dir_is_from": True,  # eksplisitt semantikk
+                "dir_is_from": True,
                 "meta": {
                     "injected_client": True,
                     "reduce_factor": None,
@@ -1365,20 +1662,17 @@ async def analyze_session(
                 )
                 if wx_fetched:
                     wx_used = wx_fetched
-                    wx_used["dir_is_from"] = True  # eksplisitt semantikk
+                    wx_used["dir_is_from"] = True
 
-    # Bygg third med weather hvis tilgjengelig
     third = dict(estimat_cfg)
     weather_applied = False
 
     if wx_used and not no_weather:
-        # Normaliser til kanoniske navn for Rust-bindingen
         wind_ms_val = float(wx_used.get("wind_ms", 0.0))
         wind_dir_deg_val = float(wx_used.get("wind_dir_deg", 0.0))
         air_temp_c_val = float(wx_used.get("air_temp_c", 15.0))
         air_pressure_hpa_val = float(wx_used.get("air_pressure_hpa", 1013.25))
 
-        # Oppdater third med kanoniske navn på toppnivå
         third.update(
             {
                 "wind_ms": wind_ms_val,
@@ -1389,7 +1683,6 @@ async def analyze_session(
             }
         )
 
-        # Behold metadata for serverens observabilitet
         third["weather_meta"] = wx_meta
         fp = fp or _wx_fp(wx_used)
         third["weather_fp"] = fp
@@ -1406,7 +1699,6 @@ async def analyze_session(
         except Exception:
             pass
     else:
-        # IKKE send 0-vær til Rust - fjern eventuelle vær-nøkler
         for k in [
             "wind_ms",
             "wind_dir_deg",
@@ -1425,9 +1717,8 @@ async def analyze_session(
     # --- Enhetsheuristikk på samples (før mapping/Rust) ---
     samples = body.get("samples") or []
     samples = _apply_device_heuristics(samples, profile.get("device"))
-    body["samples"] = samples  # hold body i sync
+    body["samples"] = samples
 
-    # --- (VALGFRITT) NORMALISERING AV SAMPLES -> mapped ---
     def _coerce_f(x):
         try:
             return float(x)
@@ -1487,10 +1778,6 @@ async def analyze_session(
     except Exception:
         pass
 
-    # =========================================
-    # PATCH A — REBUILD ANALYSIS PAYLOAD
-    # =========================================
-
     global rs_power_json
     if rs_power_json is None:
         rs_power_json = _load_rs_power_json()
@@ -1498,7 +1785,6 @@ async def analyze_session(
     # ---------- HARD RUST SHORT-CIRCUIT ----------
     if rs_power_json is not None:
         try:
-            # ✅ sender BOTH estimat og weather i tredje-argumentet
             r = rs_power_json(mapped, profile_scrubbed, third)
         except Exception as e:
             print(
@@ -1517,14 +1803,15 @@ async def analyze_session(
                     "exception": repr(e),
                 },
             }
+            # Legg til input debug info
+            err_resp["debug"].update(input_debug_info)
             err_resp = _ensure_contract_shape(err_resp)
-            err_resp = _final_ui_override(err_resp)
             err_resp = _set_basic_ride_fields(err_resp, sid)
             try:
                 _write_observability(err_resp)
             except Exception as e_log:
                 print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
-            return err_resp
+            return _RET(err_resp)
 
         resp: Dict[str, Any] = {}
         if isinstance(r, dict):
@@ -1552,43 +1839,55 @@ async def analyze_session(
                         "exception": repr(e),
                     },
                 }
+                # Legg til input debug info
+                err_resp["debug"].update(input_debug_info)
                 err_resp = _ensure_contract_shape(err_resp)
-                err_resp = _final_ui_override(err_resp)
                 err_resp = _set_basic_ride_fields(err_resp, sid)
                 try:
                     _write_observability(err_resp)
                 except Exception as e_log:
                     print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
-                return err_resp
+                return _RET(err_resp)
 
         # Injiser profile_used, deretter skaler (DEL / eff) og legg på profile_version
         try:
             resp = _inject_profile_used(resp, profile)
 
-            # --- Trinn 5: anvend crank_eff_pct korrekt (rider power = wheel power / eta) ---
             metrics = resp.get("metrics") or {}
 
-            # ==================== PATCH: PEDAL-BASED WATTS CANONICALIZATION ====================
-            # Prefer pedal-based watts if present (avoids negative downhill "free energy" lowering average)
+            # ==================== PATCH E1: DO NOT OVERWRITE CANONICAL WITH *_PEDAL ====================
+            # Keep canonical wheel/model (signed) as truth. Pedal variants are view-only.
             if isinstance(metrics, dict) and "precision_watt_pedal" in metrics:
                 metrics.setdefault("precision_watt_signed", metrics.get("precision_watt"))
                 metrics.setdefault("total_watt_signed", metrics.get("total_watt"))
                 metrics.setdefault("gravity_watt_signed", metrics.get("gravity_watt"))
                 metrics.setdefault("model_watt_wheel_signed", metrics.get("model_watt_wheel"))
 
-                metrics["precision_watt"] = metrics.get("precision_watt_pedal")
-                metrics["total_watt"] = metrics.get("total_watt_pedal", metrics.get("model_watt_wheel_pedal"))
-                metrics["gravity_watt"] = metrics.get("gravity_watt_pedal")
-                metrics["model_watt_wheel"] = metrics.get("model_watt_wheel_pedal", metrics.get("model_watt_wheel"))
-            # ==================== END PATCH ====================
+                # never overwrite canonical fields; only backfill pedal fields
+                metrics.setdefault(
+                    "total_watt_pedal",
+                    metrics.get("total_watt_pedal", metrics.get("total_watt")),
+                )
+                metrics.setdefault(
+                    "gravity_watt_pedal",
+                    metrics.get("gravity_watt_pedal", metrics.get("gravity_watt")),
+                )
+                metrics.setdefault(
+                    "model_watt_wheel_pedal",
+                    metrics.get("model_watt_wheel_pedal", metrics.get("model_watt_wheel")),
+                )
+            # ==================== END PATCH E1 ====================
 
+            # crank efficiency (rider power = wheel power / eta)
             try:
                 eff = float(profile.get("crank_eff_pct") or 95.5) / 100.0
             except Exception:
                 eff = 0.955
+
             base_pw = metrics.get("precision_watt")
             if base_pw is None:
                 base_pw = metrics.get("total_watt")
+
             if isinstance(base_pw, (int, float)) and eff > 0:
                 scaled = float(base_pw) / eff  # DEL, ikke gang
                 metrics["precision_watt"] = scaled
@@ -1599,7 +1898,6 @@ async def analyze_session(
             pu["profile_version"] = profile_version
             metrics["profile_used"] = pu
 
-            # --- Legg til weather metadata i metrics ---
             if weather_applied and wx_used:
                 metrics["weather_used"] = wx_used
                 metrics["weather_meta"] = wx_meta
@@ -1641,7 +1939,6 @@ async def analyze_session(
                 metrics["calibration_status"] = status
 
                 if os.getenv("CG_CALIBRATE", "") == "1":
-
                     def _mean(xs):
                         xs2 = [float(x) for x in xs if isinstance(x, (int, float))]
                         return (sum(xs2) / len(xs2)) if xs2 else None
@@ -1707,7 +2004,6 @@ async def analyze_session(
             print(f"[SVR] Error processing Rust response: {e}")
 
         if isinstance(resp, dict):
-            # Pakk flat → metrics hvis nødvendig
             if "metrics" not in resp:
                 keys = ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
                 if any(k in resp for k in keys):
@@ -1728,7 +2024,6 @@ async def analyze_session(
             m.setdefault("weather_applied", weather_applied)
             m.setdefault("total_watt", m.get("precision_watt", 0.0))
 
-            # Legg til weather metadata hvis ikke allerede satt (med weather_lock guard)
             if not weather_locked and weather_applied and wx_used and "weather_used" not in m:
                 m["weather_used"] = wx_used
                 m["weather_meta"] = wx_meta
@@ -1740,17 +2035,21 @@ async def analyze_session(
             dbg["persist_ignored"] = bool(force_recompute)
             dbg["ignored_persist"] = bool(force_recompute)
             dbg["used_fallback"] = False
-            dbg["weather_locked"] = bool(weather_locked)  # <-- Viktig: vis at vær er låst
+            dbg["weather_locked"] = bool(weather_locked)
             if not dbg.get("weather_source"):
                 dbg["weather_source"] = "historical" if weather_applied else "neutral"
             if force_recompute:
                 dbg["estimat_cfg_used"] = dict(estimat_cfg)
 
+            # ==================== PATCH A: LEGG TIL INPUT DEBUG INFO ====================
+            dbg.update(input_debug_info)
+            # ==================== END PATCH A ====================
+
             rust_has_metrics = isinstance(m, dict) and any(
                 k in m for k in ("precision_watt", "drag_watt", "rolling_watt", "total_watt")
             )
+
             if rust_has_metrics:
-                # --- Weather source propagation (Trinn 9) ---
                 try:
                     _m = resp.get("metrics") or {}
                     _wm = (_m.get("weather_meta") or {})
@@ -1762,7 +2061,6 @@ async def analyze_session(
                     resp.setdefault("weather_source", "unknown")
                     resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
 
-                # --- TRINN 10: Profile versioning inject ---
                 resp["profile_version"] = profile_version
                 mu_top = resp.setdefault("profile_used", {})
                 mu_top["rider_weight_kg"] = rider_w
@@ -1771,31 +2069,23 @@ async def analyze_session(
                 mu_top["total_weight_kg"] = total_w
                 mu_top.update({**profile, "profile_version": profile_version})
 
-                # --- Trinn 7: kontraktsikre + observability ---
                 try:
                     ensured = _ensure_contract_shape(resp)
 
-                    # Mirror profile_used inn i metrics.profile_used
                     mu_top = ensured.setdefault("profile_used", {})
                     mm = ensured.setdefault("metrics", {})
                     mm.setdefault("profile_used", {})
                     mm["profile_used"] = dict(mu_top)
 
-                    # ✅ FINAL OVERRIDE rett før vi skriver/returnerer
-                    ensured = _final_ui_override(ensured)
-
-                    # Legg til start_time og distance_km hvis tilgjengelig
                     ensured = _set_basic_ride_fields(ensured, sid)
 
                     _write_observability(ensured)
 
-                    # Ride-specific result logging
                     rid = str(sid)
                     safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
                     outdir = Path("logs") / "results"
                     outdir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Skriv resultatfilen
+
                     result_data = json.dumps(
                         ensured,
                         ensure_ascii=False,
@@ -1807,15 +2097,34 @@ async def analyze_session(
                         encoding="utf-8",
                     )
 
-                    return ensured
+                    # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
+                    # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
+                    if isinstance(body, dict) and isinstance(body.get("debug"), dict):
+                        resp_dbg = ensured.get("debug") or {}
+                        if not isinstance(resp_dbg, dict):
+                            resp_dbg = {}
+                        resp_dbg.update(body["debug"])
+                        ensured["debug"] = resp_dbg
+                    # ==================== END PATCH B2.1 ====================
+
+                    return _RET(ensured)
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
                     resp2 = _ensure_contract_shape(resp)
-                    resp2 = _final_ui_override(resp2)
                     resp2 = _set_basic_ride_fields(resp2, sid)
-                    return resp2
+                    
+                    # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
+                    # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
+                    if isinstance(body, dict) and isinstance(body.get("debug"), dict):
+                        resp_dbg = resp2.get("debug") or {}
+                        if not isinstance(resp_dbg, dict):
+                            resp_dbg = {}
+                        resp_dbg.update(body["debug"])
+                        resp2["debug"] = resp_dbg
+                    # ==================== END PATCH B2.1 ====================
+                    
+                    return _RET(resp2)
             else:
-                # --- PATCH B: RUST ga ikke gyldige metrics (no-fallback) ---
                 print(
                     "[SVR] [RUST] missing/invalid metrics (no-fallback)",
                     file=sys.stderr,
@@ -1833,19 +2142,30 @@ async def analyze_session(
                         "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
                     },
                 }
+                # Legg til input debug info
+                err["debug"].update(input_debug_info)
                 err = _ensure_contract_shape(err)
-                err = _final_ui_override(err)
                 err = _set_basic_ride_fields(err, sid)
                 try:
                     _write_observability(err)
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
-                return err
+                
+                # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
+                # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
+                if isinstance(body, dict) and isinstance(body.get("debug"), dict):
+                    resp_dbg = err.get("debug") or {}
+                    if not isinstance(resp_dbg, dict):
+                        resp_dbg = {}
+                    resp_dbg.update(body["debug"])
+                    err["debug"] = resp_dbg
+                # ==================== END PATCH B2.1 ====================
+                
+                return _RET(err)
 
     # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
     weather_flag = bool(wx_used) and not no_weather
 
-    # Bygg profile_used med totalvekt-informasjon for fallback
     profile_used = {
         "cda": float(profile.get("cda")) if profile.get("cda") is not None else 0.30,
         "crr": float(profile.get("crr")) if profile.get("crr") is not None else 0.004,
@@ -1860,15 +2180,13 @@ async def analyze_session(
         "profile_version": profile_version,
     }
 
-    # Kall fallback-motoren (Python-fysikk)
     fallback_metrics = _fallback_metrics(
         mapped,
-        profile,  # NB: profile, ikke profile_used
+        profile,
         weather_applied=weather_flag,
         profile_used=profile_used,
     )
 
-    # Hvis vi faktisk har wx_used: speil det inn i metrics slik at CLI kan verifisere (med weather_lock guard)
     if not weather_locked and weather_flag and wx_used:
         try:
             fallback_metrics.setdefault("weather_used", wx_used)
@@ -1877,7 +2195,6 @@ async def analyze_session(
         except Exception:
             pass
 
-    # --- Trinn 15: Heuristisk presisjonsindikator for fallback ---
     try:
         est_range, hint, completeness = compute_estimated_error_and_hint(profile_used, wx_used or {})
         fallback_metrics["estimated_error_pct_range"] = est_range
@@ -1893,14 +2210,17 @@ async def analyze_session(
         "debug": {
             "reason": "fallback_py",
             "used_fallback": True,
-            "weather_source": "neutral",  # oppdateres under
+            "weather_source": "neutral",
             "weather_locked": bool(weather_locked),
             "adapter_resp_keys": [],
             "metrics_seen": list(fallback_metrics.keys()),
         },
     }
 
-    # --- Weather source propagation (Trinn 9) ---
+    # ==================== PATCH A: LEGG TIL INPUT DEBUG INFO ====================
+    resp["debug"].update(input_debug_info)
+    # ==================== END PATCH A ====================
+
     try:
         _m = resp.get("metrics") or {}
         _wm = (_m.get("weather_meta") or {})
@@ -1912,7 +2232,6 @@ async def analyze_session(
         resp.setdefault("weather_source", "unknown")
         resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
 
-    # --- TRINN 10: Profile versioning inject ---
     resp["profile_version"] = profile_version
     mu_top = resp.setdefault("profile_used", {})
     mu_top["rider_weight_kg"] = rider_w
@@ -1921,25 +2240,18 @@ async def analyze_session(
     mu_top["total_weight_kg"] = total_w
     mu_top.update({**profile, "profile_version": profile_version})
 
-    # Trinn 7: kontraktsikre + observability før return
     resp = _ensure_contract_shape(resp)
 
-    # --- TRINN 10: mirror profile_used inn i metrics.profile_used også ---
     mu_top = resp.setdefault("profile_used", {})
     mm = resp.setdefault("metrics", {})
     mm.setdefault("profile_used", {})
     mm["profile_used"] = dict(mu_top)
 
-    # ✅ FINAL OVERRIDE rett før vi logger/returnerer fallback
-    resp = _final_ui_override(resp)
-
-    # Legg til start_time og distance_km hvis tilgjengelig
     resp = _set_basic_ride_fields(resp, sid)
 
     try:
         _write_observability(resp)
 
-        # --- Ride-specific result logging ---
         rid = str(sid)
         safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
         outdir = Path("logs") / "results"
@@ -1956,8 +2268,31 @@ async def analyze_session(
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
 
-    return resp
+    # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
+    # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
+    if isinstance(body, dict) and isinstance(body.get("debug"), dict):
+        resp_dbg = resp.get("debug") or {}
+        if not isinstance(resp_dbg, dict):
+            resp_dbg = {}
+        resp_dbg.update(body["debug"])
+        resp["debug"] = resp_dbg
+    # ==================== END PATCH B2.1 ====================
 
+    return _RET(resp)
+
+
+# ==================== PATCH: ANALYZE SESSIONS.PY PROBE ====================
+@router.post("/{sid}/analyze_sessionspy")
+async def analyze_session_sessionspy(
+    sid: str,
+    request: Request,
+    no_weather: bool = Query(False),
+    force_recompute: bool = Query(False),
+    debug: int = Query(0),
+):
+    # Ren delegator: garanterer at du tester sessions.py sin pipeline isolert
+    return await analyze_session(sid, request, no_weather, force_recompute, debug)
+# ==================== END PATCH ====================
 
 
 @router.get("/{session_id}")
