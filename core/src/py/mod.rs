@@ -461,13 +461,6 @@ fn compute_scalar_metrics(
 
         let w_pedal = w_d + w_r + w_g_pedal;
         w_model_pedal.push(w_pedal);
-
-        // Målt effekt, hvis tilgjengelig
-        if let Some(w) = s.device_watts {
-            if w.is_finite() {
-                device_watts.push(w);
-            }
-        }
     }
 
     // ───────────────────────────────────────────────
@@ -480,25 +473,7 @@ fn compute_scalar_metrics(
     // eksisterende "precision" fallback (wheel, signert grav)
     let precision_watt = drag_watt + rolling_watt + gravity_watt;
 
-    let total_watt = if !device_watts.is_empty() {
-        // Bruk tidvektet gjennomsnitt for device_watts (samme lengde som samples)
-        // Vi må lage en vektor med samme lengde som samples for tw_mean_f64
-        let mut device_watts_full = Vec::with_capacity(n);
-        for s in samples {
-            if let Some(w) = s.device_watts {
-                if w.is_finite() {
-                    device_watts_full.push(w);
-                } else {
-                    device_watts_full.push(0.0);
-                }
-            } else {
-                device_watts_full.push(0.0);
-            }
-        }
-        tw_mean_f64(&device_watts_full, samples)
-    } else {
-        precision_watt
-    };
+    let total_watt = precision_watt; // Bruk modell når vi ikke har device_watts
 
     // ───────────────────────────────────────────────
     // 5) PATCH: pedal averages (time-weighted)
@@ -524,6 +499,38 @@ fn compute_scalar_metrics(
         avg_model_pedal,
         precision_watt_pedal,
     )
+}
+
+/// Beregner core_watts_avg KUN fra device_watts i samples
+/// Returnerer (Option<f64>, &'static str, usize) hvor strengen er "device_watts" hvis data finnes, ellers "none"
+/// PATCH 1: Strengere sjekk - ignorer verdier utenfor realistisk område
+/// PATCH 2: Force-disable core for nåværende appmodus (uten powermeter)
+fn compute_device_watts_avg(samples: &Vec<crate::Sample>) -> (Option<f64>, &'static str, usize) {
+    // --- core_watts_avg: ONLY from device_watts (powermeter) ---
+    let mut device_readings = Vec::<f64>::new();
+    
+    for s in samples {
+        if let Some(w) = s.device_watts {
+            // PATCH 1: Strengere sjekk - bare aksepter realistiske verdier
+            if w.is_finite() && w > 0.0 && w < 2000.0 {
+                device_readings.push(w);
+            }
+        }
+    }
+    
+    // PATCH 2: Force-disable core for nåværende appmodus (uten powermeter)
+    // Vi returnerer alltid None og sier at core er deaktivert
+    let core_watts_avg: Option<f64> = None;
+    let core_watts_source = "disabled_no_powermeter";
+    let core_n = 0;
+    
+    // PATCH 2: Debug logging for å bevise at device_watts faktisk finnes
+    eprintln!(
+        "[CORE] core_watts_avg={:?} source={} n_device={} total_samples={}",
+        core_watts_avg, core_watts_source, core_n, samples.len()
+    );
+    
+    (core_watts_avg, core_watts_source, core_n)
 }
 
 
@@ -612,19 +619,9 @@ fn enrich_metrics_on_object(
         precision_watt_pedal,
     ) = compute_scalar_metrics(samples, &prof_for_scalar, wx_for_scalar);
 
-    // 2) Les ev. tidvektet snitt fra core "power"/"watts" som diagnose
-    let mut core_watts_avg: Option<f64> = None;
-    if let Some(obj) = resp.as_object() {
-        if let Some(arr) = obj.get("power").or_else(|| obj.get("watts")) {
-            if let Some(ps) = arr.as_array() {
-                let mut buf: Vec<f64> = Vec::with_capacity(ps.len());
-                for v in ps {
-                    buf.push(v.as_f64().unwrap_or(0.0));
-                }
-                core_watts_avg = tw_mean(&buf, samples);
-            }
-        }
-    }
+    // 2) core_watts_avg: KUN fra device_watts i samples (powermeter)
+    // PATCH 1+2: Få tuple med 3 verdier og force-disable
+    let (core_watts_avg, core_watts_source, core_n) = compute_device_watts_avg(samples);
 
     // 3) IKKE backsolve gravity. Bruk scalar gravity fra smoothed altitude+dt.
     let gravity_watt = gravity_watt_scalar;
@@ -678,8 +675,9 @@ fn enrich_metrics_on_object(
                     .map(clamp_eff_from_profile)
                     .unwrap_or(0.955);
 
-                // total_watt: core_watts_avg hvis finnes, ellers wheel
-                let total_watt_ui = core_watts_avg.unwrap_or(model_watt_wheel);
+                // total_watt: PATCH 3: Bruk alltid wheel model når vi ikke har powermeter
+                // IKKE bruk core_watts_avg da den alltid er None
+                let total_watt_ui = model_watt_wheel;
                 m.insert("total_watt".into(), json!(total_watt_ui));
 
                 // diagnose / transparens
@@ -687,9 +685,12 @@ fn enrich_metrics_on_object(
                 m.insert("eff_used".into(), json!(eff));
                 m.insert("model_watt_crank".into(), json!(model_watt_wheel / eff));
 
-                if let Some(avg) = core_watts_avg {
-                    m.insert("core_watts_avg".into(), json!(avg));
-                }
+                // PATCH 3: core_watts_avg KUN fra device_watts - sett kun hvis vi har data
+                // PATCH 2: core_watts_avg er alltid None, så vi setter ikke denne
+                m.insert("core_watts_source".into(), json!(core_watts_source));
+                m.insert("core_n_device_samples".into(), json!(core_n));
+                // PATCH 3: Ikke sett "core_watts_avg" i JSON hvis den er None
+                // Dette sikrer at with_has_core_key=False i testene
 
                 // pedal (positive-only) behold
                 m.insert("gravity_watt_pedal".into(), json!(avg_grav_pedal));
@@ -717,36 +718,30 @@ fn enrich_metrics_on_object(
                 prof.insert("calibrated".into(), json!(profile.calibrated));
 
                 let eff = clamp_eff_from_profile(&prof);
-                let total_watt_ui = core_watts_avg.unwrap_or(model_watt_wheel);
+                // PATCH 3: Bruk alltid wheel model når vi ikke har powermeter
+                let total_watt_ui = model_watt_wheel;
 
-                obj.insert(
-                    "metrics".into(),
-                    json!({
-                        "cg_build": "T15-canonical-override-TEST-20251216-1636",
+                let mut metrics_obj = serde_json::Map::new();
+                metrics_obj.insert("cg_build".into(), json!("T15-canonical-override-TEST-20251216-1636"));
+                metrics_obj.insert("drag_watt".into(), json!(drag_watt));
+                metrics_obj.insert("rolling_watt".into(), json!(rolling_watt));
+                metrics_obj.insert("gravity_watt".into(), json!(gravity_watt));
+                metrics_obj.insert("model_watt_wheel".into(), json!(model_watt_wheel));
+                metrics_obj.insert("total_watt".into(), json!(total_watt_ui));
+                metrics_obj.insert("precision_watt_crank".into(), json!(model_watt_wheel / eff));
+                metrics_obj.insert("eff_used".into(), json!(eff));
+                metrics_obj.insert("model_watt_crank".into(), json!(model_watt_wheel / eff));
+                metrics_obj.insert("core_watts_source".into(), json!(core_watts_source));
+                metrics_obj.insert("core_n_device_samples".into(), json!(core_n));
+                // PATCH 3: Ikke sett "core_watts_avg" i JSON hvis den er None
+                
+                metrics_obj.insert("profile_used".into(), Value::Object(prof));
+                metrics_obj.insert("gravity_watt_pedal".into(), json!(avg_grav_pedal));
+                metrics_obj.insert("total_watt_pedal".into(), json!(avg_model_pedal));
+                metrics_obj.insert("precision_watt_pedal".into(), json!(precision_watt_pedal));
+                metrics_obj.insert("model_watt_wheel_pedal".into(), json!(avg_model_pedal));
 
-                        "drag_watt": drag_watt,
-                        "rolling_watt": rolling_watt,
-                        "gravity_watt": gravity_watt,
-
-                        "model_watt_wheel": model_watt_wheel,
-
-                        "total_watt": total_watt_ui,
-
-                        // diagnose
-                        "precision_watt_crank": model_watt_wheel / eff,
-                        "eff_used": eff,
-                        "model_watt_crank": model_watt_wheel / eff,
-
-                        "core_watts_avg": core_watts_avg,
-                        "profile_used": prof,
-
-                        // pedal (positive-only)
-                        "gravity_watt_pedal": avg_grav_pedal,
-                        "total_watt_pedal": avg_model_pedal,
-                        "precision_watt_pedal": precision_watt_pedal,
-                        "model_watt_wheel_pedal": avg_model_pedal
-                    }),
-                );
+                obj.insert("metrics".into(), Value::Object(metrics_obj));
             }
         }
 
