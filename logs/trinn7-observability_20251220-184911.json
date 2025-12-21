@@ -13,12 +13,11 @@
     "model_watt_wheel": 91.51817506711518,
     "model_watt_wheel_pedal": 154.74159450778717,
     "precision_watt": 95.83054980849758,
-    "precision_watt_avg": 91.51817506711518,
     "precision_watt_crank": 95.83054980849758,
     "precision_watt_pedal": 162.03308325422742,
     "profile_used": {
       "rider_weight_kg": 103,
-      "bike_weight_kg": 8.0,
+      "bike_weight_kg": 8,
       "weight_kg": 111.0,
       "total_weight_kg": 111.0,
       "cda": 0.3,
@@ -26,7 +25,7 @@
       "crank_eff_pct": 95.5,
       "device": "strava",
       "notes": "Trinn5 default; rediger fritt.",
-      "profile_version": "v1-778838e3-20251221"
+      "profile_version": "v1-fe10ba69-20251220"
     },
     "rolling_watt": 23.37105672459699,
     "total_watt": 91.51817506711518,
@@ -70,7 +69,6 @@
     "precision_quality_hint": "no-heuristics-available",
     "weather_applied": true
   },
-  "precision_watt_avg": 162.03308325422742,
   "source": "rust_1arg",
   "v_rel": [
     1.8949927442089836,
@@ -3072,10 +3070,10 @@
     "streams_probe": null
   },
   "weather_source": "open-meteo/era5",
-  "profile_version": "v1-778838e3-20251221",
+  "profile_version": "v1-fe10ba69-20251220",
   "profile_used": {
     "rider_weight_kg": 103,
-    "bike_weight_kg": 8.0,
+    "bike_weight_kg": 8,
     "weight_kg": 111.0,
     "total_weight_kg": 111.0,
     "cda": 0.3,
@@ -3083,7 +3081,7 @@
     "crank_eff_pct": 95.5,
     "device": "strava",
     "notes": "Trinn5 default; rediger fritt.",
-    "profile_version": "v1-778838e3-20251221"
+    "profile_version": "v1-fe10ba69-20251220"
   },
   "start_time": "2025-11-19T08:00:44.607597"
 }

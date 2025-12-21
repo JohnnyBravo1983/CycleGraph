@@ -3,17 +3,18 @@
   "cg_build": "T15-cg_build-20251216",
   "metrics": {
     "cg_build": "T15-canonical-override-TEST-20251216-1636",
-    "core_watts_avg": 220.43828594750843,
-    "drag_watt": 84.76716668076277,
+    "core_n_device_samples": 0,
+    "core_watts_source": "disabled_no_powermeter",
+    "drag_watt": 77.60058386042596,
     "eff_used": 0.955,
     "gravity_watt": -0.512780252246809,
     "gravity_watt_pedal": 66.04116895126158,
-    "model_watt_crank": 117.63956858857519,
-    "model_watt_wheel": 112.3457880020893,
-    "model_watt_wheel_pedal": 178.8997372055976,
-    "precision_watt": 117.63956858857519,
-    "precision_watt_crank": 117.63956858857519,
-    "precision_watt_pedal": 187.32956775455247,
+    "model_watt_crank": 110.13529338403401,
+    "model_watt_wheel": 105.17920518175248,
+    "model_watt_wheel_pedal": 171.73315438526066,
+    "precision_watt": 110.13529338403401,
+    "precision_watt_crank": 110.13529338403401,
+    "precision_watt_pedal": 179.82529255001117,
     "profile_used": {
       "rider_weight_kg": 103,
       "bike_weight_kg": 8,
@@ -24,15 +25,16 @@
       "crank_eff_pct": 95.5,
       "device": "strava",
       "notes": "Trinn5 default; rediger fritt.",
-      "profile_version": "v1-fe10ba69-20251218"
+      "profile_version": "v1-fe10ba69-20251220"
     },
     "rolling_watt": 28.091401573573332,
-    "total_watt": 220.43828594750843,
-    "total_watt_pedal": 178.8997372055976,
-    "precision_watt_signed": 112.3457880020893,
-    "total_watt_signed": 220.43828594750843,
+    "total_watt": 105.17920518175248,
+    "total_watt_pedal": 171.73315438526066,
+    "wind_effect": 0.55,
+    "precision_watt_signed": 105.17920518175248,
+    "total_watt_signed": 105.17920518175248,
     "gravity_watt_signed": -0.512780252246809,
-    "model_watt_wheel_signed": 112.3457880020893,
+    "model_watt_wheel_signed": 105.17920518175248,
     "weather_used": {
       "air_temp_c": 10.1,
       "air_pressure_hpa": 1011.5,
@@ -2912,10 +2914,31 @@
     "weather_source": "historical",
     "estimat_cfg_used": {
       "force": true
-    }
+    },
+    "input_candidates": {
+      "debug_session": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\_debug\\session_16381383185.json",
+      "debug_result": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\_debug\\result_16381383185.json",
+      "results": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\logs\\results\\result_16381383185.json",
+      "inline_samples": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\logs\\inline_samples_16381383185.json",
+      "raw_streams": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\data\\raw\\streams_16381383185.json",
+      "raw_activity": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\data\\raw\\activity_16381383185.json",
+      "gpx": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\data\\gpx\\16381383185.gpx"
+    },
+    "input_exists": {
+      "debug_session": true,
+      "debug_result": true,
+      "results": true,
+      "inline_samples": false,
+      "raw_streams": false,
+      "raw_activity": false,
+      "gpx": false
+    },
+    "input_used": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\_debug\\session_16381383185.json",
+    "samples_len": 942,
+    "streams_probe": null
   },
   "weather_source": "open-meteo/era5",
-  "profile_version": "v1-fe10ba69-20251218",
+  "profile_version": "v1-fe10ba69-20251220",
   "profile_used": {
     "rider_weight_kg": 103,
     "bike_weight_kg": 8,
@@ -2926,7 +2949,7 @@
     "crank_eff_pct": 95.5,
     "device": "strava",
     "notes": "Trinn5 default; rediger fritt.",
-    "profile_version": "v1-fe10ba69-20251218"
+    "profile_version": "v1-fe10ba69-20251220"
   },
   "start_time": "2025-11-19T08:00:46.451034"
 }

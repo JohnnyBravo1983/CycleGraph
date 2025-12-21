@@ -1114,6 +1114,9 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
       - precision_watt_crank := wheel / eff_used
       - model_watt_crank     := same as precision_watt_crank (optional consistency)
 
+    IMPORTANT: core_watts_avg must remain as set by Rust (device_watts only) and not be overridden by model values.
+    We do not touch core_watts_avg here - it should only come from device_watts measurements.
+
     Fingerprint goes into resp["debug"] so we can verify it ran on EVERY return path.
     """
     try:
@@ -1200,8 +1203,18 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         m["precision_watt_crank"] = crank_f
         m["model_watt_crank"] = crank_f  # optional consistency; never used as canonical source
 
+        # CRITICAL: core_watts_avg must remain as set by Rust (device_watts only) - do NOT override with model values
+        # We do not touch core_watts_avg here - it should only come from device_watts measurements
+
         # Top-level list safety-net
-        resp["precision_watt_avg"] = wheel_f
+        # Prefer "pedal" (brukerfelt) hvis tilgjengelig, ellers wheel.
+        try:
+           pedal_f = float(m.get("precision_watt_pedal")) if isinstance(m.get("precision_watt_pedal"), (int, float)) else None
+        except Exception:
+           pedal_f = None
+
+        resp["precision_watt_avg"] = pedal_f if pedal_f is not None else wheel_f
+
 
         # ─────────────────────────────────────────────────────────────────────
         # 4) PATCH H: Fingerprint into debug

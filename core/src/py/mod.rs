@@ -23,6 +23,7 @@ use crate::Weather as CoreWeather; // Added import for Sample type
 // ──────────────────────────────────────────────────────────────────────────────
 const G: f64 = 9.80665;
 const RHO_DEFAULT: f64 = 1.225;
+const WIND_EFFECT: f64 = 0.55; // Hvor mye av modellen-vinden som faktisk "treffer" rytteren
 
 // ──────────────────────────────────────────────────────────────────────────────
 // INPUT-REPR (untagged): PRØV OBJECT FØRST, SÅ LEGACY (TRIPLE)
@@ -348,7 +349,7 @@ fn clamp_eff_pct_from_profile_tol(p: &ProfileInTol) -> f64 {
 }
 
 /// Fallback/beriking: regn skalarer når core ikke leverer alt.
-/// Nå med vær slik at drag bruker relativ luftfart (v_air^3) basert på cosinus-loven.
+/// Nå med vær slik at drag bruker relativ luftfart (v_air^3) basert på langs-komponent modell.
 ///
 /// Return:
 /// (w_drag, w_roll, w_grav, w_model, drag_watt, rolling_watt, gravity_watt, precision_watt, total_watt,
@@ -428,10 +429,20 @@ fn compute_scalar_metrics(
         let v = s.v_ms.max(0.0);
 
         // Relativ vinkel mellom sykkel-heading og vindens "til"-retning
-        let delta_rad = (wind_to_deg - s.heading_deg).to_radians();
+        // NB: normaliser til [-180,180] for stabilitet rundt 0/360 wrap.
+        let mut d = (wind_to_deg - s.heading_deg) % 360.0;
+        if d < -180.0 { d += 360.0; }
+        if d > 180.0 { d -= 360.0; }
+        let delta_rad = d.to_radians();
 
-        // Luftrelativ fart (cosinusloven)
-        let v_air = (v.powi(2) + wind_ms.powi(2) - 2.0 * v * wind_ms * delta_rad.cos()).sqrt();
+        // Vind langs bevegelsesretning (+ = tailwind, - = headwind)
+        let wind_along = wind_ms * delta_rad.cos();
+        
+        // Reduser vindens effekt med WIND_EFFECT faktor for reliability
+        let wind_along_eff = wind_along * WIND_EFFECT;
+
+        // Bruk kun langs-komponent for relativ luftfart (stabil, realistisk for road-bikes uten yaw-modell)
+        let v_air = (v - wind_along_eff).max(0.0);
 
         // Aerodynamisk drag ~ v_air^3
         let w_d = 0.5 * rho * cda * v_air.powi(3);
@@ -501,14 +512,16 @@ fn compute_scalar_metrics(
     )
 }
 
-/// Beregner core_watts_avg KUN fra device_watts i samples
-/// Returnerer (Option<f64>, &'static str, usize) hvor strengen er "device_watts" hvis data finnes, ellers "none"
-/// PATCH 1: Strengere sjekk - ignorer verdier utenfor realistisk område
-/// PATCH 2: Force-disable core for nåværende appmodus (uten powermeter)
+// UI-definisjon:
+// - metrics.precision_watt_avg   = wheel (rå fysikk)
+// - metrics.precision_watt_pedal = hovedverdi for bruker
+// - metrics.precision_watt_crank = avansert (wheel / eff)
+// - resp.precision_watt_avg      = pedal (brukes i UI)
+// Ingen fysikk endres her – kun mapping.
 fn compute_device_watts_avg(samples: &Vec<crate::Sample>) -> (Option<f64>, &'static str, usize) {
     // --- core_watts_avg: ONLY from device_watts (powermeter) ---
     let mut device_readings = Vec::<f64>::new();
-    
+
     for s in samples {
         if let Some(w) = s.device_watts {
             // PATCH 1: Strengere sjekk - bare aksepter realistiske verdier
@@ -517,22 +530,21 @@ fn compute_device_watts_avg(samples: &Vec<crate::Sample>) -> (Option<f64>, &'sta
             }
         }
     }
-    
+
     // PATCH 2: Force-disable core for nåværende appmodus (uten powermeter)
     // Vi returnerer alltid None og sier at core er deaktivert
     let core_watts_avg: Option<f64> = None;
     let core_watts_source = "disabled_no_powermeter";
     let core_n = 0;
-    
+
     // PATCH 2: Debug logging for å bevise at device_watts faktisk finnes
     eprintln!(
         "[CORE] core_watts_avg={:?} source={} n_device={} total_samples={}",
         core_watts_avg, core_watts_source, core_n, samples.len()
     );
-    
+
     (core_watts_avg, core_watts_source, core_n)
 }
-
 
 fn enrich_metrics_on_object(
     mut resp: serde_json::Value,
@@ -685,6 +697,9 @@ fn enrich_metrics_on_object(
                 m.insert("eff_used".into(), json!(eff));
                 m.insert("model_watt_crank".into(), json!(model_watt_wheel / eff));
 
+                // wind_effect faktor i debug info
+                m.insert("wind_effect".into(), json!(WIND_EFFECT));
+
                 // PATCH 3: core_watts_avg KUN fra device_watts - sett kun hvis vi har data
                 // PATCH 2: core_watts_avg er alltid None, så vi setter ikke denne
                 m.insert("core_watts_source".into(), json!(core_watts_source));
@@ -722,7 +737,10 @@ fn enrich_metrics_on_object(
                 let total_watt_ui = model_watt_wheel;
 
                 let mut metrics_obj = serde_json::Map::new();
-                metrics_obj.insert("cg_build".into(), json!("T15-canonical-override-TEST-20251216-1636"));
+                metrics_obj.insert(
+                    "cg_build".into(),
+                    json!("T15-canonical-override-TEST-20251216-1636"),
+                );
                 metrics_obj.insert("drag_watt".into(), json!(drag_watt));
                 metrics_obj.insert("rolling_watt".into(), json!(rolling_watt));
                 metrics_obj.insert("gravity_watt".into(), json!(gravity_watt));
@@ -733,8 +751,10 @@ fn enrich_metrics_on_object(
                 metrics_obj.insert("model_watt_crank".into(), json!(model_watt_wheel / eff));
                 metrics_obj.insert("core_watts_source".into(), json!(core_watts_source));
                 metrics_obj.insert("core_n_device_samples".into(), json!(core_n));
+                // wind_effect faktor i debug info
+                metrics_obj.insert("wind_effect".into(), json!(WIND_EFFECT));
                 // PATCH 3: Ikke sett "core_watts_avg" i JSON hvis den er None
-                
+
                 metrics_obj.insert("profile_used".into(), Value::Object(prof));
                 metrics_obj.insert("gravity_watt_pedal".into(), json!(avg_grav_pedal));
                 metrics_obj.insert("total_watt_pedal".into(), json!(avg_model_pedal));
@@ -768,8 +788,18 @@ fn enrich_metrics_on_object(
                 m.insert("precision_watt_crank".into(), json!(wheel / eff));
                 m.insert("eff_used".into(), json!(eff));
                 m.insert("model_watt_crank".into(), json!(wheel / eff));
+
+                // ✅ NYTT: metrics.precision_watt_avg skal være WHEEL (rå fysikk)
+                m.insert("precision_watt_avg".into(), json!(wheel));
+
+                // ✅ Sikkerhet: behold pedal i metrics (hoved for bruker)
+                // (den settes allerede over, men dette gjør hard-override robust)
+                m.insert("precision_watt_pedal".into(), json!(precision_watt_pedal));
             }
         }
+
+        // ✅ NYTT: Top-level avg for list/UI = PEDAL (brukerfelt)
+        obj.insert("precision_watt_avg".into(), json!(precision_watt_pedal));
 
         // Sett metadata om de mangler (ikke overskriv core)
         obj.entry("source").or_insert(Value::from("rust_1arg"));
@@ -860,6 +890,7 @@ fn parse_tolerant(
 // PRIMÆR PARSING (OBJECT → LEGACY) MED OBJ-DEBUG
 // ──────────────────────────────────────────────────────────────────────────────
 
+
 fn call_compute_from_json(json_in: &str) -> Result<String, String> {
     // 0) OBJ-DEBUG: prøv ren OBJECT først
     let val: Value = json::from_str(json_in).unwrap_or(Value::Null);
@@ -881,7 +912,9 @@ fn call_compute_from_json(json_in: &str) -> Result<String, String> {
                     .map(to_core_sample_tol)
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let mut out = crate::compute_power_with_wind_json(&core_samples, &core_profile, &w);
+                // ✅ FIX: compute_power_with_wind_json tar 3 args (samples, profile, weather)
+                let mut out =
+                    crate::compute_power_with_wind_json(&core_samples, &core_profile, &w);
 
                 let mut dbg = JsonMap::new();
                 dbg.insert("repr_kind".into(), Value::from("object"));
@@ -994,6 +1027,7 @@ fn call_compute_from_json(json_in: &str) -> Result<String, String> {
             }
         };
 
+    // ✅ FIX: 3 args (samples, profile, weather)
     let mut out = crate::compute_power_with_wind_json(&samples, &profile, &weather);
 
     let mut dbg = JsonMap::new();
@@ -1084,6 +1118,7 @@ fn call_compute_power_with_wind_from_json_v3(json_in: &str) -> Result<String, St
             .map_err(|e| format!("parse error (Profile in v3 strict) at {}: {}", e.path(), e))?
     };
 
+    // ✅ FIX: 3 args (samples, profile, weather)
     let out = crate::compute_power_with_wind_json(&parsed.samples, &profile, &parsed.weather);
     Ok(out)
 }
@@ -1129,6 +1164,7 @@ fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| PyValueError::new_err(e))?;
 
+    // ✅ FIX: 3 args (samples, profile, weather)
     let core_out_str = crate::compute_power_with_wind_json(&core_samples, &core_profile, &weather);
     let core_resp_val: serde_json::Value = serde_json::from_str(&core_out_str)
         .unwrap_or_else(|_| serde_json::json!({ "debug": { "reason": "decode_error" } }));
@@ -1148,6 +1184,8 @@ fn compute_power_with_wind_json(_py: Python<'_>, payload_json: &str) -> PyResult
     serde_json::to_string(&enriched)
         .map_err(|e| PyValueError::new_err(format!("json encode error: {e}")))
 }
+
+
 
 #[pyfunction]
 pub fn compute_power_with_wind_json_v3(_py: Python<'_>, json_str: &str) -> PyResult<String> {
