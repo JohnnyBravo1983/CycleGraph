@@ -26,6 +26,11 @@ const RHO_DEFAULT: f64 = 1.225;
 const WIND_EFFECT: f64 = 0.55; // Hvor mye av modellen-vinden som faktisk "treffer" rytteren
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Build-konstant for å verifisere at riktig Rust kjører
+// ──────────────────────────────────────────────────────────────────────────────
+const CG_BUILD: &str = "T15-cg_build-20251216";
+
+// ──────────────────────────────────────────────────────────────────────────────
 // INPUT-REPR (untagged): PRØV OBJECT FØRST, SÅ LEGACY (TRIPLE)
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -337,6 +342,45 @@ fn tw_mean_f64(power: &[f64], samples: &Vec<crate::Sample>) -> f64 {
     if tsum > 0.0 { sum / tsum } else { 0.0 }
 }
 
+// Time-weighted mean, men bare for perioder hvor rytteren beveger seg (moving==true)
+fn tw_mean_f64_moving_only(values: &Vec<f64>, samples: &Vec<crate::Sample>) -> f64 {
+    if values.is_empty() || samples.is_empty() {
+        return 0.0;
+    }
+
+    let mut sum = 0.0_f64;
+    let mut wsum = 0.0_f64;
+
+    let n = values.len().min(samples.len());
+    for i in 0..n {
+        let s = &samples[i];
+
+        // samme moving-def som i loop
+        let moving = s.moving && s.v_ms.is_finite() && s.v_ms > 0.5;
+        if !moving {
+            continue;
+        }
+
+        // dt fra t-serien (fallback 1s)
+        let dt = if i == 0 {
+            1.0
+        } else {
+            let prev_t = samples[i - 1].t;
+            let this_t = s.t;
+            let d = (this_t - prev_t).max(0.01);
+            if d.is_finite() { d } else { 1.0 }
+        };
+
+        let v = values[i];
+        if v.is_finite() {
+            sum += v * dt;
+            wsum += dt;
+        }
+    }
+
+    if wsum > 0.0 { sum / wsum } else { 0.0 }
+}
+
 fn clamp_eff_pct_from_profile_tol(p: &ProfileInTol) -> f64 {
     // prefer pct, fallback 95.5
     let raw = p.crank_eff_pct.unwrap_or(95.5);
@@ -363,6 +407,9 @@ fn compute_scalar_metrics(
     Vec<f64>,
     Vec<f64>,
     Vec<f64>,
+    f64,
+    f64,
+    f64,
     f64,
     f64,
     f64,
@@ -487,14 +534,24 @@ fn compute_scalar_metrics(
     let total_watt = precision_watt; // Bruk modell når vi ikke har device_watts
 
     // ───────────────────────────────────────────────
-    // 5) PATCH: pedal averages (time-weighted)
+    // 5) PATCH C2: elapsed vs moving averages (time-weighted) for pedal model
     // ───────────────────────────────────────────────
-    let avg_grav_pedal = tw_mean_f64(&w_grav_pedal, samples);
-    let avg_model_pedal = tw_mean_f64(&w_model_pedal, samples);
+    let avg_grav_pedal = tw_mean_f64_moving_only(&w_grav_pedal, samples);
+    
+    // Beregn BÅDE elapsed og moving for pedal-model
+    let avg_model_pedal_elapsed = tw_mean_f64(&w_model_pedal, samples);
+    let avg_model_pedal_moving = tw_mean_f64_moving_only(&w_model_pedal, samples);
+    
+    // Ratio for debug
+    let pedal_ratio_elapsed_over_moving = if avg_model_pedal_moving > 0.0 {
+        avg_model_pedal_elapsed / avg_model_pedal_moving
+    } else {
+        0.0
+    };
 
     let crank_eff_pct = clamp_eff_pct_from_profile_tol(profile);
     let eff = (crank_eff_pct / 100.0).clamp(0.50, 1.0);
-    let precision_watt_pedal = if eff > 0.0 { avg_model_pedal / eff } else { 0.0 };
+    let precision_watt_pedal = if eff > 0.0 { avg_model_pedal_moving / eff } else { 0.0 };
 
     (
         w_drag,
@@ -507,8 +564,11 @@ fn compute_scalar_metrics(
         precision_watt,
         total_watt,
         avg_grav_pedal,
-        avg_model_pedal,
+        avg_model_pedal_moving, // bruk moving for eksisterende bruk
         precision_watt_pedal,
+        avg_model_pedal_elapsed, // ny: for debug
+        avg_model_pedal_moving,  // ny: for debug (samme som over)
+        pedal_ratio_elapsed_over_moving, // ny: ratio for debug
     )
 }
 
@@ -627,8 +687,11 @@ fn enrich_metrics_on_object(
         _precision_watt_fb,
         _total_watt_fb,
         avg_grav_pedal,
-        avg_model_pedal,
+        avg_model_pedal_moving, // NOTE: bruker moving-versionen her
         precision_watt_pedal,
+        avg_model_pedal_elapsed, // PATCH C2: elapsed version
+        _avg_model_pedal_moving_debug, // PATCH C2: moving (samme som ovenfor)
+        pedal_ratio_elapsed_over_moving, // PATCH C2: ratio
     ) = compute_scalar_metrics(samples, &prof_for_scalar, wx_for_scalar);
 
     // 2) core_watts_avg: KUN fra device_watts i samples (powermeter)
@@ -645,10 +708,7 @@ fn enrich_metrics_on_object(
                 let m = mv.as_object_mut().unwrap();
 
                 // build-stempel for å bekrefte at riktig Rust kjører
-                m.insert(
-                    "cg_build".into(),
-                    json!("T15-canonical-override-TEST-20251216-1636"),
-                );
+                m.insert("cg_build".into(), json!(CG_BUILD));
 
                 // components (fallback hvis core ikke leverer)
                 m.entry("drag_watt").or_insert(json!(drag_watt));
@@ -709,9 +769,14 @@ fn enrich_metrics_on_object(
 
                 // pedal (positive-only) behold
                 m.insert("gravity_watt_pedal".into(), json!(avg_grav_pedal));
-                m.insert("model_watt_wheel_pedal".into(), json!(avg_model_pedal));
-                m.insert("total_watt_pedal".into(), json!(avg_model_pedal));
+                m.insert("model_watt_wheel_pedal".into(), json!(avg_model_pedal_moving));
+                m.insert("total_watt_pedal".into(), json!(avg_model_pedal_moving));
                 m.insert("precision_watt_pedal".into(), json!(precision_watt_pedal));
+                
+                // PATCH C2: Legg til debug-felt for elapsed vs moving
+                m.insert("model_watt_wheel_pedal_elapsed".into(), json!(avg_model_pedal_elapsed));
+                m.insert("model_watt_wheel_pedal_moving".into(), json!(avg_model_pedal_moving));
+                m.insert("pedal_ratio_elapsed_over_moving".into(), json!(pedal_ratio_elapsed_over_moving));
             }
             _ => {
                 // Opprett metrics-blokk
@@ -737,10 +802,7 @@ fn enrich_metrics_on_object(
                 let total_watt_ui = model_watt_wheel;
 
                 let mut metrics_obj = serde_json::Map::new();
-                metrics_obj.insert(
-                    "cg_build".into(),
-                    json!("T15-canonical-override-TEST-20251216-1636"),
-                );
+                metrics_obj.insert("cg_build".into(), json!(CG_BUILD));
                 metrics_obj.insert("drag_watt".into(), json!(drag_watt));
                 metrics_obj.insert("rolling_watt".into(), json!(rolling_watt));
                 metrics_obj.insert("gravity_watt".into(), json!(gravity_watt));
@@ -757,9 +819,14 @@ fn enrich_metrics_on_object(
 
                 metrics_obj.insert("profile_used".into(), Value::Object(prof));
                 metrics_obj.insert("gravity_watt_pedal".into(), json!(avg_grav_pedal));
-                metrics_obj.insert("total_watt_pedal".into(), json!(avg_model_pedal));
+                metrics_obj.insert("total_watt_pedal".into(), json!(avg_model_pedal_moving));
                 metrics_obj.insert("precision_watt_pedal".into(), json!(precision_watt_pedal));
-                metrics_obj.insert("model_watt_wheel_pedal".into(), json!(avg_model_pedal));
+                metrics_obj.insert("model_watt_wheel_pedal".into(), json!(avg_model_pedal_moving));
+                
+                // PATCH C2: Legg til debug-felt for elapsed vs moving
+                metrics_obj.insert("model_watt_wheel_pedal_elapsed".into(), json!(avg_model_pedal_elapsed));
+                metrics_obj.insert("model_watt_wheel_pedal_moving".into(), json!(avg_model_pedal_moving));
+                metrics_obj.insert("pedal_ratio_elapsed_over_moving".into(), json!(pedal_ratio_elapsed_over_moving));
 
                 obj.insert("metrics".into(), Value::Object(metrics_obj));
             }
@@ -806,7 +873,7 @@ fn enrich_metrics_on_object(
         obj.entry("weather_applied").or_insert(Value::from(false));
 
         // DEBUG: build-stamp for å verifisere at ny .pyd faktisk kjører
-        obj.insert("cg_build".into(), Value::from("T15-cg_build-20251216"));
+        obj.insert("cg_build".into(), Value::from(CG_BUILD));
     }
 
     resp
@@ -1223,7 +1290,7 @@ fn cyclegraph_core(_py: Python, m: &PyModule) -> PyResult<()> {
     // 1-arg: OBJECT → core → enrich → JSON
     m.add_function(wrap_pyfunction!(compute_power_with_wind_json, m)?)?;
 
-    // Eksplicit V3 (strict) for testing
+    // Eksplisitt V3 (strict) for testing
     m.add_function(wrap_pyfunction!(compute_power_with_wind_json_v3, m)?)?;
 
     // Analyze helper

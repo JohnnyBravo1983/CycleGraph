@@ -2,7 +2,7 @@
   "calibrated": false,
   "cg_build": "T15-cg_build-20251216",
   "metrics": {
-    "cg_build": "T15-cg_build-20251216",
+    "cg_build": "T15-canonical-override-TEST-20251216-1636",
     "core_n_device_samples": 0,
     "core_watts_source": "disabled_no_powermeter",
     "drag_watt": 89.47646607269118,
@@ -12,9 +12,6 @@
     "model_watt_crank": 122.4889296731817,
     "model_watt_wheel": 116.97692783788852,
     "model_watt_wheel_pedal": 202.24401661053867,
-    "model_watt_wheel_pedal_elapsed": 149.04548105537324,
-    "model_watt_wheel_pedal_moving": 202.24401661053867,
-    "pedal_ratio_elapsed_over_moving": 0.736958667817551,
     "precision_watt": 122.4889296731817,
     "precision_watt_avg": 116.97692783788852,
     "precision_watt_crank": 122.4889296731817,
