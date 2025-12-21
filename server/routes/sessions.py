@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi.responses import JSONResponse  # <-- PATCH 1F: Import JSONResponse
 from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
 from server.utils.versioning import compute_version, load_profile
 from datetime import datetime, timezone
@@ -60,6 +61,17 @@ import re
 import glob
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional, List
+import statistics as _stats  # <-- PATCH 2: Import for median
+
+# ==================== PATCH S2B: Weather FP from key function ====================
+def _weather_fp_from_key(ts_hour: int, lat: float, lon: float, source: str) -> str:
+    """
+    Beregn weather_fp utelukkende fra nøkkelparametrene, ikke fra værdataene.
+    Dette sikrer at samme nøkkel alltid gir samme fp, uavhengig av faktisk værdata.
+    """
+    s = f"{int(ts_hour)}|{lat:.6f}|{lon:.6f}|{source}"
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+# ==================== END PATCH S2B ====================
 
 # ==================== PATCH: Robust ts_hour parsing helper ====================
 def _parse_ts_hour_to_epoch(ts_hour: object) -> int | None:
@@ -102,8 +114,8 @@ def _parse_ts_hour_to_epoch(ts_hour: object) -> int | None:
             "%Y-%m-%dT%H:%M",
             "%Y-%m-%dT%H:%M:%S",
             "%Y-%m-%d %H:%M",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%dT%H:00",   # hvis noen ganger lagres på '...T00:00' uten minutter
+            "%Y-%m-d %H:%M:%S",
+            "%Y-%m-dT%H:00",   # hvis noen ganger lagres på '...T00:00' uten minutter
         ]
         for fmt in fmts:
             try:
@@ -114,6 +126,249 @@ def _parse_ts_hour_to_epoch(ts_hour: object) -> int | None:
 
     return None
 # ==================== END PATCH ====================
+
+# ==================== PATCH: FULL WEATHER LOCK HELPER FUNCTIONS ====================
+def _safe_float(x):
+    try:
+        if x is None:
+            return None
+        if isinstance(x, bool):
+            return None
+        if isinstance(x, (int, float)):
+            return float(x)
+        # strings "1,23" etc (norsk desimal) -> prøv
+        if isinstance(x, str):
+            return float(x.replace(",", "."))
+    except Exception:
+        return None
+    return None
+
+def _find_weather_used_dict(doc: dict):
+    """Finn weather_used-lignende dict i en result-fil (robust mot variasjoner)."""
+    if not isinstance(doc, dict):
+        return None
+
+    # Vanligst: doc.metrics.weather_used
+    m = doc.get("metrics")
+    if isinstance(m, dict):
+        wx = m.get("weather_used")
+        if isinstance(wx, dict):
+            return wx
+
+    # Noen ganger: doc.weather_used
+    wx = doc.get("weather_used")
+    if isinstance(wx, dict):
+        return wx
+
+    # Noen ganger: doc.debug.weather_used
+    dbg = doc.get("debug")
+    if isinstance(dbg, dict):
+        wx = dbg.get("weather_used")
+        if isinstance(wx, dict):
+            return wx
+
+    return None
+
+def _try_load_weather_lock_from_result(path: str):
+    """
+    Leser en result_*.json og returnerer flat weather dict + meta.
+    Krever minst wind_ms og wind_dir_deg.
+    """
+    try:
+        p = Path(path)
+        if not p.exists():
+            return None
+
+        # ==================== PATCH 2: Bruk utf-8-sig for å håndtere BOM ====================
+        doc = json.loads(p.read_text(encoding="utf-8-sig"))
+        wx = _find_weather_used_dict(doc)
+        if not isinstance(wx, dict):
+            return None
+
+        wind_ms = _safe_float(wx.get("wind_ms"))
+        wind_dir_deg = _safe_float(wx.get("wind_dir_deg"))
+        if wind_ms is None or wind_dir_deg is None:
+            return None
+
+        air_temp_c = _safe_float(wx.get("air_temp_c"))
+        air_pressure_hpa = _safe_float(wx.get("air_pressure_hpa"))
+
+        dir_is_from = wx.get("dir_is_from", True)
+        dir_is_from = bool(dir_is_from)
+
+        meta = wx.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+
+        # returner alt vi trenger
+        return {
+            "path": str(p),
+            "flat": {
+                "wind_ms": float(wind_ms),
+                "wind_dir_deg": float(wind_dir_deg),
+                "air_temp_c": float(air_temp_c) if air_temp_c is not None else None,
+                "air_pressure_hpa": float(air_pressure_hpa) if air_pressure_hpa is not None else None,
+                "dir_is_from": dir_is_from,
+            },
+            "meta": meta,
+        }
+    except Exception as e:
+        print(f"[SVR] weather_lock_full failed path={path} err={e}", file=sys.stderr)
+        return None
+# ==================== END PATCH ====================
+
+# ==================== PATCH 1: CANONICAL WEATHER KEY FUNCTIONS ====================
+def _floor_to_hour_epoch(ts: int) -> int:
+    """Rund ned til nærmeste heltime (epoch sekunder)."""
+    return int(ts) - (int(ts) % 3600)
+
+def _median(nums: list[float]) -> float:
+    nums2 = sorted(nums)
+    n = len(nums2)
+    if n == 0:
+        raise ValueError("median of empty list")
+    mid = n // 2
+    if n % 2 == 1:
+        return float(nums2[mid])
+    return float((nums2[mid - 1] + nums2[mid]) / 2.0)
+
+# ==================== PATCH 1F: ENDRE SIGNATUR - RETURNER ERR I STEDET FOR Å RAISE ====================
+def _canonical_weather_key_from_samples(samples: list[dict], want_debug: bool = False) -> tuple[float | None, float | None, int | None, dict | None]:
+    """
+    Canonical truth (A) – ONE RULE, no fallback chain:
+      ts_hour = floor(samples[0].t_abs to hour)
+      lat/lon = median of valid lat_deg/lon_deg across samples
+    
+    Returnerer (center_lat, center_lon, ts_hour, err)
+    Hvis OK: err = None
+    Hvis feil: returnerer (None, None, None, err_dict)
+    """
+    # PATCH 2: Debug snapshot helper
+    def _dbg_snapshot() -> dict:
+        if not want_debug or not samples:
+            return {}
+        s0 = samples[0] if isinstance(samples[0], dict) else {}
+        keys = sorted(list(s0.keys())) if isinstance(s0, dict) else []
+        # Bruk trygg string konvertering for preview
+        preview = {}
+        if isinstance(s0, dict):
+            for k in keys[:25]:
+                val = s0.get(k)
+                try:
+                    preview[k] = str(val)
+                except Exception:
+                    preview[k] = "<unrepresentable>"
+        return {"samples_len": len(samples), "samples0_keys": keys, "samples0_preview": preview}
+    
+    if not isinstance(samples, list) or len(samples) == 0:
+        err = {"error": "WEATHER_CANONICAL_ERROR: samples missing/empty"}
+        if want_debug:
+            err.update(_dbg_snapshot())
+        return None, None, None, err
+
+    # ==================== PATCH 2: t_abs extraction ====================
+    t0 = samples[0].get("t_abs")
+    if not isinstance(t0, (int, float, str)):
+        err = {"error": "WEATHER_CANONICAL_ERROR: samples[0].t_abs missing/invalid"}
+        if want_debug:
+            err.update(_dbg_snapshot())
+        return None, None, None, err
+
+    try:
+        t0 = int(float(t0))
+    except Exception:
+        err = {"error": f"WEATHER_CANONICAL_ERROR: bad t_abs0={t0!r}"}
+        if want_debug:
+            err.update(_dbg_snapshot())
+        return None, None, None, err
+
+    ts_hour = (t0 // 3600) * 3600  # floor til time
+    # ==================== END PATCH 2 ====================
+
+    # ==================== PATCH 2: lat_deg/lon_deg median ====================
+    lats: list[float] = []
+    lons: list[float] = []
+    
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+
+        la = s.get("lat_deg")
+        lo = s.get("lon_deg")
+
+        if la is None or lo is None:
+            continue
+
+        try:
+            lat = float(la)
+            lon = float(lo)
+        except Exception:
+            continue
+
+        # Sanity check
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            continue
+
+        lats.append(lat)
+        lons.append(lon)
+
+    if not lats or not lons:
+        err = {"error": "WEATHER_CANONICAL_ERROR: no valid lat_deg/lon_deg in samples"}
+        if want_debug and samples and isinstance(samples[0], dict):
+            s0 = samples[0]
+            keys = sorted(list(s0.keys()))
+            err["samples_len"] = len(samples)
+            err["samples0_keys"] = keys
+            err["samples0_preview"] = {k: str(s0.get(k)) for k in keys[:25]}
+        return None, None, None, err
+
+    center_lat = float(_stats.median(lats))
+    center_lon = float(_stats.median(lons))
+    # ==================== END PATCH 2 ====================
+
+    return center_lat, center_lon, ts_hour, None
+# ==================== END PATCH 1 ====================
+
+# ==================== PATCH S3D: Weather key injection helper ====================
+def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon: float, fp: str | None) -> None:
+    """
+    Sørg for at metrics.weather_used.meta i responsen alltid har nøkkelparametre
+    (ts_hour/lat/lon/hour_iso_utc/fp). Dette gjør PS-verifisering mulig og
+    hindrer '1970' når meta.ts_hour mangler.
+    """
+    try:
+        if not isinstance(resp, dict):
+            return
+        metrics = resp.get("metrics")
+        if not isinstance(metrics, dict):
+            return
+
+        wu = metrics.get("weather_used")
+        if not isinstance(wu, dict):
+            return
+
+        meta = wu.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+            wu["meta"] = meta
+
+        # Sett nøkkelparametre - overskriv hvis de allerede finnes (for å sikre riktige verdier)
+        meta["ts_hour"] = int(ts_hour)
+        meta["lat_used"] = float(lat)
+        meta["lon_used"] = float(lon)
+
+        import datetime
+        meta["hour_iso_utc"] = datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
+
+        if fp:
+            meta["fp"] = fp
+
+        # skriv tilbake
+        metrics["weather_used"] = wu
+        resp["metrics"] = metrics
+    except Exception:
+        return
+# ==================== END PATCH S3D ====================
 
 # ─────────────────────────────────────────────────────────────
 # Rust adapter: preferer cyclegraph_core, fallback til cli.rust_bindings
@@ -773,32 +1028,9 @@ def _write_observability(resp: dict) -> None:
         print(f"[SVR][OBS] CSV-write failed: {e_csv!r}", flush=True)
 
 # --- Vær-hjelpere ---
-def _center_latlon_and_hour_from_samples(samples: list[dict]) -> Tuple[Optional[float], Optional[float], Optional[int]]:
-    lat_sum = lon_sum = 0.0
-    n_ll = 0
-    t_abs = []
-
-    for s in samples or []:
-        lat = s.get("lat_deg"); lon = s.get("lon_deg")
-        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-            lat_sum += float(lat); lon_sum += float(lon); n_ll += 1
-        ta = s.get("t_abs")
-        if isinstance(ta, (int, float)):
-            t_abs.append(float(ta))
-
-    center_lat = (lat_sum / n_ll) if n_ll > 0 else None
-    center_lon = (lon_sum / n_ll) if n_ll > 0 else None
-
-    ts_hour = None
-    if t_abs:
-        mid = t_abs[len(t_abs)//2]
-        ts_hour = int(round(mid / 3600.0)) * 3600
-
-    return center_lat, center_lon, ts_hour
-
 def _iso_hour_from_unix(ts_hour: int) -> str:
     # UNIX → "YYYY-MM-DDTHH:00"
-    return dt.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
+    return dt.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-dT%H:00")
 
 def _unix_from_iso_hour(s: str) -> int:
     # ==================== PATCH: Bruk robust parsing i stedet ====================
@@ -810,72 +1042,103 @@ def _unix_from_iso_hour(s: str) -> int:
 
 async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Optional[Dict[str, float]]:
     """
-    Hent timesoppløst vær fra Open-Meteo i m/s (10 m), °C, hPa.
+    Hent timesoppløst vær fra Open-Meteo Archive (ERA5).
     Returnerer dict med felt klare for fysikkmotoren (etter skalering til 2 m).
+    NOTE:
+      - Bruker start_date/end_date (ikke past_days) for å treffe historiske økter korrekt.
+      - Open-Meteo archive returnerer typisk wind_speed_10m i km/h → vi konverterer til m/s selv.
     """
     import aiohttp
-    # Vi låser til m/s for å unngå enhetsfeil.
-    # Bruker 'past_days' bredt nok til å dekke historiske økter rundt ts_hour.
-    base = (
-        "https://archive-api.open-meteo.com/v1/era5"
-        "?latitude={lat}&longitude={lon}"
-        "&hourly=temperature_2m,pressure_msl,windspeed_10m,winddirection_10m"
-        "&windspeed_unit=ms"
-        "&timezone=UTC"
-        "&past_days=30"
-    ).format(lat=lat, lon=lon)
+    import datetime
 
-    # Vi trenger bare én time (ts_hour); filterer client-side på første timepost
     try:
+        # Dato + time i UTC fra ts_hour
+        dt_utc = datetime.datetime.utcfromtimestamp(int(ts_hour))
+        day = dt_utc.strftime("%Y-%m-%d")
+        wanted_iso = dt_utc.strftime("%Y-%m-%dT%H:00")
+
+        # Bruk samme param/key-format som din manuelle "fasit"-URL
+        url = (
+            "https://archive-api.open-meteo.com/v1/era5"
+            f"?latitude={lat}&longitude={lon}"
+            f"&start_date={day}&end_date={day}"
+            "&hourly=temperature_2m,pressure_msl,wind_speed_10m,wind_direction_10m"
+            "&timezone=UTC"
+        )
+
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(base, timeout=12) as resp:
+            async with sess.get(url, timeout=12) as resp:
                 if resp.status != 200:
-                    print(f"[WX] open-meteo HTTP {resp.status}")
+                    print(f"[WX] open-meteo HTTP {resp.status}", flush=True)
                     return None
                 payload = await resp.json()
 
         hrs = payload.get("hourly") or {}
         times = hrs.get("time") or []
-        t2m   = hrs.get("temperature_2m") or []
-        pmsl  = hrs.get("pressure_msl") or []
-        w10   = hrs.get("windspeed_10m") or []      # m/s (10 m)
-        wdir  = hrs.get("winddirection_10m") or []  # deg (fra)
+
+        # Støtt både snake_case og legacy keys, men prefer snake_case
+        t2m = hrs.get("temperature_2m") or []
+        pmsl = hrs.get("pressure_msl") or []
+
+        # Wind keys: prefer wind_speed_10m (som i manual URL), men fallback til windspeed_10m
+        w10 = hrs.get("wind_speed_10m")
+        if not w10:
+            w10 = hrs.get("windspeed_10m")
+        if not w10:
+            w10 = []
+
+        wdir = hrs.get("wind_direction_10m")
+        if not wdir:
+            wdir = hrs.get("winddirection_10m")
+        if not wdir:
+            wdir = []
 
         if not (times and t2m and pmsl and w10 and wdir):
-            print("[WX] open-meteo payload missing fields")
+            print("[WX] open-meteo payload missing fields", flush=True)
             return None
 
-        # Finn index for ønsket UTC-time (ts_hour er UNIX sekunder avrundet time)
-        wanted_iso = _iso_hour_from_unix(ts_hour)  # f.eks. "2025-11-09T14:00"
+        # Finn index for ønsket UTC-time
         try:
             idx = times.index(wanted_iso)
         except ValueError:
-            # Fallback: nærmeste time
-            idx = min(range(len(times)), key=lambda i: abs(_parse_ts_hour_to_epoch(times[i]) - ts_hour))
+            # Fallback: nærmeste time (men innenfor samme day-array)
+            idx = min(
+                range(len(times)),
+                key=lambda i: abs(_parse_ts_hour_to_epoch(times[i]) - ts_hour),
+            )
 
         # Les verdier
-        t_c    = float(t2m[idx])
-        p_hpa  = float(pmsl[idx])
-        w10_ms = float(w10[idx])     # m/s @10 m
-        w_deg  = float(wdir[idx])    # fra-retning
+        t_c = float(t2m[idx])
+        p_hpa = float(pmsl[idx])
+
+        # Open-Meteo Archive: wind_speed_10m er typisk km/h → konverter til m/s
+        w10_raw = float(w10[idx])
+        w10_ms = w10_raw / 3.6
+
+        w_deg = float(wdir[idx])  # fra-retning
 
         # Skaler 10 m → 2 m
         w2_ms = w10_ms * float(REDUCE_10M_TO_2M)
 
+        # Debug-linje som gjør dette 100% verifiserbart ved behov
+        # print(f"[WXDBG] {wanted_iso} idx={idx} T={t_c} P={p_hpa} W10_kmh={w10_raw} DIR={w_deg}", flush=True)
+
         return {
-            "air_temp_c":       t_c,
+            "air_temp_c": t_c,
             "air_pressure_hpa": p_hpa,
-            "wind_ms":          w2_ms,   # endelig m/s (≈2 m)
-            "wind_dir_deg":     w_deg,   # "fra"-retning
+            "wind_ms": w2_ms,      # endelig m/s (~2 m)
+            "wind_dir_deg": w_deg, # "fra"-retning
             "meta": {
                 "windspeed_10m_ms": w10_ms,
-                "reduce_factor":    REDUCE_10M_TO_2M,
-                "source":           "open-meteo/era5"
-            }
+                "reduce_factor": REDUCE_10M_TO_2M,
+                "source": "open-meteo/era5",
+            },
         }
+
     except Exception as e:
-        print(f"[WX] fetch_open_meteo error: {e}")
+        print(f"[WX] fetch_open_meteo error: {e!r}", flush=True)
         return None
+
 
 def _wx_fp(wx: Dict[str, Any]) -> str:
     try:
@@ -1244,6 +1507,27 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         return resp
 
 
+# ==================== PATCH C/E: ENHANCED WEATHER LOCK ====================
+def _extract_start_time_from_session_file(sess_path: Path) -> int | None:
+    """
+    Les session-fil og hent starttid (epoch sekunder) nedfelt til nærmeste time.
+    Returnerer None hvis ikke tilgjengelig.
+    """
+    try:
+        doc = json.loads(sess_path.read_text(encoding="utf-8"))
+        # 1) prefer explicit start_epoch / start_ts if present
+        start_epoch = doc.get("start_epoch") or doc.get("start_ts")
+        if isinstance(start_epoch, (int, float)) and start_epoch > 0:
+            return _floor_to_hour_epoch(int(start_epoch))
+        # 2) fallback: use first sample.t_abs if present - FJERNET I PATCH 1.2
+        # Vi returnerer None hvis vi ikke har start_epoch
+        return None
+    except Exception as e:
+        print(f"[WX] Failed to extract start_time from {sess_path}: {e}")
+        return None
+# ==================== END PATCH C/E ====================
+
+
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
 async def analyze_session(
@@ -1255,8 +1539,10 @@ async def analyze_session(
 ):
     
     want_debug = bool(debug)
+    
     print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}", file=sys.stderr)
     print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
+    print(f"[SVR] HIT /sessions/{sid}/analyze force_recompute={force_recompute} debug={debug}", file=sys.stderr)
 
     # ==================== PATCH 1: HARD INPUT GATE ====================
     avail = _input_availability(sid)
@@ -1285,29 +1571,10 @@ async def analyze_session(
         return x
     # ===========================================================================================
 
-    # ==================== WEATHER LOCK INITIALIZATION ====================
-    # ─────────────────────────────────────────────────────────────────────
-    # WEATHER LOCK: ved recompute (profilendring) låser vi vær til persisted
-    # ─────────────────────────────────────────────────────────────────────
-    locked_wx_used = None
-    locked_wx_meta = None
-    locked_wx_fp = None
-    weather_locked = False
-
-    # Selv om vi bypasser persisted *resultat* ved force_recompute,
-    # så ønsker vi å gjenbruke samme vær som fasit/persisted (stabilt).
-    if force_recompute:
-        try:
-            _p = _pick_best_persisted_result_path(sid)
-            if _p is not None and _p.exists():
-                with _p.open("r", encoding="utf-8-sig") as f:
-                    _doc = json.load(f)
-                locked_wx_used, locked_wx_meta, locked_wx_fp = _extract_persisted_weather(_doc)
-                if locked_wx_used:
-                    weather_locked = True
-                    print(f"[SVR] weather_lock sid={sid} path={_p}", flush=True)
-        except Exception as e:
-            print(f"[SVR] weather_lock_failed sid={sid} err={e}", flush=True)
+    # ==================== PATCH S3: INITIALIZATION FOR SINGLE WEATHER SOURCE ====================
+    # Fjerner weather-lock mekanismen for å sikre én kilde
+    # Server vil nå være den eneste kilden for værdata
+    # ============================================================================================
 
     # ==================== PATCH 2: persisted hit/bypass logging ====================
     if force_recompute:
@@ -1323,6 +1590,16 @@ async def analyze_session(
                     doc = json.load(f)
 
                 if isinstance(doc, dict) and _is_full_result_doc(doc):
+                    # ==================== PATCH S3A: FJERN ALL WEATHER FRA PERSISTED DOC ====================
+                    # Normal path skal IKKE bruke weather fra persisted doc
+                    # Fjern all weather data fra persisted doc før vi returnerer den
+                    metrics = doc.get("metrics") or {}
+                    metrics.pop("weather_used", None)
+                    metrics.pop("weather_meta", None)
+                    metrics.pop("weather_fp", None)
+                    doc.pop("weather_source", None)
+                    # ==================== END PATCH S3A ====================
+
                     # PATCH C: Legg til start_time fra trend_sessions.csv hvis mangler
                     if not doc.get("start_time"):
                         st = _trend_sessions_lookup_start_time(sid)
@@ -1340,6 +1617,78 @@ async def analyze_session(
                         f"[SVR] persisted_hit sid={sid} path={persisted_path}",
                         file=sys.stderr,
                     )
+                    
+                    # ==================== PATCH S3B: LEGG TIL WEATHER PÅ NYTT BASERT PÅ CANONICAL KEY ====================
+                    # Vi må nå beregne weather på nytt basert på canonical key
+                    # Last samples hvis de ikke allerede er tilgjengelige
+                    samples = None
+                    sess_path = _pick_best_session_path(sid)
+                    if sess_path is not None:
+                        try:
+                            loaded = _load_samples_from_session_file(sess_path)
+                            samples = loaded
+                            dbg = doc.get("debug") or {}
+                            if not isinstance(dbg, dict):
+                                dbg = {}
+                            dbg["session_path"] = str(sess_path)
+                            dbg["samples_loaded"] = len(samples)
+                            doc["debug"] = dbg
+                        except Exception as e:
+                            print(
+                                f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
+                                file=sys.stderr,
+                            )
+                    
+                    # Beregn canonical key fra samples
+                    if isinstance(samples, list) and len(samples) > 0:
+                        center_lat, center_lon, ts_hour, wx_err = _canonical_weather_key_from_samples(samples, want_debug=False)
+                        if wx_err is None and center_lat is not None and center_lon is not None and ts_hour is not None:
+                            # Hent vær for denne nøkkelen
+                            wx_fetched = await _fetch_open_meteo_hour_ms(float(center_lat), float(center_lon), int(ts_hour))
+                            if wx_fetched:
+                                wx_used = wx_fetched
+                                wx_used["dir_is_from"] = True
+                                wx_meta = {
+                                    "provider": "open-meteo/era5",
+                                    "lat_used": float(center_lat),
+                                    "lon_used": float(center_lon),
+                                    "ts_hour": int(ts_hour),
+                                    "height": "10m->2m",
+                                    "unit_wind": "m/s",
+                                    "cache_key": f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}",
+                                }
+                                # ==================== PATCH S2B: Bruk _weather_fp_from_key ====================
+                                fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
+                                # Oppdater doc med det nye været
+                                metrics = doc.get("metrics") or {}
+                                metrics["weather_used"] = wx_used
+                                metrics["weather_meta"] = wx_meta
+                                metrics["weather_fp"] = fp
+                                metrics["weather_applied"] = True
+                                doc["metrics"] = metrics
+                                doc["weather_source"] = wx_meta.get("provider")
+                                doc["weather_applied"] = True
+                                
+                                # ==================== PATCH S3D: Injiser nøkkelparametre i weather_used.meta ====================
+                                _inject_weather_key_meta_into_resp(doc, int(ts_hour), float(center_lat), float(center_lon), fp)
+                                # ==================== END PATCH S3D ====================
+                                
+                                # Oppdater også debug hvis det finnes
+                                dbg = doc.get("debug") or {}
+                                if isinstance(dbg, dict):
+                                    dbg["weather_source"] = wx_meta.get("provider")
+                                    dbg["weather_applied"] = True
+                                    if want_debug:
+                                        dbg["wx_key"] = {"ts_hour": ts_hour, "lat": center_lat, "lon": center_lon}
+                                    doc["debug"] = dbg
+                                
+                                print(f"[SVR][PATCH S3] Recalculated weather for persisted doc: ts_hour={ts_hour}, lat={center_lat}, lon={center_lon}, fp={fp[:8]}", file=sys.stderr)
+                            else:
+                                print(f"[SVR][PATCH S3] Failed to fetch weather for persisted doc", file=sys.stderr)
+                        else:
+                            print(f"[SVR][PATCH S3] Could not calculate canonical key for persisted doc", file=sys.stderr)
+                    # ==================== END PATCH S3B ====================
+
                     return _RET(doc)
                 else:
                     print(
@@ -1422,6 +1771,32 @@ async def analyze_session(
     samples = body["samples"]
     profile_in = body["profile"]
     client_sent_profile = bool(profile_in)
+
+    # ==================== PATCH 1C: DEBUG SAMPLES ====================
+    if want_debug:
+        print(f"[SVR][DBG] samples type: {type(samples)}", file=sys.stderr)
+        if isinstance(samples, list):
+            print(f"[SVR][DBG] samples length: {len(samples)}", file=sys.stderr)
+            if samples:
+                print(f"[SVR][DBG] first sample keys: {list(samples[0].keys())}", file=sys.stderr)
+                # Vis også noen verdier
+                for k in ['t', 't_abs', 'lat_deg', 'lon_deg', 'altitude_m', 'v_ms']:
+                    if k in samples[0]:
+                        print(f"[SVR][DBG] samples[0][{k}] = {samples[0][k]}", file=sys.stderr)
+
+        # Lagre i body debug
+        dbg = body.get('debug', {})
+        if not isinstance(dbg, dict):
+            dbg = {}
+        if isinstance(samples, list):
+            dbg['samples_len'] = len(samples)
+            if samples:
+                dbg['samples0_keys'] = list(samples[0].keys())
+                # Begrens preview til noen få viktige felt
+                preview_keys = ['t', 't_abs', 'lat_deg', 'lon_deg', 'altitude_m', 'v_ms', 'moving', 'grade', 'heading_deg']
+                dbg['samples0_preview'] = {k: samples[0].get(k) for k in preview_keys if k in samples[0]}
+        body['debug'] = dbg
+    # ==================== END PATCH 1C ====================
 
     # ==================== PATCH A: INPUT DISCOVERY + DEBUG SYNLIGHET ====================
     # --- Opprett input discovery debug info ---
@@ -1669,33 +2044,61 @@ async def analyze_session(
 
     # === WX PATCH START ===
     hint = dict((body or {}).get("weather_hint") or {})
-    center_lat, center_lon, ts_hour = _center_latlon_and_hour_from_samples(samples)
 
-    if center_lat is None:
-        center_lat = hint.get("lat_deg")
-    if center_lon is None:
-        center_lon = hint.get("lon_deg")
-    if ts_hour is None:
-        ts_hour = hint.get("ts_hour")
+    # ==================== PATCH 1F: Bruk canonical weather key med error handling ====================
+    # ==================== PATCH 1D: Pass want_debug til canonical funksjonen ====================
+    center_lat, center_lon, ts_hour, wx_err = _canonical_weather_key_from_samples(samples, want_debug=want_debug)
+    
+    # ==================== PATCH 1F: Håndter error og returner JSONResponse ====================
+    if wx_err is not None:
+        # Hard error - returner JSONResponse med garantert JSON body
+        status = 500
+        if want_debug:
+            return JSONResponse(status_code=status, content={"detail": wx_err})
+        # Uten debug: returner bare error-strengen
+        return JSONResponse(status_code=status, content={"detail": {"error": wx_err.get("error", "WEATHER_CANONICAL_ERROR")}})
+    
+    # ==================== END PATCH 1 ====================
 
-    # ==================== PATCH: Robust ts_hour parsing ====================
-    ts_epoch = None
-    if ts_hour is not None:
-        ts_epoch = _parse_ts_hour_to_epoch(ts_hour)
-        if ts_epoch is None:
-            print(f"[WX] WARN: Could not parse ts_hour: {ts_hour!r}", flush=True)
-    # ==================== END PATCH ====================
+    ts_epoch = ts_hour  # ts_hour er allerede fra canonical funksjonen
 
+    # ==================== PATCH S3C: SERVER ER ENESTE WEATHER SOURCE ====================
+    # Kun server skal hente værdata
     wx_used: Optional[Dict[str, float]] = None
-    wx_meta: Dict[str, Any] = {
-        "provider": "open-meteo/era5",
-        "lat_used": float(center_lat) if isinstance(center_lat, (int, float)) else None,
-        "lon_used": float(center_lon) if isinstance(center_lon, (int, float)) else None,
-        "ts_hour": int(ts_epoch) if isinstance(ts_epoch, (int, float)) else None,
-        "height": "10m->2m",
-        "unit_wind": "m/s",
-        "cache_key": None,
-    }
+    wx_meta: Dict[str, Any] = {}
+    fp = None
+    weather_applied = False
+
+    # Hent vær fra server (Open-Meteo) hvis ikke no_weather
+    if not no_weather and center_lat is not None and center_lon is not None and ts_hour is not None:
+        wx_fetched = await _fetch_open_meteo_hour_ms(float(center_lat), float(center_lon), int(ts_epoch))
+        if wx_fetched:
+            wx_used = wx_fetched
+            wx_used["dir_is_from"] = True
+            wx_meta = {
+                "provider": "open-meteo/era5",
+                "lat_used": float(center_lat),
+                "lon_used": float(center_lon),
+                "ts_hour": int(ts_hour),
+                "height": "10m->2m",
+                "unit_wind": "m/s",
+                "cache_key": f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}",
+            }
+            # ==================== PATCH S2B: Bruk _weather_fp_from_key ====================
+            fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
+            # ==================== END PATCH S2B ====================
+            weather_applied = True
+            
+            print(f"[WX] Server fetched weather: T={wx_used['air_temp_c']}°C P={wx_used['air_pressure_hpa']}hPa "
+                  f"wind_2m={wx_used['wind_ms']:.2f} m/s from={wx_used['wind_dir_deg']}° fp={fp[:8]}")
+        else:
+            print(f"[WX] Server weather fetch failed for sid={sid}")
+    else:
+        if no_weather:
+            print(f"[WX] Weather disabled via no_weather flag for sid={sid}")
+        else:
+            print(f"[WX] Missing weather key params for sid={sid}: center_lat={center_lat}, center_lon={center_lon}, ts_hour={ts_hour}")
+    # ==================== END PATCH S3C ====================
 
     # ==================== PATCH: Debug logging for ts_hour ====================
     if want_debug:
@@ -1707,102 +2110,28 @@ async def analyze_session(
         body["debug"] = dbg
     # ==================== END PATCH ====================
 
-    fp = None
-
-    # WEATHER LOCK: bruk låst vær hvis tilgjengelig
-    if weather_locked:
-        wx_used = dict(locked_wx_used or {})
-        if isinstance(locked_wx_meta, dict) and locked_wx_meta:
-            wx_meta = dict(locked_wx_meta)
-        fp = locked_wx_fp or _wx_fp(wx_used)
-        wx_used.setdefault("dir_is_from", True)
-        wx_used["force"] = True
-        print(
-            f"[WX] locked sid={sid} T={wx_used.get('air_temp_c')}°C P={wx_used.get('air_pressure_hpa')}hPa "
-            f"wind_ms={wx_used.get('wind_ms')} from={wx_used.get('wind_dir_deg')}° fp={fp[:8] if isinstance(fp,str) else fp}",
-            flush=True,
-        )
-    else:
-        wx_payload = dict((body or {}).get("weather") or {})
-        if wx_payload:
-            w_ms = float(wx_payload.get("wind_ms", 0.0))
-            w_dd = float(wx_payload.get("wind_dir_deg", 0.0))
-            t_c = float(wx_payload.get("air_temp_c", 0.0))
-            p_h = float(wx_payload.get("air_pressure_hpa", 0.0))
-            wx_used = {
-                "wind_ms": w_ms,
-                "wind_dir_deg": w_dd,
-                "air_temp_c": t_c,
-                "air_pressure_hpa": p_h,
-                "dir_is_from": True,
-                "meta": {
-                    "injected_client": True,
-                    "reduce_factor": None,
-                    "windspeed_10m_ms": None,
-                },
-            }
-        else:
-            if (
-                isinstance(center_lat, (int, float))
-                and isinstance(center_lon, (int, float))
-                and isinstance(ts_epoch, int)
-            ):
-                wx_meta["cache_key"] = f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_epoch}"
-                wx_fetched = await _fetch_open_meteo_hour_ms(
-                    float(center_lat), float(center_lon), int(ts_epoch)
-                )
-                if wx_fetched:
-                    wx_used = wx_fetched
-                    wx_used["dir_is_from"] = True
-
+    # Bygg third (estimat_cfg) med været fra server
     third = dict(estimat_cfg)
-    weather_applied = False
-
-    if wx_used and not no_weather:
-        wind_ms_val = float(wx_used.get("wind_ms", 0.0))
-        wind_dir_deg_val = float(wx_used.get("wind_dir_deg", 0.0))
-        air_temp_c_val = float(wx_used.get("air_temp_c", 15.0))
-        air_pressure_hpa_val = float(wx_used.get("air_pressure_hpa", 1013.25))
-
+    
+    if weather_applied and wx_used:
         third.update(
             {
-                "wind_ms": wind_ms_val,
-                "wind_dir_deg": wind_dir_deg_val,
-                "air_temp_c": air_temp_c_val,
-                "air_pressure_hpa": air_pressure_hpa_val,
+                "wind_ms": wx_used["wind_ms"],
+                "wind_dir_deg": wx_used["wind_dir_deg"],
+                "air_temp_c": wx_used["air_temp_c"],
+                "air_pressure_hpa": wx_used["air_pressure_hpa"],
                 "dir_is_from": True,
+                "weather_meta": wx_meta,
+                "weather_fp": fp,
             }
         )
-
-        third["weather_meta"] = wx_meta
-        fp = fp or _wx_fp(wx_used)
-        third["weather_fp"] = fp
-        weather_applied = True
-
-        try:
-            print(
-                f"[WX] hour={wx_meta['ts_hour']} lat={wx_meta['lat_used']:.5f} lon={wx_meta['lon_used']:.5f} "
-                f"T={wx_used['air_temp_c']}°C P={wx_used['air_pressure_hpa']}hPa "
-                f"wind_2m={wx_used['wind_ms']:.2f} m/s from={wx_used['wind_dir_deg']}° "
-                f"(10m={wx_used.get('meta', {}).get('windspeed_10m_ms')} m/s, "
-                f"factor={wx_used.get('meta', {}).get('reduce_factor')}) fp={fp[:8]}"
-            )
-        except Exception:
-            pass
+        third["weather_applied"] = True
     else:
-        for k in [
-            "wind_ms",
-            "wind_dir_deg",
-            "air_temp_c",
-            "air_pressure_hpa",
-            "dir_is_from",
-        ]:
+        # Fjern eventuelle weather-felter fra third
+        for k in ["wind_ms", "wind_dir_deg", "air_temp_c", "air_pressure_hpa", "dir_is_from", 
+                  "weather_meta", "weather_fp", "weather_applied"]:
             third.pop(k, None)
-        weather_applied = False
-        if no_weather:
-            print("[WX] weather disabled via no_weather flag")
-        else:
-            print("[WX] no weather available (missing lat/lon/ts_hour or fetch failed)")
+    
     # === WX PATCH END ===
 
     # --- Enhetsheuristikk på samples (før mapping/Rust) ---
@@ -1940,6 +2269,34 @@ async def analyze_session(
                     print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
                 return _RET(err_resp)
 
+        # ==================== PATCH S3D: ATTACH WX_KEY + ENSURE WEATHER META IN RESPONSE ====================
+        try:
+            if want_debug:
+                resp.setdefault("debug", {})
+                if not isinstance(resp["debug"], dict):
+                    resp["debug"] = {}
+                resp["debug"]["wx_key"] = {"ts_hour": ts_hour, "lat": center_lat, "lon": center_lon}
+                resp["debug"]["wx_ts_hour_in"] = ts_hour
+                resp["debug"]["wx_ts_epoch"] = ts_epoch
+
+            # Hvis vær faktisk ble brukt, sørg for at resp.metrics.weather_used.meta har ts/lat/lon
+            if weather_applied and wx_used and center_lat is not None and center_lon is not None and ts_hour is not None:
+                _inject_weather_key_meta_into_resp(resp, int(ts_hour), float(center_lat), float(center_lon), fp)
+        except Exception:
+            pass
+        # ==================== END PATCH S3D ====================
+
+        # ==================== PATCH S3A: SERVER ER CANONICAL WEATHER SOURCE ====================
+        # Fjern eventuelle weather-felter som Rust har satt
+        if isinstance(resp, dict):
+            metrics = resp.get("metrics") or {}
+            if isinstance(metrics, dict):
+                metrics.pop("weather_used", None)
+                metrics.pop("weather_meta", None)
+                metrics.pop("weather_fp", None)
+                metrics.pop("weather_source", None)
+        # ================================================================================
+
         # Injiser profile_used, deretter skaler (DEL / eff) og legg på profile_version
         try:
             resp = _inject_profile_used(resp, profile)
@@ -1989,11 +2346,14 @@ async def analyze_session(
             pu["profile_version"] = profile_version
             metrics["profile_used"] = pu
 
+            # ==================== PATCH S3D: SET WEATHER FROM SERVER SOURCE ====================
             if weather_applied and wx_used:
                 metrics["weather_used"] = wx_used
                 metrics["weather_meta"] = wx_meta
-                metrics["weather_fp"] = fp if isinstance(fp, str) else _wx_fp(wx_used)
-                metrics["weather_source"] = "locked" if weather_locked else metrics.get("weather_source")
+                metrics["weather_fp"] = fp
+                metrics["weather_source"] = "open-meteo/era5"
+                metrics["weather_applied"] = True
+            # ==================== END PATCH S3D ====================
 
             # --- Trinn 6: passiv kalibrering (MAE mot device_watts om tilstede) ---
             try:
@@ -2115,10 +2475,13 @@ async def analyze_session(
             m.setdefault("weather_applied", weather_applied)
             m.setdefault("total_watt", m.get("precision_watt", 0.0))
 
-            if not weather_locked and weather_applied and wx_used and "weather_used" not in m:
+            # ==================== PATCH S3E: SET WEATHER FROM SERVER ====================
+            if weather_applied and wx_used:
                 m["weather_used"] = wx_used
                 m["weather_meta"] = wx_meta
-                m["weather_fp"] = _wx_fp(wx_used)
+                m["weather_fp"] = fp
+                m["weather_source"] = "open-meteo/era5"
+            # ==================== END PATCH S3E ====================
 
             dbg = resp.setdefault("debug", {})
             dbg.setdefault("reason", "ok")
@@ -2126,9 +2489,11 @@ async def analyze_session(
             dbg["persist_ignored"] = bool(force_recompute)
             dbg["ignored_persist"] = bool(force_recompute)
             dbg["used_fallback"] = False
-            dbg["weather_locked"] = bool(weather_locked)
-            if not dbg.get("weather_source"):
-                dbg["weather_source"] = "historical" if weather_applied else "neutral"
+            dbg["weather_applied"] = weather_applied
+            if weather_applied:
+                dbg["weather_source"] = "open-meteo/era5"
+            else:
+                dbg["weather_source"] = "neutral"
             if force_recompute:
                 dbg["estimat_cfg_used"] = dict(estimat_cfg)
 
@@ -2141,16 +2506,14 @@ async def analyze_session(
             )
 
             if rust_has_metrics:
-                try:
-                    _m = resp.get("metrics") or {}
-                    _wm = (_m.get("weather_meta") or {})
-                    _prov = _wm.get("provider") or _wm.get("source") or _wm.get("name")
-                    resp["weather_source"] = _prov or "open-meteo"
-                    _m["weather_source"] = resp["weather_source"]
-                    resp["metrics"] = _m
-                except Exception:
-                    resp.setdefault("weather_source", "unknown")
-                    resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
+                # ==================== PATCH S3F: SET TOP-LEVEL WEATHER FIELDS ====================
+                if weather_applied:
+                    resp["weather_source"] = "open-meteo/era5"
+                    resp["weather_applied"] = True
+                else:
+                    resp.setdefault("weather_source", "neutral")
+                    resp["weather_applied"] = False
+                # ==================== END PATCH S3F ====================
 
                 resp["profile_version"] = profile_version
                 mu_top = resp.setdefault("profile_used", {})
@@ -2228,7 +2591,7 @@ async def analyze_session(
                     "debug": {
                         "reason": "no-metrics-from-rust",
                         "used_fallback": False,
-                        "weather_source": ("historical" if weather_applied else "neutral"),
+                        "weather_source": "neutral",
                         "adapter_resp_keys": list(resp.keys()) if isinstance(resp, dict) else [],
                         "metrics_seen": list((m or {}).keys()) if isinstance(m, dict) else [],
                     },
@@ -2255,7 +2618,7 @@ async def analyze_session(
                 return _RET(err)
 
     # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
-    weather_flag = bool(wx_used) and not no_weather
+    weather_flag = weather_applied  # Bruk server weather_applied
 
     profile_used = {
         "cda": float(profile.get("cda")) if profile.get("cda") is not None else 0.30,
@@ -2278,13 +2641,25 @@ async def analyze_session(
         profile_used=profile_used,
     )
 
-    if not weather_locked and weather_flag and wx_used:
+    # ==================== PATCH S3G: SET WEATHER IN FALLBACK ====================
+    if weather_applied and wx_used:
         try:
-            fallback_metrics.setdefault("weather_used", wx_used)
-            fallback_metrics.setdefault("weather_meta", wx_meta)
-            fallback_metrics.setdefault("weather_fp", _wx_fp(wx_used))
+            fallback_metrics["weather_used"] = wx_used
+            fallback_metrics["weather_meta"] = wx_meta
+            fallback_metrics["weather_fp"] = fp
+            fallback_metrics["weather_source"] = "open-meteo/era5"
+            fallback_metrics["weather_applied"] = True
+            
+            # ==================== PATCH S3D: Injiser nøkkelparametre i weather_used.meta for fallback også ====================
+            # Opprett en midlertidig dict for å injisere meta
+            temp_resp = {"metrics": fallback_metrics}
+            _inject_weather_key_meta_into_resp(temp_resp, int(ts_hour), float(center_lat), float(center_lon), fp)
+            fallback_metrics = temp_resp.get("metrics", fallback_metrics)
+            # ==================== END PATCH S3D ====================
+            
         except Exception:
             pass
+    # ==================== END PATCH S3G ====================
 
     try:
         est_range, hint, completeness = compute_estimated_error_and_hint(profile_used, wx_used or {})
@@ -2301,27 +2676,36 @@ async def analyze_session(
         "debug": {
             "reason": "fallback_py",
             "used_fallback": True,
-            "weather_source": "neutral",
-            "weather_locked": bool(weather_locked),
+            "weather_applied": weather_flag,
+            "weather_source": "open-meteo/era5" if weather_flag else "neutral",
             "adapter_resp_keys": [],
             "metrics_seen": list(fallback_metrics.keys()),
         },
     }
 
+    # ==================== PATCH S3D: ADD WX_KEY TO DEBUG FOR FALLBACK ====================
+    if want_debug:
+        resp["debug"]["wx_key"] = {"ts_hour": ts_hour, "lat": center_lat, "lon": center_lon}
+        resp["debug"]["wx_ts_hour_in"] = ts_hour
+        resp["debug"]["wx_ts_epoch"] = ts_epoch
+    # ==================== END PATCH S3D ====================
+
     # ==================== PATCH A: LEGG TIL INPUT DEBUG INFO ====================
     resp["debug"].update(input_debug_info)
     # ==================== END PATCH A ====================
 
-    try:
-        _m = resp.get("metrics") or {}
-        _wm = (_m.get("weather_meta") or {})
-        _prov = _wm.get("provider") or _wm.get("source") or _wm.get("name")
-        resp["weather_source"] = _prov or "open-meteo"
-        _m["weather_source"] = resp["weather_source"]
-        resp["metrics"] = _m
-    except Exception:
-        resp.setdefault("weather_source", "unknown")
-        resp.setdefault("metrics", {}).setdefault("weather_source", resp["weather_source"])
+    # ==================== PATCH S3H: SET WEATHER SOURCE IN FALLBACK ====================
+    if weather_applied:
+        resp["weather_source"] = "open-meteo/era5"
+        resp["weather_applied"] = True
+        m = resp.get("metrics") or {}
+        m["weather_source"] = "open-meteo/era5"
+        m["weather_applied"] = True
+        resp["metrics"] = m
+    else:
+        resp.setdefault("weather_source", "neutral")
+        resp["weather_applied"] = False
+    # ==================== END PATCH S3H ====================
 
     resp["profile_version"] = profile_version
     mu_top = resp.setdefault("profile_used", {})
@@ -2457,29 +2841,6 @@ def get_session(session_id: str) -> Dict[str, Any]:
             "debug_path": debug_path,
             "debug_exists": debug_exists,
             "results_path": results_path,
-            "results_exists": results_exists,
+            "results_exists": results,
             "debug_error": debug_error,
         }
-
-    # 4) Fallback – vi fant ingen result-fil for denne økten
-    return {
-        "session_id": session_id,
-        "precision_watt": None,
-        "precision_watt_ci": None,
-        "strava_activity_id": None,
-        "publish_state": None,
-        "publish_time": None,
-        "publish_hash": "",
-        "publish_error": None,
-        "start_time": None,
-        "distance_km": None,
-        # ekstra debug-felt
-        "analysis_source": None,
-        "raw_has_metrics": False,
-        "base_dir": base_dir,
-        "debug_path": debug_path,
-        "debug_exists": debug_exists,
-        "results_path": results_path,
-        "results_exists": results_exists,
-        "debug_error": debug_error,
-    }
