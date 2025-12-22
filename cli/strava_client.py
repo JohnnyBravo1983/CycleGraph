@@ -1,49 +1,77 @@
 # cli/strava_client.py
 from __future__ import annotations
 
-import requests
-import time
-import json
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
-from cli.tokens import load_tokens, build_headers
+import json
+import time
+import requests
+
+from dotenv import load_dotenv
+
+from cli.tokens import load_tokens as _load_tokens, build_headers as _build_headers
+from cli import strava_auth
+
+# Paths / env
+REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR = REPO_ROOT / "state"
+LAST_IMPORT = STATE_DIR / "last_import.json"
+load_dotenv(dotenv_path=str(REPO_ROOT / ".env"), override=True)
+
 
 class S:
+    """
+    Test-hook wrapper.
+    Testene dine monkeypatcher:
+      - S.load_tokens(path)
+      - S.refresh_if_needed(tokens, cid, csec, leeway_secs=...)
+    """
     @staticmethod
-    def load_tokens():
-        return load_tokens()
+    def load_tokens(path: Optional[Path] = None):
+        # cli.tokens.load_tokens kan være (path) eller uten args i noen repo-varianter
+        try:
+            return _load_tokens(path) if path is not None else _load_tokens()
+        except TypeError:
+            # fallback hvis load_tokens() ikke tar path
+            return _load_tokens()
 
     @staticmethod
-    def build_headers():
-        return build_headers()
+    def build_headers(tokens: Optional[Dict[str, Any]] = None):
+        # samme type fleksibilitet for build_headers
+        try:
+            return _build_headers(tokens) if tokens is not None else _build_headers()
+        except TypeError:
+            return _build_headers()
 
     @staticmethod
     def refresh_if_needed(tokens, cid, csec, leeway_secs=3600):
-        # Dummy implementasjon – testene vil mocke denne
-        return build_headers()
+        # Ekte refresh ligger i cli/strava_auth.py, men testene mocker dette uansett.
+        return strava_auth.refresh_if_needed(tokens, client_id=cid, client_secret=csec, leeway_secs=leeway_secs)
 
-    tokens = load_tokens()
-    headers = build_headers()
 
-def resolve_activity_from_state() -> str:
-    with open("state/last_import.json", encoding="utf-8") as f:
-        state = json.load(f)
-    return str(state.get("activity_id", ""))
+def resolve_activity_from_state(state_dir: Path = STATE_DIR) -> str:
+    p = state_dir / "last_import.json"
+    if not p.exists():
+        return ""
+    try:
+        state = json.loads(p.read_text(encoding="utf-8"))
+        return str(state.get("activity_id", "") or "")
+    except Exception:
+        return ""
 
-import json
-import time
-import requests
 
-def publish_to_strava(pieces, dry_run=False, lang="no", headers=None) -> tuple[str, str]:
-    activity_id = resolve_activity_from_state()
+def publish_to_strava(pieces, dry_run: bool = False, lang: str = "no", headers: Optional[Dict[str, str]] = None) -> tuple[str, str]:
+    activity_id = resolve_activity_from_state(STATE_DIR)
 
-    # Håndter dry-run før vi sjekker activity_id
+    # Dry-run: aldri krev activity_id, aldri krev headers
     if dry_run:
         if isinstance(pieces, dict):
             description = pieces.get("description", "")
             comment = pieces.get("comment", "")
         else:
-            description = getattr(pieces, "desc_header", "")
-            comment = getattr(pieces, "comment", "")
+            description = getattr(pieces, "desc_header", "") or ""
+            comment = getattr(pieces, "comment", "") or ""
 
         msg = (
             f"[dry-run] activity_id={activity_id or ''} "
@@ -66,74 +94,49 @@ def publish_to_strava(pieces, dry_run=False, lang="no", headers=None) -> tuple[s
         description = pieces.get("description", "")
         comment = pieces.get("comment", "")
     else:
-        description = getattr(pieces, "desc_header", "")
-        comment = getattr(pieces, "comment", "")
+        description = getattr(pieces, "desc_header", "") or ""
+        comment = getattr(pieces, "comment", "") or ""
 
     url = f"https://www.strava.com/api/v3/activities/{activity_id}"
-    payload = {
-        "description": description,
-        "name": comment
-    }
+    payload = {"description": description, "name": comment}
 
     if headers is None:
         return activity_id, "missing_headers"
 
     for attempt in range(2):
-        response = requests.put(url, headers=headers, json=payload)
+        response = requests.put(url, headers=headers, json=payload, timeout=15)
         if response.status_code in (401, 403):
             print(f"[STRAVA] Auth error ({response.status_code}), retrying...")
             time.sleep(1)
             continue
         if response.ok:
             return activity_id, "ok"
-        else:
-            return activity_id, f"error_{response.status_code}"
+        return activity_id, f"error_{response.status_code}"
 
     return activity_id, "auth_failed"
 
 
-
-from typing import Any, Dict, Optional, Tuple
-from pathlib import Path
-
-
-
-from dotenv import load_dotenv
-
-from cli import strava_auth
-
-# Paths / env
-REPO_ROOT = Path(__file__).resolve().parent.parent
-STATE_DIR = REPO_ROOT / "state"
-LAST_IMPORT = STATE_DIR / "last_import.json"
-load_dotenv(dotenv_path=str(REPO_ROOT / ".env"), override=True)
-
-
 class StravaClient:
-     def __init__(
+    def __init__(
         self,
         base_url: str = "https://www.strava.com/api/v3",
         lang: str = "no",
-        state_dir: Path = Path("state")
+        state_dir: Path = Path("state"),
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.lang = lang
-        self._fixed_headers: Optional[Dict[str, str]] = None  # settes av publish.py
+        self._fixed_headers: Optional[Dict[str, str]] = None
         self.state_dir = state_dir
         self.last_import_path = self.state_dir / "last_import.json"
 
+    def use_headers(self, headers: Dict[str, str]) -> None:
+        self._fixed_headers = dict(headers)
 
-    # ── injiser forhåndsbygde headers fra publish.py ──────────────────────────
-     def use_headers(self, headers: Dict[str, str]) -> None:
-        self._fixed_headers = headers
-        
-    # ── dummy-metode for test: hentes av test_401_retry_flow_on_latest_activity ─
-     def get_latest_activity_id(self):
-        # Dummy implementasjon – testen monkeypatcher denne uansett
-        return 99     
+    # dummy for test (test_401_retry_flow_on_latest_activity monkeypatcher denne uansett)
+    def get_latest_activity_id(self):
+        return 99
 
-    # ── intern request-helper (med 401→refresh→retry) ─────────────────────────
-     def _request(
+    def _request(
         self,
         method: str,
         url: str,
@@ -141,7 +144,6 @@ class StravaClient:
         json_body: Optional[Dict[str, Any]] = None,
         form_body: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        # 1) Bygg headers (bruk injisert om de finnes, ellers last/refresh)
         def build_headers() -> Dict[str, str]:
             if self._fixed_headers is not None:
                 return dict(self._fixed_headers)
@@ -153,15 +155,14 @@ class StravaClient:
         def do_req(hdrs: Dict[str, str]):
             kwargs: Dict[str, Any] = {"headers": hdrs, "timeout": 15}
             if json_body is not None:
-                kwargs["json"] = json_body               # application/json
+                kwargs["json"] = json_body
             if form_body is not None:
-                kwargs["data"] = form_body               # application/x-www-form-urlencoded
+                kwargs["data"] = form_body
             return requests.request(method, url, **kwargs)
 
-        # 2) Første forsøk
         resp = do_req(headers)
         if resp.status_code == 401:
-            # 3) Tvungen refresh + ett retry
+            # tvungen refresh + ett retry
             try:
                 tokens = strava_auth.load_tokens()
                 new_hdrs = strava_auth.refresh_if_needed(
@@ -182,25 +183,31 @@ class StravaClient:
                 return {}
         return {}
 
-    # ── hjelpefunksjon: finn target activity id ───────────────────────────────
-     def resolve_target_activity_id(self, target: Any = None) -> Optional[str]:
-      s = str(target).strip().lower()
-      if s != "latest":
-       return str(target)
-      if self.last_import_path.exists():
+    def resolve_target_activity_id(self, target: Any = None) -> Optional[str]:
+        if target is None:
+            target = "latest"
+        s = str(target).strip().lower()
+
+        if s != "latest":
+            return str(target)
+
+        if self.last_import_path.exists():
+            try:
+                data = json.loads(self.last_import_path.read_text(encoding="utf-8"))
+                for key in ("activity_id", "id", "aid", "target_activity_id", "latest"):
+                    v = data.get(key)
+                    if v:
+                        return str(v)
+            except Exception:
+                pass
+
+        # fallback (valgfritt)
         try:
-            data = json.loads(self.last_import_path.read_text(encoding="utf-8"))
-            for key in ("activity_id", "id", "aid", "target_activity_id", "latest"):
-                v = data.get(key)
-                if v:
-                    return str(v)
+            return str(self.get_latest_activity_id())
         except Exception:
-            pass
-      return None
+            return None
 
-
-    # ── robust utpakking av tekstbiter ────────────────────────────────────────
-     def _extract_pieces(self, x: Any) -> Tuple[Optional[str], Optional[str]]:
+    def _extract_pieces(self, x: Any) -> Tuple[Optional[str], Optional[str]]:
         if x is None:
             return (None, "")
         if isinstance(x, dict):
@@ -216,14 +223,17 @@ class StravaClient:
                     parts.append(str(body))
                 description = "\n".join(p for p in parts if p)
             return (str(comment) if comment else None, str(description) if description else "")
+
         if isinstance(x, (list, tuple)):
             try:
                 description = "\n".join(str(t) for t in x if t is not None)
             except Exception:
                 description = ""
             return (None, description)
+
         if isinstance(x, str):
             return (None, x)
+
         c = getattr(x, "comment", None)
         h = getattr(x, "header", None)
         b = getattr(x, "body", None)
@@ -236,17 +246,15 @@ class StravaClient:
                 parts.append(str(b))
             d = "\n".join(p for p in parts if p)
         return (str(c) if c else None, str(d) if d else "")
-     def fetch_activity_with_streams(self, activity_id: str) -> Dict[str, Any]:
-        # Hent metadata
+
+    def fetch_activity_with_streams(self, activity_id: str) -> Dict[str, Any]:
         meta_url = f"{self.base_url}/activities/{activity_id}"
         meta = self._request("GET", meta_url)
 
-        # Hent streams
         stream_keys = ["time", "distance", "heartrate", "cadence", "watts", "latlng"]
         stream_url = f"{self.base_url}/activities/{activity_id}/streams"
         streams = self._request("GET", f"{stream_url}?keys={','.join(stream_keys)}&key_by_type=true")
 
-        # Auto-deteksjon av modus
         trainer = meta.get("trainer", False)
         sport_type = meta.get("sport_type", "")
         device_watts = meta.get("device_watts", False)
@@ -257,44 +265,41 @@ class StravaClient:
             mode = "outdoor"
 
         return {
-            "id": activity_id,
+            "id": str(activity_id),
             "mode": mode,
-            "meta": {
-                "sport_type": sport_type,
-                "trainer": trainer,
-                "device_watts": device_watts
-            },
-            "streams": streams
+            "meta": meta,
+            "streams": streams,
         }
 
+    def publish_to_strava(self, pieces: Any, dry_run: bool = False, activity_id: Any = "latest") -> tuple[str, str]:
+        target_id = self.resolve_target_activity_id(activity_id)
+        if dry_run:
+            # bare gjenbruk top-level preview-format
+            return publish_to_strava(pieces, dry_run=True, lang=self.lang, headers=None)
 
-    # ── dry-run preview ───────────────────────────────────────────────────────
-     def publish_to_strava(
-        self,
-        pieces: Any = None,
-        dry_run: bool = False,
-        activity_id: Optional[str] = None,
-    ) -> Tuple[None, str]:
+        if not target_id:
+            return "", "missing_activity_id"
+
         comment, description = self._extract_pieces(pieces)
-        msg = (
-        f"[dry-run] activity_id={activity_id or 'latest'} "
-        f"comment={comment} "
-        f"description={description} "
-        f"lang={self.lang}"
-)
-        return None, msg
+        comment = comment or ""
 
+        if self._fixed_headers is None:
+            # bygg headers via strava_auth
+            tokens = strava_auth.load_tokens()
+            hdrs = strava_auth.refresh_if_needed(tokens, client_id=None, client_secret=None)
+        else:
+            hdrs = dict(self._fixed_headers)
 
-    # ── kommentarer via API er ikke støttet → signaliser 'unsupported' ────────
-     def create_comment(self, activity_id: str | int, text: str) -> Dict[str, Any]:
-        """
-        Strava V3 API støtter ikke å opprette kommentarer via offentlig API.
-        Kalleren (publish.py) sjekker _unsupported og faller tilbake til å
-        flette kommentaren inn i description.
-        """
-        return {"_unsupported": True, "reason": "Strava API does not expose a comment-create endpoint."}
+        url = f"{self.base_url}/activities/{target_id}"
+        payload = {"description": description or "", "name": comment}
 
-    # ── oppdater beskrivelse (form-encoded) ───────────────────────────────────
-     def update_description(self, activity_id: str | int, desc: str) -> Dict[str, Any]:
-        url = f"{self.base_url}/activities/{activity_id}"
-        return self._request("PUT", url, form_body={"description": desc})
+        for attempt in range(2):
+            resp = requests.request("PUT", url, headers=hdrs, json=payload, timeout=15)
+            if resp.status_code in (401, 403):
+                time.sleep(1)
+                continue
+            if resp.ok:
+                return str(target_id), "ok"
+            return str(target_id), f"error_{resp.status_code}"
+
+        return str(target_id), "auth_failed"

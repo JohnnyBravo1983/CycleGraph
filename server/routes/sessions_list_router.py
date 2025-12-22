@@ -129,6 +129,30 @@ def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
     return m if isinstance(m, dict) else {}
 
 
+def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[float]:
+    """
+    Velg "avg" i riktig rekkefølge.
+
+    Viktig: legacy docs kan ha doc.watts som ikke er "precision/model/total".
+    Derfor bruker vi ALDRI watts-mean som fallback før vi har en verifisert kontrakt.
+    """
+    pw_avg = _to_float(doc.get("precision_watt_avg"))
+    if pw_avg is None:
+        pw_avg = _to_float(metrics.get("precision_watt_avg"))
+
+    # Foretrekk modell/total før precision_watt i legacy
+    if pw_avg is None:
+        pw_avg = _to_float(metrics.get("model_watt_wheel"))
+    if pw_avg is None:
+        pw_avg = _to_float(metrics.get("total_watt"))
+    if pw_avg is None:
+        pw_avg = _to_float(metrics.get("precision_watt"))
+
+    return pw_avg
+
+
+
+
 def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
     """
     Bygger rad. Bruker fallback_sid hvis doc mangler id.
@@ -141,11 +165,7 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         if dm is not None:
             distance_km = dm / 1000.0
 
-    pw_avg = _to_float(doc.get("precision_watt_avg"))
-    if pw_avg is None:
-        pw_avg = _to_float(metrics.get("precision_watt_avg"))
-    if pw_avg is None:
-        pw_avg = _to_float(metrics.get("precision_watt"))
+    pw_avg = _pick_precision_watt_avg(doc, metrics)
 
     sid = str(doc.get("session_id") or doc.get("ride_id") or doc.get("id") or fallback_sid)
 
@@ -162,7 +182,7 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
 
     # PATCH C-final (safe): never break listing
     try:
-        if row.get("start_time") in (None, "",):
+        if row.get("start_time") in (None, ""):
             sid2 = row.get("session_id") or row.get("ride_id")
             if sid2:
                 st = _trend_sessions_lookup_start_time(str(sid2))
@@ -194,24 +214,48 @@ def _gather_result_files(root: Path) -> List[Path]:
 
 
 def _prefer_path(a: Path, b: Path) -> Path:
+    """
+    Velg "beste" path for samme rid.
+
+    Primærregel: NYESTE fil (mtime) vinner.
+    Tie-break #1: logs/results foretrekkes fremfor _debug, deretter out.
+    Tie-break #2: størst fil vinner (ofte full doc vs stub).
+    """
+
     def tier(p: Path) -> int:
         s = str(p).replace("\\", "/")
-        if "/_debug/" in s:
-            return 0
         if "/logs/results/" in s:
+            return 0
+        if "/_debug/" in s:
             return 1
         if "/out/" in s:
             return 2
         return 9
 
+    # 1) Nyeste mtime vinner
+    try:
+        ma = a.stat().st_mtime
+        mb = b.stat().st_mtime
+        if ma != mb:
+            return a if ma > mb else b
+    except Exception:
+        pass
+
+    # 2) Tier hvis mtime feiler/lik
     ta, tb = tier(a), tier(b)
     if ta != tb:
         return a if ta < tb else b
 
+    # 3) Størst fil hvis fortsatt likt
     try:
-        return a if a.stat().st_mtime >= b.stat().st_mtime else b
+        sa = a.stat().st_size
+        sb = b.stat().st_size
+        if sa != sb:
+            return a if sa > sb else b
     except Exception:
-        return a
+        pass
+
+    return a
 
 
 # ─────────────────────────────────────────────────────────────────────────────

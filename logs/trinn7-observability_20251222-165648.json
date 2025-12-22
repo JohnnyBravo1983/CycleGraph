@@ -5271,15 +5271,12 @@
     "wx_ts_hour_in": 1760875200,
     "wx_ts_epoch": 1760875200,
     "reason": "ok",
-    "force_recompute": true,
-    "persist_ignored": true,
-    "ignored_persist": true,
+    "force_recompute": false,
+    "persist_ignored": false,
+    "ignored_persist": false,
     "used_fallback": false,
     "weather_applied": true,
     "weather_source": "open-meteo/era5",
-    "estimat_cfg_used": {
-      "force": true
-    },
     "input_candidates": {
       "debug_session": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\_debug\\session_16192415203.json",
       "debug_result": "C:\\Users\\easy2\\OneDrive\\Skrivebord\\Archieve\\Karriere\\CycleGraph\\_debug\\result_16192415203.json",

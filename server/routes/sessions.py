@@ -516,9 +516,25 @@ def _pick_best_persisted_result_path(sid: str) -> Path | None:
     logs = root / "logs"
     fn = f"result_{sid}.json"
 
-    # 1) Foretrukket: latest
+    import sys
+    print(f"[PICK] called sid={sid} fn={fn}", file=sys.stderr)
+
+    def _big_enough(p: Path) -> bool:
+        try:
+            return p.exists() and p.stat().st_size > 20_000
+        except Exception:
+            return False
+
+    # 0) SSOT: logs/results (nyeste, skrevet av serveren ved force_recompute)
+    p0 = logs / "results" / fn
+    if _big_enough(p0) and _is_full_result_doc(_read_json_utf8_sig(p0) or {}):
+        print(f"[PICK] return SSOT {p0}", file=sys.stderr)
+        return p0
+
+    # 1) Foretrukket: actual10/latest
     p1 = logs / "actual10" / "latest" / fn
-    if p1.exists() and p1.stat().st_size > 20_000:
+    if _big_enough(p1):
+        print(f"[PICK] return LATEST {p1}", file=sys.stderr)
         return p1
 
     # 2) Største i actual10/** (typisk full doc)
@@ -528,11 +544,10 @@ def _pick_best_persisted_result_path(sid: str) -> Path | None:
         if cands:
             cands.sort(key=lambda p: p.stat().st_size, reverse=True)
             for p in cands:
-                if p.exists() and p.stat().st_size > 20_000:
+                if _big_enough(p):
+                    print(f"[PICK] return ACTUAL10 {p}", file=sys.stderr)
                     return p
 
-    # 3) (valgfri) fallback til logs/results – men denne er ofte stub (1–2KB),
-    # så vi bruker den IKKE her. Returnér None hvis ikke actual10 finnes.
     return None
 
 def _pick_best_session_path(sid: str) -> Path | None:
@@ -611,6 +626,13 @@ def _is_full_result_doc(doc: dict) -> bool:
     except Exception:
         pass
     return False
+
+def _read_json_utf8_sig(path: Path) -> dict | None:
+    """Read JSON with UTF-8 BOM handling."""
+    try:
+        return json.loads(path.read_text(encoding='utf-8-sig'))
+    except Exception:
+        return None
 
 # ==================== WEATHER LOCK HELPER FUNCTIONS ====================
 
@@ -1571,6 +1593,13 @@ async def analyze_session(
         return x
     # ===========================================================================================
 
+    # ==================== PATCH 1A: ensure want_debug is always defined ====================
+    try:
+        want_debug
+    except NameError:
+        want_debug = False
+    # =====================================================================================
+
     # ==================== PATCH S3: INITIALIZATION FOR SINGLE WEATHER SOURCE ====================
     # Fjerner weather-lock mekanismen for å sikre én kilde
     # Server vil nå være den eneste kilden for værdata
@@ -1657,21 +1686,28 @@ async def analyze_session(
                                     "unit_wind": "m/s",
                                     "cache_key": f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}",
                                 }
-                                # ==================== PATCH S2B: Bruk _weather_fp_from_key ====================
-                                fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
+                                # ==================== PATCH 1B: Robust weather FP with fallback ====================
+                                try:
+                                    fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
+                                except Exception:
+                                    fp = None
                                 # Oppdater doc med det nye været
                                 metrics = doc.get("metrics") or {}
                                 metrics["weather_used"] = wx_used
                                 metrics["weather_meta"] = wx_meta
-                                metrics["weather_fp"] = fp
+                                if isinstance(fp, str) and fp:
+                                    metrics["weather_fp"] = fp
                                 metrics["weather_applied"] = True
                                 doc["metrics"] = metrics
                                 doc["weather_source"] = wx_meta.get("provider")
                                 doc["weather_applied"] = True
                                 
-                                # ==================== PATCH S3D: Injiser nøkkelparametre i weather_used.meta ====================
-                                _inject_weather_key_meta_into_resp(doc, int(ts_hour), float(center_lat), float(center_lon), fp)
-                                # ==================== END PATCH S3D ====================
+                                # ==================== PATCH 1B: Robust weather key injection ====================
+                                try:
+                                    _inject_weather_key_meta_into_resp(doc, int(ts_hour), float(center_lat), float(center_lon), fp)
+                                except Exception:
+                                    pass
+                                # ==================== END PATCH 1B ====================
                                 
                                 # Oppdater også debug hvis det finnes
                                 dbg = doc.get("debug") or {}
@@ -1682,13 +1718,33 @@ async def analyze_session(
                                         dbg["wx_key"] = {"ts_hour": ts_hour, "lat": center_lat, "lon": center_lon}
                                     doc["debug"] = dbg
                                 
-                                print(f"[SVR][PATCH S3] Recalculated weather for persisted doc: ts_hour={ts_hour}, lat={center_lat}, lon={center_lon}, fp={fp[:8]}", file=sys.stderr)
+                                fp8 = fp[:8] if isinstance(fp, str) else "no-fp"
+                                print(f"[SVR][PATCH S3] Recalculated weather for persisted doc: ts_hour={ts_hour}, lat={center_lat}, lon={center_lon}, fp={fp8}", file=sys.stderr)
                             else:
                                 print(f"[SVR][PATCH S3] Failed to fetch weather for persisted doc", file=sys.stderr)
                         else:
                             print(f"[SVR][PATCH S3] Could not calculate canonical key for persisted doc", file=sys.stderr)
                     # ==================== END PATCH S3B ====================
+                    try:
+                        m = doc.get("metrics") or {}
+                        pu = (m.get("profile_used") or {}) if isinstance(m, dict) else {}
+                        pv = pu.get("profile_version")
+                        if not doc.get("profile_version") and isinstance(pv, str) and pv:
+                            doc["profile_version"] = pv
+                    except Exception:
+                        pass            
+                        
+                    dbg = doc.get("debug") or {}
+                    if not isinstance(dbg, dict):
+                        dbg = {}
+                    dbg.setdefault("reason", "persisted_hit")
+                    dbg["persist_path"] = str(persisted_path)
 
+                    doc["debug"] = dbg
+                    
+                    
+                    
+                    
                     return _RET(doc)
                 else:
                     print(
@@ -2841,6 +2897,17 @@ def get_session(session_id: str) -> Dict[str, Any]:
             "debug_path": debug_path,
             "debug_exists": debug_exists,
             "results_path": results_path,
-            "results_exists": results,
+            "results_exists": results_exists,
+            "debug_error": debug_error,
+        }
+    else:
+        # Ingen fil funnet
+        return {
+            "session_id": session_id,
+            "error": "session_not_found",
+            "debug_path": debug_path,
+            "debug_exists": debug_exists,
+            "results_path": results_path,
+            "results_exists": results_exists,
             "debug_error": debug_error,
         }

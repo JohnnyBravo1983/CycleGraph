@@ -1,0 +1,157 @@
+KONTEKSTBLOKK til “Atbil Analyse/Persistenspipeline”
+Hvor vi står nå (status)
+
+Vi har i denne chatten jobbet målrettet med å stabilisere og verifisere værdata + Precision Watt i analyse-pipelinen (/api/sessions/{rid}/analyze). Resultatet er at analysen nå gir fysisk konsistente tall, med full sporbarhet på værkilden.
+
+Hva som var problemet
+
+Historisk vær hadde store avvik (temp/vind/trykk), bl.a. tilfeller der server ga −5.4°C mens Open-Meteo viste +11°C for samme tidspunkt.
+
+Debug-felter var vanskelige å verifisere (noen ganger debug.wx_key var NULL).
+
+ts_hour ble i noen kjøringer tolket som 0 → 1970-dato i PowerShell.
+
+Det var uklart hvilken time/posisjon serveren faktisk brukte.
+
+Dette skapte mistillit til Precision Watt og gjorde tuning meningsløs.
+
+Viktige patches/fiks (høy-nivå)
+
+Canonical weather key:
+
+Vi bruker en canonical wx_key (ts_hour, center_lat, center_lon) basert på samples, og den brukes konsekvent i serveren.
+
+Server som eneste weather source:
+
+Serveren fetcher Open-Meteo ERA5 selv (ikke klient), og injiserer flat weather inn i “third” argument til Rust.
+
+Kritisk fix: Open-Meteo historisk kall
+
+Vi identifiserte at _fetch_open_meteo_hour_ms tidligere ga feil dag/time pga past_days/fallback som plukket feil indeks.
+
+Vi justerte slik at fetchen er deterministisk og matcher korrekt hour_iso_utc basert på ts_hour, med korrekt historisk dag.
+
+Meta/trace i respons:
+
+metrics.weather_used.meta ble utvidet slik at vi alltid kan sanity-verifisere:
+
+ts_hour, lat_used, lon_used, hour_iso_utc, windspeed_10m_ms, reduce_factor, source, fp.
+
+metrics.weather_fp settes konsistent fra canonical key.
+
+Debug trace:
+
+debug.wx_key kan nå vises i respons ved debug-kjøring (slik at vi alltid ser hvilken time/pos som ble brukt).
+
+Verifikasjon / bevis på at vær nå er korrekt
+
+Vi verifiserte på 16127771071:
+
+ts_hour=1760360400 → 2025-10-13 13:00 UTC (15:00 Oslo)
+
+Open-Meteo svar ved index 13 ga:
+
+temp 11°C, pressure 1023.4 hPa, wind10m 0.972 m/s, wind_dir 105°
+
+Serverens weather_used matchet 1:1:
+
+air_temp_c=11.0
+
+air_pressure_hpa=1023.4
+
+meta.windspeed_10m_ms=0.9722…
+
+wind_ms=0.7291… (10m→2m skalert med reduce_factor=0.75)
+
+wind_dir_deg=105
+
+Alt stemmer og er sporbar gjennom meta.hour_iso_utc, meta.ts_hour, meta.lat_used/lon_used.
+
+Stabilitetstest på flere økter (viktig for pipeline)
+
+Vi kjørte analyse på 9 lagrede økter og så at:
+
+weather_source=open-meteo/era5 og weather_applied=True på alle.
+
+weather_fp var identisk mellom analyze?debug=1 og analyze?force_recompute=1&debug=1 (normal vs recompute).
+Dette indikerer at vær-lock/caching er stabil og deterministisk, og ikke endrer seg av recompute.
+
+Testede RIDer:
+
+16530586366
+
+16473718378
+
+16454599112
+
+15908409437
+
+16077776774
+
+16127771071
+
+16192415203
+
+16262232459
+
+16279854313
+(+ vi jobbet også med 16231049823 i vekt-sanity)
+
+Vekt og sanity – veldig viktig funn for Precision Watt
+
+Vi oppdaget at analysen ofte brukte profile_used.weight_kg=86.0 (ikke ønsket).
+
+For sanity-testing satte vi totalvekt eksplisitt til 111 kg inkludert sykkel via profile_override (rider/bike split).
+
+Dette ga konsistente tall og gjorde at vi kunne sanity-validere fysikken.
+
+“Kald sanity”-verifikasjon som bekrefter at modellen gir riktig størrelse
+
+For rid 16077776774 (rute 42 km, 400 hm, snitt 29.5 km/t, ca 1t25m, snittpuls 162, maks >170, moving≈elapsed):
+
+total_weight_kg_used=111.0
+
+precision_watt_avg=263.56 W
+
+model_watt_wheel=180.37 W
+
+Differansen ~83 W matcher teoretisk klatringskomponent:
+
+mgh over ~85 min ≈ ~85 W.
+Konklusjon: Tallene er fysisk konsistente og ser “riktige” ut.
+
+Hva dette betyr for pipeline-chatten
+
+Vær og Precision Watt er nå “grønt” og kan anses som stabilt fundament.
+
+Vi kan nå flytte fokus til pipeline: persistens, list-visning, frontend-kontrakt og etter hvert OAuth.
+
+Hva vi ønsker videre (plan for neste del-sprint)
+
+Målet er nå å:
+
+Bli bedre kjent med hele analyse/persistens-pipelinen (hvor data kommer fra, hva caches, hva skrives til disk).
+
+Legge til rette for Strava OAuth / “real ingestion”.
+
+Når pipeline er robust: få korrekt resultat inn i frontend:
+
+/rides liste viser riktige tall (precision_watt_avg, weather temp/wind, start_time, distance, profile_version)
+
+SessionView viser samme tall som backend (ikke mismatch mellom liste vs detalj).
+
+Sikre “single source of truth” for resultat (persisted docs) slik at UI alltid viser samme som analysemotoren.
+
+Pipeline-chatten bør nå generere en Sprint-plan basert på sin kontekst (persistens-arbeidet som allerede finnes der) + denne statusen fra weather/precision-fixen.
+
+Nyttige PowerShell-kommandoer vi brukte (for pipeline testing)
+
+Verifisere weather_used og meta:
+
+metrics.weather_used og metrics.weather_used.meta med Format-List *
+
+Sammenligne normal vs recompute:
+
+weather_fp, air_temp_c, precision_watt side-by-side
+
+Kjøring av batch analyser over flere RID-er med profile_override for totalvekt 111 kg og CSV-export for sanity.
