@@ -1,0 +1,13 @@
+Ny annalyse Sannity og Mot Strava
+
+Activity ID|CycleGraph Watt|Strava Watt|Comments
+16530586366|228,18 (35,5%) |168        |Vind 3,1 M Pr Sekund 1,4C Tur Retur Tønsberg Snitt 29,3
+16473718378|200    (24,2%) |161        |Vind 2,5 M Pr Sekund 3,2C Tur Retur Tønsberg Snitt 29,0  
+1645599112 |226,16 (24,2%) |182        |Vind 1,52M Pr Sekuund Temp 2,7C  
+15908409437|251,79 (29,1%) |195        |Vind 2,7M pr Sekund Temp 11,5C Tut Retur Tønsberg 31,5 Snitt
+16077776774|263,55 (30,4%) |202        |Vind 2,52 Temp 14,5  Hard Revetalrunde Snitt 29,5 Merk Mer Vind
+16127771071|246,69 (20,4%) |205        |Vind Svak 0,72       Hard Revetalrunde snitt 28,6
+16192415203|253,44 (25,5%) |202        |Vind 1,33 M Pr Sekund Temp 5,4C Hard Revetalrunde Snitt 29,4
+16262232459|238,7  (26,3%) |189        |Vind 3,18 M Pr sekund Temp 7,8C Tur Med Martin Snitt 26,4 Elevation Gain 489
+16279854313|229,73 (27,0%) |181        |Vind 2,20 M Pr Sekund Temp 3,8 Tur Retur Tønsberg Snitt 30,6
+16231049823|255,27 (+27,5%)|200        |Vind 0,27 M pr Sekund Temp 9,0C Hard Revetalrunde 29,5
