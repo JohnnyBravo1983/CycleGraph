@@ -23,10 +23,12 @@ load_dotenv(dotenv_path=str(REPO_ROOT / ".env"), override=True)
 class S:
     """
     Test-hook wrapper.
+
     Testene dine monkeypatcher:
       - S.load_tokens(path)
       - S.refresh_if_needed(tokens, cid, csec, leeway_secs=...)
     """
+
     @staticmethod
     def load_tokens(path: Optional[Path] = None):
         # cli.tokens.load_tokens kan være (path) eller uten args i noen repo-varianter
@@ -47,22 +49,30 @@ class S:
     @staticmethod
     def refresh_if_needed(tokens, cid, csec, leeway_secs=3600):
         # Ekte refresh ligger i cli/strava_auth.py, men testene mocker dette uansett.
-        return strava_auth.refresh_if_needed(tokens, client_id=cid, client_secret=csec, leeway_secs=leeway_secs)
+        return strava_auth.refresh_if_needed(
+            tokens, client_id=cid, client_secret=csec, leeway_secs=leeway_secs
+        )
 
 
-def resolve_activity_from_state(state_dir: Path = STATE_DIR) -> str:
-    p = state_dir / "last_import.json"
-    if not p.exists():
-        return ""
+# PATCH 2A — state-dir-basert resolve (robust og safe)
+def resolve_activity_from_state(state_dir: Path | str = "state") -> str:
+    p = Path(state_dir) / "last_import.json"
     try:
-        state = json.loads(p.read_text(encoding="utf-8"))
-        return str(state.get("activity_id", "") or "")
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return str(data.get("activity_id", "") or "")
     except Exception:
         return ""
 
 
-def publish_to_strava(pieces, dry_run: bool = False, lang: str = "no", headers: Optional[Dict[str, str]] = None) -> tuple[str, str]:
-    activity_id = resolve_activity_from_state(STATE_DIR)
+# PATCH 2B — top-level publish_to_strava bruker state_dir (ikke CWD)
+def publish_to_strava(
+    pieces,
+    dry_run: bool = False,
+    lang: str = "no",
+    headers: Optional[Dict[str, str]] = None,
+    state_dir: Path | str = "state",
+) -> tuple[str, str]:
+    activity_id = resolve_activity_from_state(state_dir)
 
     # Dry-run: aldri krev activity_id, aldri krev headers
     if dry_run:
@@ -253,7 +263,9 @@ class StravaClient:
 
         stream_keys = ["time", "distance", "heartrate", "cadence", "watts", "latlng"]
         stream_url = f"{self.base_url}/activities/{activity_id}/streams"
-        streams = self._request("GET", f"{stream_url}?keys={','.join(stream_keys)}&key_by_type=true")
+        streams = self._request(
+            "GET", f"{stream_url}?keys={','.join(stream_keys)}&key_by_type=true"
+        )
 
         trainer = meta.get("trainer", False)
         sport_type = meta.get("sport_type", "")
@@ -271,11 +283,20 @@ class StravaClient:
             "streams": streams,
         }
 
-    def publish_to_strava(self, pieces: Any, dry_run: bool = False, activity_id: Any = "latest") -> tuple[str, str]:
+    # PATCH 2C — StravaClient.publish_to_strava sender self.state_dir inn (SSOT)
+    def publish_to_strava(
+        self, pieces: Any, dry_run: bool = False, activity_id: Any = "latest"
+    ) -> tuple[str, str]:
         target_id = self.resolve_target_activity_id(activity_id)
+
         if dry_run:
-            # bare gjenbruk top-level preview-format
-            return publish_to_strava(pieces, dry_run=True, lang=self.lang, headers=None)
+            return publish_to_strava(
+                pieces,
+                dry_run=True,
+                lang=self.lang,
+                headers=None,
+                state_dir=self.state_dir,
+            )
 
         if not target_id:
             return "", "missing_activity_id"

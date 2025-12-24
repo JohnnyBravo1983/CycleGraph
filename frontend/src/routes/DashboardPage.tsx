@@ -1,5 +1,5 @@
 // frontend/src/routes/DashboardPage.tsx
-
+import { StravaImportCard } from "../components/StravaImportCard";
 import { Link } from "react-router-dom";
 
 export default function DashboardPage() {
@@ -7,12 +7,15 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-8">
       {/* Overskrift */}
       <section>
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">
-          Dashboard
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight mb-2">Dashboard</h1>
         <p className="text-slate-600 max-w-xl">
           Oversikt over treningen din, kalibrering og nøyaktighet i analysene.
         </p>
+      </section>
+
+      {/* Sprint 2: Strava wiring (status → import → list/all) */}
+      <section className="max-w-xl">
+        <StravaImportCard />
       </section>
 
       {/* To rundinger – samme ide som på CalibrationPage (dummy-verdier nå) */}

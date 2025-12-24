@@ -34,6 +34,13 @@ from server.routes.sessions_list_router import router as sessions_list_router
 from server.routes.auth_strava import router as strava_auth_router  # <-- PATCH B
 from server.routes.strava_import_router import router as strava_import_router  # <-- PATCH P1 (Sprint 2 ingest)
 
+# Routers
+app.include_router(sessions.router)
+app.include_router(profile_router)
+app.include_router(sessions_list_router)
+app.include_router(strava_auth_router)         # OAuth (DONE)
+app.include_router(strava_import_router)       # Ingest: OAuth -> import -> sessiondoc -> analyze
+
 # -----------------------------------------------------------------------------
 # Konfig
 # -----------------------------------------------------------------------------
@@ -47,8 +54,7 @@ app = FastAPI(title="CycleGraph API", version="0.1.0")
 app.include_router(sessions.router)
 app.include_router(profile_router)
 app.include_router(sessions_list_router)
-app.include_router(strava_auth_router)         # OAuth (routeren har prefix internt)
-app.include_router(strava_import_router)       # Sprint 2 ingest
+app.include_router(strava_auth_router, prefix="/api/auth/strava", tags=["auth"])  # <-- PATCH B
 
 app.add_middleware(
     CORSMiddleware,

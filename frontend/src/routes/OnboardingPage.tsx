@@ -1,11 +1,33 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useProfileStore } from "../state/profileStore";
 import ProfileForm from "../components/ProfileForm";
 import { cgApi, type StatusResp } from "../lib/cgApi";
 
+function getErrMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+type TokenState = "unknown" | "missing" | "expired" | "valid";
+
+function getTokenState(st: StatusResp | null): TokenState {
+  if (!st) return "unknown";
+  if (st.has_tokens !== true) return "missing";
+  const exp = typeof st.expires_in_sec === "number" ? st.expires_in_sec : null;
+  if (exp !== null && exp <= 0) return "expired";
+  return "valid";
+}
+
 export default function OnboardingPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+
   const { draft, loading, error, init, setDraft, applyDefaults, commit } =
     useProfileStore();
 
@@ -18,31 +40,40 @@ export default function OnboardingPage() {
     init();
   }, [init]);
 
+  // Auto-check status:
+  // - on mount
+  // - when URL changes (OAuth redirect back often changes ?code/&state, etc.)
+  useEffect(() => {
+    (async () => {
+      setStBusy(true);
+      setStErr(null);
+      try {
+        const s = await cgApi.status(); // sets cg_uid cookie (backend-origin)
+        setSt(s);
+      } catch (e: unknown) {
+        setSt(null);
+        setStErr(getErrMsg(e));
+      } finally {
+        setStBusy(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search]);
+
   const onFinish = async () => {
     const ok = await commit();
     if (ok) navigate("/dashboard");
   };
 
-  async function checkStravaStatus() {
-    setStBusy(true);
-    setStErr(null);
-    try {
-      // IMPORTANT: /status sets cg_uid cookie (backend-origin),
-      // and cgApi must use credentials:"include"
-      const s = await cgApi.status();
-      setSt(s);
-    } catch (e: any) {
-      setStErr(e?.message || String(e));
-    } finally {
-      setStBusy(false);
-    }
-  }
-
   function connectStrava() {
-    // Open in same tab so OAuth callback flow is clean
-    window.open(`${cgApi.baseUrl()}/login`, "_self");
+    // One-button flow: start OAuth and come back here
+    const next = encodeURIComponent(window.location.href);
+    window.open(`${cgApi.baseUrl()}/login?next=${next}`, "_self");
   }
 
+  const tokenState = getTokenState(st);
+  const tokenValid = tokenState === "valid";
+  const tokenExpired = tokenState === "expired";
   const hasTokens = st?.has_tokens === true;
 
   return (
@@ -52,8 +83,8 @@ export default function OnboardingPage() {
       </h1>
 
       <p className="text-slate-600">
-        Før vi starter trenger vi et grovt utgangspunkt for profilen din.
-        Dette kan justeres senere.
+        Før vi starter trenger vi et grovt utgangspunkt for profilen din. Dette
+        kan justeres senere.
       </p>
 
       {error ? <div className="text-red-600 text-sm">{error}</div> : null}
@@ -66,33 +97,39 @@ export default function OnboardingPage() {
           <div>
             <h2 className="font-semibold">Koble til Strava</h2>
             <p className="text-sm text-slate-600 mt-1">
-              For å hente turer og bygge din første analyse trenger vi tilgang til Strava.
+              For å hente turer og bygge din første analyse trenger vi tilgang
+              til Strava.
             </p>
             <p className="text-xs text-slate-500 mt-1">
               Backend: <span className="font-mono">{cgApi.baseUrl()}</span>
             </p>
           </div>
 
-          <div className="flex gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={checkStravaStatus}
-              disabled={stBusy}
-              className="px-3 py-2 rounded border text-sm disabled:opacity-60"
-              title="Kaller /status og setter cg_uid cookie"
-            >
-              {stBusy ? "Sjekker…" : "Check status"}
-            </button>
-
-            <button
-              type="button"
-              onClick={connectStrava}
-              disabled={stBusy}
-              className="px-3 py-2 rounded bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
-              title="Åpner backend /login"
-            >
-              Connect Strava
-            </button>
+          {/* Single action button (no "Check status") */}
+          <div className="shrink-0">
+            {tokenValid ? (
+              <div className="px-3 py-2 rounded border text-sm text-slate-700 bg-slate-50">
+                Strava er tilkoblet ✅
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={connectStrava}
+                disabled={stBusy}
+                className="px-3 py-2 rounded bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
+                title={
+                  tokenExpired
+                    ? "Token er utløpt – koble til på nytt"
+                    : "Koble til Strava"
+                }
+              >
+                {stBusy
+                  ? "Sjekker…"
+                  : tokenExpired
+                  ? "Reconnect Strava"
+                  : "Connect Strava"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -118,10 +155,18 @@ export default function OnboardingPage() {
             </div>
           </div>
 
+          {tokenExpired ? (
+            <div className="mt-2 text-xs text-amber-700">
+              Strava-token er utløpt. Trykk <b>Reconnect Strava</b> eller importer
+              en tur senere i Dashboard for å trigge refresh.
+            </div>
+          ) : null}
+
           {!hasTokens && st ? (
             <div className="mt-2 text-xs text-slate-600">
-              Mangler token. Trykk <span className="font-semibold">Connect Strava</span>, fullfør innlogging,
-              kom tilbake hit og trykk <span className="font-semibold">Check status</span>.
+              Du har ikke koblet til Strava ennå. Trykk{" "}
+              <span className="font-semibold">Connect Strava</span> og fullfør
+              innlogging – så oppdateres status automatisk når du kommer tilbake.
             </div>
           ) : null}
 

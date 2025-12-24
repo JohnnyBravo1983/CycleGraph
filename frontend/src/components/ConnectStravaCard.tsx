@@ -1,62 +1,89 @@
-import React from "react";
-import { cgApi, StatusResp } from "../lib/cgApi";
+// src/lib/cgApi.ts
 
-export function ConnectStravaCard() {
-  const [status, setStatus] = React.useState<StatusResp | null>(null);
-  const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
+export type StatusResp = {
+  ok: boolean;
+  uid?: string;
+  has_tokens?: boolean;
+  expires_at?: number;
+  expires_in_sec?: number;
+  token_path?: string;
+  [k: string]: unknown;
+};
 
-  async function checkStatus() {
-    setBusy(true);
-    setErr(null);
-    try {
-      const s = await cgApi.status(); // IMPORTANT: sets cg_uid cookie
-      setStatus(s);
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+export type ImportResp = {
+  ok?: boolean;
+  samples_len?: number;
+  analyze?: { status_code?: number; [k: string]: unknown };
+  [k: string]: unknown;
+};
 
-  function connect() {
-    // open in same tab so callback lands cleanly
-    window.open(`${cgApi.baseUrl()}/login`, "_self");
-  }
+export type SessionListItem = {
+  session_id?: string;
+  ride_id?: string | number;
+  debug_source_path?: string;
+  [k: string]: unknown;
+};
 
-  const hasTokens = status?.has_tokens === true;
-
-  return (
-    <div style={{ border: "1px solid #333", borderRadius: 10, padding: 12, marginTop: 16 }}>
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>Koble til Strava</div>
-
-      <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 10 }}>
-        Vi bruker Strava for å hente turer og bygge din første analyse. <br />
-        Backend: <span style={{ fontFamily: "monospace" }}>{cgApi.baseUrl()}</span>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={checkStatus} disabled={busy}>
-          {busy ? "Sjekker…" : "Check status"}
-        </button>
-
-        <button onClick={connect} disabled={busy}>
-          Connect Strava
-        </button>
-      </div>
-
-      <div style={{ marginTop: 10, fontSize: 12 }}>
-        status.has_tokens: <b>{String(status?.has_tokens ?? "unknown")}</b>{" "}
-        | expires_in_sec: <b>{String(status?.expires_in_sec ?? "n/a")}</b>
-      </div>
-
-      {!hasTokens && status && (
-        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.9 }}>
-          Tips: Trykk <b>Connect Strava</b>, fullfør login, gå tilbake hit og trykk <b>Check status</b>.
-        </div>
-      )}
-
-      {err && <div style={{ marginTop: 10, color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{err}</div>}
-    </div>
-  );
+function baseUrl(): string {
+  const raw = import.meta.env.VITE_BACKEND_BASE ?? "http://localhost:5175";
+  return String(raw).replace(/\/$/, "");
 }
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function extractErrorMessage(json: unknown): unknown {
+  if (!isRecord(json)) return null;
+  return json.detail ?? json.reason ?? json.error ?? json.message ?? null;
+}
+
+async function cgFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${baseUrl()}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  const res = await fetch(url, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
+
+  const text = await res.text();
+
+  let json: unknown = null;
+  try {
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    json = null; // Non-JSON response
+  }
+
+  if (!res.ok) {
+    const msgFromJson = extractErrorMessage(json);
+
+    const msg =
+      (typeof msgFromJson === "string" && msgFromJson) ||
+      (msgFromJson ? JSON.stringify(msgFromJson) : null) ||
+      (text ? text : null) ||
+      `HTTP ${res.status} ${res.statusText}`;
+
+    throw new Error(msg);
+  }
+
+  return json as T;
+}
+
+export const cgApi = {
+  baseUrl,
+  status: () => cgFetch<StatusResp>("/status", { method: "GET" }),
+
+  importRide: (rid: string) =>
+    cgFetch<ImportResp>(`/api/strava/import/${encodeURIComponent(rid)}`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  listAll: () =>
+    cgFetch<SessionListItem[]>("/api/sessions/list/all", { method: "GET" }),
+};

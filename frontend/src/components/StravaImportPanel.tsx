@@ -1,5 +1,20 @@
 import React from "react";
-import { cgApi, ImportResp, SessionListItem, StatusResp } from "../lib/cgApi";
+import {
+  cgApi,
+  type ImportResp,
+  type SessionListItem,
+  type StatusResp,
+} from "../lib/cgApi";
+
+function getErrMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
 
 export function StravaImportPanel() {
   const [rid, setRid] = React.useState("16127771071");
@@ -39,53 +54,109 @@ export function StravaImportPanel() {
       setImportRes(r);
 
       await refreshList();
-    } catch (e: any) {
-      setErr(e?.message || String(e));
+    } catch (e: unknown) {
+      setErr(getErrMsg(e));
     } finally {
       setBusy(false);
     }
   }
 
-  const match = sessions?.find((x) => String(x.session_id ?? x.ride_id ?? "") === rid.trim()) ?? null;
+  const match =
+    sessions?.find(
+      (x) => String(x.session_id ?? x.ride_id ?? "") === rid.trim()
+    ) ?? null;
 
   return (
-    <div style={{ border: "1px solid #333", borderRadius: 8, padding: 12, marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <div
+      style={{
+        border: "1px solid #333",
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
-          <div style={{ fontWeight: 700 }}>Sprint 2 – Strava Import (Dev Panel)</div>
-          <div style={{ opacity: 0.8, fontSize: 12 }}>Backend: {cgApi.baseUrl()} (credentials: include)</div>
+          <div style={{ fontWeight: 700 }}>
+            Sprint 2 – Strava Import (Dev Panel)
+          </div>
+          <div style={{ opacity: 0.8, fontSize: 12 }}>
+            Backend: {cgApi.baseUrl()} (credentials: include)
+          </div>
         </div>
 
-        <button onClick={() => window.open(`${cgApi.baseUrl()}/login`, "_self")} disabled={busy}>
+        {/* PATCH: send med ?next= slik at backend redirecter tilbake hit */}
+        <button
+          onClick={() => {
+            const next = encodeURIComponent(window.location.href);
+            window.open(`${cgApi.baseUrl()}/login?next=${next}`, "_self");
+          }}
+          disabled={busy}
+        >
           Connect Strava
         </button>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-        <input value={rid} onChange={(e) => setRid(e.target.value)} style={{ padding: 8, minWidth: 220 }} />
-        <button onClick={() => refreshStatus().catch((e) => setErr(e.message))} disabled={busy}>
+        <input
+          value={rid}
+          onChange={(e) => setRid(e.target.value)}
+          style={{ padding: 8, minWidth: 220 }}
+        />
+        <button
+          onClick={() =>
+            refreshStatus().catch((e: unknown) => setErr(getErrMsg(e)))
+          }
+          disabled={busy}
+        >
           Check status
         </button>
         <button onClick={doImport} disabled={busy || !rid.trim()}>
           {busy ? "Importing…" : "Import from Strava"}
         </button>
-        <button onClick={() => refreshList().catch((e) => setErr(e.message))} disabled={busy}>
+        <button
+          onClick={() =>
+            refreshList().catch((e: unknown) => setErr(getErrMsg(e)))
+          }
+          disabled={busy}
+        >
           Refresh list/all
         </button>
       </div>
 
-      {err && <div style={{ marginTop: 10, color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{err}</div>}
+      {err && (
+        <div
+          style={{
+            marginTop: 10,
+            color: "#ff6b6b",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {err}
+        </div>
+      )}
 
       <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
         <div style={{ fontSize: 12, opacity: 0.9 }}>
-          status.has_tokens: <b>{String(status?.has_tokens ?? "unknown")}</b> | expires_in_sec:{" "}
-          <b>{String(status?.expires_in_sec ?? "n/a")}</b> | uid: <b>{String(status?.uid ?? "n/a")}</b>
+          status.has_tokens: <b>{String(status?.has_tokens ?? "unknown")}</b> |
+          expires_in_sec:{" "}
+          <b>{String(status?.expires_in_sec ?? "n/a")}</b> | uid:{" "}
+          <b>{String(status?.uid ?? "n/a")}</b>
         </div>
 
         {importRes && (
           <div style={{ fontSize: 12 }}>
-            import.ok: <b>{String(importRes.ok ?? "n/a")}</b> | samples_len: <b>{String(importRes.samples_len ?? "n/a")}</b>{" "}
-            | analyze.status_code: <b>{String(importRes.analyze?.status_code ?? "n/a")}</b>
+            import.ok: <b>{String(importRes.ok ?? "n/a")}</b> | samples_len:{" "}
+            <b>{String(importRes.samples_len ?? "n/a")}</b> |
+            analyze.status_code:{" "}
+            <b>{String(importRes.analyze?.status_code ?? "n/a")}</b>
           </div>
         )}
 
@@ -95,7 +166,9 @@ export function StravaImportPanel() {
             {match ? (
               <>
                 | ✅ rid funnet | debug_source_path:{" "}
-                <span style={{ fontFamily: "monospace" }}>{String(match.debug_source_path ?? "n/a")}</span>
+                <span style={{ fontFamily: "monospace" }}>
+                  {String(match.debug_source_path ?? "n/a")}
+                </span>
               </>
             ) : (
               <>| ⚠️ rid ikke funnet i listen enda</>

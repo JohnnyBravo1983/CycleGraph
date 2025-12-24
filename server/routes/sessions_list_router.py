@@ -151,8 +151,6 @@ def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Op
     return pw_avg
 
 
-
-
 def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
     """
     Bygger rad. Bruker fallback_sid hvis doc mangler id.
@@ -326,16 +324,116 @@ async def list_all() -> List[Dict[str, Any]]:
     print(f"[list_all] rows={len(rows)}", file=sys.stderr)
     return rows
 
-
 @router.get("/list/_debug_paths")
 async def _debug_paths() -> Dict[str, Any]:
     root = _repo_root_from_here()
-    files = _gather_result_files(root)
+    files = _gather_result_files(root)  # eksisterende (typisk _debug/result_*.json)
+
+    logs = root / "logs"
+    p_results = logs / "results"
+    p_actual10 = logs / "actual10"
+    p_latest_dir = p_actual10 / "latest"
+
+    def _glob_sorted(base: Path, pattern: str, limit: int = 8) -> list[str]:
+        try:
+            if not base.exists():
+                return []
+            xs = sorted(base.glob(pattern), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            return [str(p).replace("\\", "/") for p in xs[:limit]]
+        except Exception:
+            return []
+
+    def _rglob_sorted(base: Path, pattern: str, limit: int = 8) -> list[str]:
+        try:
+            if not base.exists():
+                return []
+            xs = sorted(base.rglob(pattern), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            return [str(p).replace("\\", "/") for p in xs[:limit]]
+        except Exception:
+            return []
+
+    # helper: finn nyeste fil som matcher pattern
+    def _pick_newest(paths):
+        try:
+            paths = list(paths or [])
+            if not paths:
+                return None
+            paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return paths[0]
+        except Exception:
+            return None
+
+    # samples
+    results_samples = _glob_sorted(p_results, "result_*.json", limit=8)
+    latest_result_samples = _glob_sorted(p_latest_dir, "result_*.json", limit=8)
+    actual10_session_samples = _rglob_sorted(p_actual10, "session_*.json", limit=8)
+
+    # counts (best effort)
+    def _count_glob(base: Path, pattern: str, recursive: bool = False) -> int:
+        try:
+            if not base.exists():
+                return 0
+            return sum(1 for _ in (base.rglob(pattern) if recursive else base.glob(pattern)))
+        except Exception:
+            return 0
+
+    # SSOT-ish examples: plukk 3 rids fra logs/results og vis om tilsvarende finnes i latest + actual10 session
+    examples = []
+    try:
+        if p_results.exists():
+            xs = sorted(p_results.glob("result_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]
+            for p in xs:
+                # result_123.json -> 123
+                name = p.name
+                rid = name.replace("result_", "").replace(".json", "")
+
+                # 1) logs/results/result_<rid>.json (som før)
+                p_logs = (root / "logs" / "results" / f"result_{rid}.json")
+                logs_results = str(p_logs).replace("\\", "/") if p_logs.exists() else None
+
+                # 2) actual10/latest: støtt både uten suffix og med suffix
+                cand_plain = p_latest_dir / f"result_{rid}.json"
+                cand_glob = list(p_latest_dir.glob(f"result_{rid}*.json")) if p_latest_dir.exists() else []
+                p_latest = cand_plain if cand_plain.exists() else _pick_newest(cand_glob)
+
+                actual10_latest_result = str(p_latest).replace("\\", "/") if p_latest else None
+
+                ex = {
+                    "rid": rid,
+                    "logs_results": logs_results,
+                    "actual10_latest_result": actual10_latest_result,
+                    "actual10_any_session_count": 0,
+                }
+
+                # teller antall session_<rid>.json i actual10/**
+                try:
+                    ex["actual10_any_session_count"] = (
+                        sum(1 for _ in p_actual10.rglob(f"session_{rid}.json")) if p_actual10.exists() else 0
+                    )
+                except Exception:
+                    ex["actual10_any_session_count"] = 0
+
+                examples.append(ex)
+    except Exception:
+        examples = []
 
     return {
+        # eksisterende
         "router_file": str(Path(__file__).resolve()),
         "cwd": str(Path.cwd().resolve()),
         "root_from_here": str(root.resolve()),
         "files_from_here": len(files),
         "sample_files_from_here": [str(p).replace("\\", "/") for p in files[:8]],
+
+        # nye felt
+        "logs_results_count": _count_glob(p_results, "result_*.json", recursive=False),
+        "logs_results_samples": results_samples,
+
+        "actual10_latest_result_count": _count_glob(p_latest_dir, "result_*.json", recursive=False),
+        "actual10_latest_result_samples": latest_result_samples,
+
+        "actual10_session_count": _count_glob(p_actual10, "session_*.json", recursive=True),
+        "actual10_session_samples": actual10_session_samples,
+
+        "ssot_examples": examples,
     }

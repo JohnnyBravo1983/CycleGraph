@@ -1394,13 +1394,10 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
     FINAL UI OVERRIDE (canonicalization safety-net + fingerprint)
 
     Canonical truth for UI:
-      - precision_watt := wheel truth (model_watt_wheel)
-      - total_watt     := wheel truth (same as precision_watt for UI list/view)
-      - precision_watt_crank := wheel / eff_used
-      - model_watt_crank     := same as precision_watt_crank (optional consistency)
-
-    IMPORTANT: core_watts_avg must remain as set by Rust (device_watts only) and not be overridden by model values.
-    We do not touch core_watts_avg here - it should only come from device_watts measurements.
+      - Frontend truth = top-level precision_watt_avg (SSOT/list/all).
+      - We MUST keep metrics.precision_watt aligned with that value.
+      - Keep wheel truth in model_watt_wheel for physics/debug.
+      - Do NOT touch core_watts_avg (device-only).
 
     Fingerprint goes into resp["debug"] so we can verify it ran on EVERY return path.
     """
@@ -1478,31 +1475,55 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         wheel_f = float(mw_wheel)
 
         # ─────────────────────────────────────────────────────────────────────
-        # 3) PATCH F: FORCE canonical mapping every time
-        #    precision_watt MUST be wheel (never crank)
+        # Canonical UI mapping
+        #
+        # Frontend truth = top-level precision_watt_avg (SSOT/list/all).
+        # We MUST keep metrics.precision_watt aligned with that value.
+        #
+        # Keep wheel truth in model_watt_wheel for physics/debug, but UI "precision_watt"
+        # is what users see (rider-facing). Do NOT touch core_watts_avg (device-only).
         # ─────────────────────────────────────────────────────────────────────
-        m["precision_watt"] = wheel_f
-        m["total_watt"] = wheel_f
 
-        crank_f = wheel_f / float(m["eff_used"])
-        m["precision_watt_crank"] = crank_f
-        m["model_watt_crank"] = crank_f  # optional consistency; never used as canonical source
+        # 1) Decide the UI-facing average (prefer existing top-level if present)
+        ui_avg = resp.get("precision_watt_avg")
+        if not isinstance(ui_avg, (int, float)):
+            # Fallbacks if top-level is missing:
+            # prefer explicit pedal totals if they exist, else reconstruct from wheel/eff
+            ui_avg = (
+                m.get("precision_watt_pedal")
+                if isinstance(m.get("precision_watt_pedal"), (int, float))
+                else m.get("total_watt_pedal")
+                if isinstance(m.get("total_watt_pedal"), (int, float))
+                else (wheel_f / eff) if (wheel_f is not None and eff) else wheel_f
+            )
+
+        if ui_avg is None:
+            ui_avg = 0.0
+
+        ui_avg = float(ui_avg)
+
+        # 2) Enforce top-level for list/view
+        resp["precision_watt_avg"] = ui_avg
+
+        # 3) Enforce nested UI fields to match top-level avg
+        m["precision_watt"] = ui_avg
+        m["total_watt"] = ui_avg
+
+        # 4) Keep wheel truth available (do not overwrite if already correct)
+        if wheel_f is not None:
+            m["model_watt_wheel"] = float(wheel_f)
+
+        # 5) Crank fields: keep them if present, else align to ui_avg
+        if not isinstance(m.get("precision_watt_crank"), (int, float)):
+            m["precision_watt_crank"] = ui_avg
+        if not isinstance(m.get("model_watt_crank"), (int, float)):
+            m["model_watt_crank"] = ui_avg
 
         # CRITICAL: core_watts_avg must remain as set by Rust (device_watts only) - do NOT override with model values
         # We do not touch core_watts_avg here - it should only come from device_watts measurements
 
-        # Top-level list safety-net
-        # Prefer "pedal" (brukerfelt) hvis tilgjengelig, ellers wheel.
-        try:
-           pedal_f = float(m.get("precision_watt_pedal")) if isinstance(m.get("precision_watt_pedal"), (int, float)) else None
-        except Exception:
-           pedal_f = None
-
-        resp["precision_watt_avg"] = pedal_f if pedal_f is not None else wheel_f
-
-
         # ─────────────────────────────────────────────────────────────────────
-        # 4) PATCH H: Fingerprint into debug
+        # Fingerprint into debug
         # ─────────────────────────────────────────────────────────────────────
         dbg = resp.setdefault("debug", {})
         if isinstance(dbg, dict):
@@ -1527,6 +1548,7 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
         return resp
+
 
 
 # ==================== PATCH C/E: ENHANCED WEATHER LOCK ====================
@@ -2811,8 +2833,7 @@ async def analyze_session(
 
     return _RET(resp)
 
-
-# ==================== PATCH: ANALYZE SESSIONS.PY PROBE ====================
+# ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
 @router.post("/{sid}/analyze_sessionspy")
 async def analyze_session_sessionspy(
     sid: str,
@@ -2821,9 +2842,35 @@ async def analyze_session_sessionspy(
     force_recompute: bool = Query(False),
     debug: int = Query(0),
 ):
-    # Ren delegator: garanterer at du tester sessions.py sin pipeline isolert
-    return await analyze_session(sid, request, no_weather, force_recompute, debug)
+    """
+    DEPRECATED endpoint (legacy / probe).
+
+    Denne ruten ble tidligere brukt for debugging av:
+      - dobbel router-registrering
+      - analyse-kollisjoner mellom app.py og sessions.py
+
+    Den skal ALDRI brukes i ordinær pipeline eller produksjonsflyt.
+
+    Korrekt og eneste støttede analyse-endepunkt er:
+      POST /api/sessions/{sid}/analyze
+    (implementert i sessions.py)
+
+    For å eliminere risiko for utilsiktet bruk, returnerer denne ruten
+    alltid HTTP 410 Gone og utfører ingen analyse.
+    """
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": "deprecated_endpoint",
+            "message": (
+                "Dette endepunktet er avviklet og skal ikke brukes. "
+                "Bruk POST /api/sessions/{sid}/analyze."
+            ),
+            "recommended_endpoint": f"/api/sessions/{sid}/analyze",
+        },
+    )
 # ==================== END PATCH ====================
+
 
 
 @router.get("/{session_id}")

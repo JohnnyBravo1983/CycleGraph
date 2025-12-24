@@ -1,4 +1,5 @@
 // src/lib/cgApi.ts
+
 export type StatusResp = {
   ok: boolean;
   uid?: string;
@@ -11,7 +12,6 @@ export type StatusResp = {
 
 export type ImportResp = {
   ok?: boolean;
-  reason?: string;
   samples_len?: number;
   analyze?: { status_code?: number; [k: string]: unknown };
   [k: string]: unknown;
@@ -25,8 +25,18 @@ export type SessionListItem = {
 };
 
 function baseUrl(): string {
-  const raw = (import.meta as any).env?.VITE_BACKEND_BASE || "http://localhost:5175";
+  // Vite: import.meta.env er typet, ingen behov for any
+  const raw = import.meta.env.VITE_BACKEND_BASE ?? "http://localhost:5175";
   return String(raw).replace(/\/$/, "");
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function extractErrorMessage(json: unknown): unknown {
+  if (!isRecord(json)) return null;
+  return json.detail ?? json.reason ?? json.error ?? json.message ?? null;
 }
 
 async function cgFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -35,18 +45,32 @@ async function cgFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
   });
 
   const text = await res.text();
-  let json: any = null;
+
+  let json: unknown = null;
   try {
-    json = text ? JSON.parse(text) : null;
-  } catch {}
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // Non-JSON response
+    json = null;
+  }
 
   if (!res.ok) {
-    const msg = (json && (json.detail || json.reason || json.error)) || `HTTP ${res.status} ${res.statusText}`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const msgFromJson = extractErrorMessage(json);
+
+    const msg =
+      (typeof msgFromJson === "string" && msgFromJson) ||
+      (msgFromJson ? JSON.stringify(msgFromJson) : null) ||
+      (text ? text : null) ||
+      `HTTP ${res.status} ${res.statusText}`;
+
+    throw new Error(msg);
   }
 
   return json as T;
@@ -55,7 +79,13 @@ async function cgFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const cgApi = {
   baseUrl,
   status: () => cgFetch<StatusResp>("/status", { method: "GET" }),
+
   importRide: (rid: string) =>
-    cgFetch<ImportResp>(`/api/strava/import/${encodeURIComponent(rid)}`, { method: "POST", body: "{}" }),
-  listAll: () => cgFetch<SessionListItem[]>("/api/sessions/list/all", { method: "GET" }),
+    cgFetch<ImportResp>(`/api/strava/import/${encodeURIComponent(rid)}`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  listAll: () =>
+    cgFetch<SessionListItem[]>("/api/sessions/list/all", { method: "GET" }),
 };

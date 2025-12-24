@@ -29,7 +29,7 @@
       "crank_eff_pct": 95.5,
       "device": "strava",
       "notes": "Trinn5 default; rediger fritt.",
-      "profile_version": "v1-883d8daf-20251224"
+      "profile_version": "v1-883d8daf-20251223"
     },
     "rolling_watt": 26.06879385386169,
     "total_watt": 148.23980756541468,
@@ -5274,7 +5274,7 @@
   },
   "repr_kind": "object_v3",
   "weather_source": "open-meteo/era5",
-  "profile_version": "v1-883d8daf-20251224",
+  "profile_version": "v1-883d8daf-20251223",
   "profile_used": {
     "rider_weight_kg": 78.0,
     "bike_weight_kg": 8.0,
@@ -5285,7 +5285,7 @@
     "crank_eff_pct": 95.5,
     "device": "strava",
     "notes": "Trinn5 default; rediger fritt.",
-    "profile_version": "v1-883d8daf-20251224"
+    "profile_version": "v1-883d8daf-20251223"
   },
   "start_time": "2025-11-19T08:00:39.249703"
 }
