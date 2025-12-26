@@ -77,50 +77,46 @@ const SessionView: React.FC = () => {
 
   // ─────────────────────────────────────────────────────────────
   // Patch: localStorage profile override (kun rider_weight_kg)
-  // Legg rett etter sourceLabel (som du ba om)
   // ─────────────────────────────────────────────────────────────
-function readLocalProfileOverride(): any | null {
-  try {
-    const raw = localStorage.getItem("cg.profile.v1");
-    if (!raw) return null;
+  function readLocalProfileOverride(): any | null {
+    try {
+      const raw = localStorage.getItem("cg.profile.v1");
+      if (!raw) return null;
 
-    const p = JSON.parse(raw);
+      const p = JSON.parse(raw);
 
-    // Vi ønsker å sende rider_weight_kg til backend (ikke total weight_kg).
-    // Mange steder lagrer UI bare weight_kg → map til rider_weight_kg.
-    const rider =
-      typeof p.rider_weight_kg === "number"
-        ? p.rider_weight_kg
-        : typeof p.weight_kg === "number"
-        ? p.weight_kg
-        : undefined;
+      // Vi ønsker å sende rider_weight_kg til backend (ikke total weight_kg).
+      // Mange steder lagrer UI bare weight_kg → map til rider_weight_kg.
+      const rider =
+        typeof p.rider_weight_kg === "number"
+          ? p.rider_weight_kg
+          : typeof p.weight_kg === "number"
+          ? p.weight_kg
+          : undefined;
 
-    const bike =
-      typeof p.bike_weight_kg === "number" ? p.bike_weight_kg : undefined;
+      const bike = typeof p.bike_weight_kg === "number" ? p.bike_weight_kg : undefined;
 
-    const out: any = {};
+      const out: any = {};
 
-    if (typeof rider === "number") out.rider_weight_kg = rider;
-    if (typeof bike === "number") out.bike_weight_kg = bike;
+      if (typeof rider === "number") out.rider_weight_kg = rider;
+      if (typeof bike === "number") out.bike_weight_kg = bike;
 
-    // ta med aero/rulle hvis de finnes
-    if (typeof p.cda === "number") out.cda = p.cda;
-    if (typeof p.crr === "number") out.crr = p.crr;
+      // ta med aero/rulle hvis de finnes
+      if (typeof p.cda === "number") out.cda = p.cda;
+      if (typeof p.crr === "number") out.crr = p.crr;
 
-    // crank-eff kan du sende om du vil, men ikke nødvendig for denne feilen
-    if (typeof p.crank_efficiency === "number") out.crank_efficiency = p.crank_efficiency;
-    if (typeof p.crank_eff_pct === "number") out.crank_eff_pct = p.crank_eff_pct;
+      // crank-eff kan du sende om du vil, men ikke nødvendig for denne feilen
+      if (typeof p.crank_efficiency === "number") out.crank_efficiency = p.crank_efficiency;
+      if (typeof p.crank_eff_pct === "number") out.crank_eff_pct = p.crank_eff_pct;
 
-    return out;
-  } catch {
-    return null;
+      return out;
+    } catch {
+      return null;
+    }
   }
-}
-
 
   // ─────────────────────────────────────────────────────
   // Patch: state + handler for Re-analyze
-  // (plassert her etter store-hooken; state er OK her siden hooken er over)
   // ─────────────────────────────────────────────────────
   const [reAnalyzing, setReAnalyzing] = React.useState(false);
 
@@ -147,10 +143,7 @@ function readLocalProfileOverride(): any | null {
   if (!id) {
     return (
       <div className="p-4">
-        <ErrorBanner
-          message="Mangler økt-id i URL."
-          onRetry={() => window.history.back()}
-        />
+        <ErrorBanner message="Mangler økt-id i URL." onRetry={() => window.history.back()} />
       </div>
     );
   }
@@ -186,17 +179,15 @@ function readLocalProfileOverride(): any | null {
   }
 
   // ─────────────────────────────────────────────────────
-  // Vi har data
+  // Vi har data (Analyze-SSOT)
   // ─────────────────────────────────────────────────────
   const session: SessionReport = currentSession;
 
+  // Analyze-responsen har precision_watt_avg top-level
+  const precisionAvg = (session as any)?.precision_watt_avg ?? null;
+
+  // metrics (total_watt, drag_watt, osv.) kan ligge i session.metrics
   const metrics: any = (session as any)?.metrics ?? null;
-  console.log(
-    "[SessionView] metrics.precision_watt =",
-    metrics?.precision_watt,
-    "type=",
-    typeof metrics?.precision_watt
-  );
 
   const profileUsed: any = metrics?.profile_used ?? null;
   const weatherUsed: any = metrics?.weather_used ?? null;
@@ -218,36 +209,35 @@ function readLocalProfileOverride(): any | null {
           )}
         </div>
 
-      <div className="text-right">
-  <div className="flex items-center justify-end">
-    <Link
-      to={ROUTES.RIDES}
-      className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
-    >
-      ← Tilbake til økter
-    </Link>
+        <div className="text-right">
+          <div className="flex items-center justify-end">
+            <Link
+              to={ROUTES.RIDES}
+              className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
+            >
+              ← Tilbake til økter
+            </Link>
 
-    {/* Patch: Re-analyze-knapp (med hard logging) */}
-    <button
-      onClick={() => {
-        const override = readLocalProfileOverride();
-        console.log("[SessionView] reAnalyzeNow override =", override);
-        console.log(
-          "[SessionView] reAnalyzeNow rider_weight_kg =",
-          override?.rider_weight_kg
-        );
-        reAnalyzeNow();
-      }}
-      disabled={reAnalyzing}
-      className="ml-2 inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
-      title="Re-analyser økta med rider_weight_kg fra localStorage (cg.profile.v1)"
-    >
-      {reAnalyzing ? "Re-analyserer…" : "Re-analyser med ny vekt"}
-    </button>
-  </div>
-</div>
-</header>
-
+            {/* Patch: Re-analyze-knapp (med hard logging) */}
+            <button
+              onClick={() => {
+                const override = readLocalProfileOverride();
+                console.log("[SessionView] reAnalyzeNow override =", override);
+                console.log(
+                  "[SessionView] reAnalyzeNow rider_weight_kg =",
+                  override?.rider_weight_kg
+                );
+                reAnalyzeNow();
+              }}
+              disabled={reAnalyzing}
+              className="ml-2 inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
+              title="Re-analyser økta med rider_weight_kg fra localStorage (cg.profile.v1)"
+            >
+              {reAnalyzing ? "Re-analyserer…" : "Re-analyser med ny vekt"}
+            </button>
+          </div>
+        </div>
+      </header>
 
       {/* HOVEDINNHOLD */}
       <div className="space-y-6">
@@ -256,16 +246,10 @@ function readLocalProfileOverride(): any | null {
           <section className="border rounded-lg p-4 space-y-3">
             <h2 className="text-lg font-semibold">Analyse – Precision Watt</h2>
 
-            {/* Debug-linje (kan fjernes senere) */}
-            <div className="text-xs text-slate-400">
-              precision_watt type: {String(typeof metrics?.precision_watt)} · raw:{" "}
-              <span className="font-mono">{String(metrics?.precision_watt)}</span>
-            </div>
-
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
               <div>
-                <dt className="text-slate-500">Precision watt (snitt)</dt>
-                <dd className="font-medium">{fmtW(metrics.precision_watt)}</dd>
+                <dt className="text-slate-500">Precision watt (snitt, fra analyze)</dt>
+                <dd className="font-medium">{fmtW(precisionAvg)}</dd>
               </div>
 
               <div>

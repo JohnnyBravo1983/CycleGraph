@@ -3,6 +3,7 @@ import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionListItem } from "../types/session";
+import { formatStartTimeForUi } from "../lib/api";
 
 export const SessionsPage: React.FC = () => {
   const { sessionsList, loadingList, errorList, loadSessionsList } =
@@ -22,15 +23,8 @@ export const SessionsPage: React.FC = () => {
     loadSessionsList();
   }, [loadSessionsList]);
 
-  const formatDate = (iso?: string | null): string => {
-    if (!iso) return "ukjent";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "ukjent";
-    return d.toLocaleString("nb-NO", {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  };
+  const formatDate = (iso?: string | null): string => formatStartTimeForUi(iso ?? null);
+
 
   const formatPrecision = (value?: number | null): string => {
     if (value == null || Number.isNaN(value)) return "—";

@@ -32,12 +32,25 @@ def _users_dir() -> Path:
     return _repo_root() / "state" / "users"
 
 
-def _get_or_set_uid(req: Request) -> str:
+def _get_or_set_uid(req: Request, resp: Optional[Response] = None) -> str:
     uid = req.cookies.get("cg_uid")
-    if uid and isinstance(uid, str) and len(uid) >= 12:
+    if uid and isinstance(uid, str) and len(uid) >= 10:
         return uid
-    # generate new anon uid
-    return "u_" + secrets.token_urlsafe(16)
+
+    # generate new anon uid (strip urlsafe chars that can be annoying in paths/logs)
+    uid = "u_" + secrets.token_urlsafe(16).replace("-", "").replace("_", "")
+
+    # If a response object is provided, prime the cookie immediately.
+    if resp is not None:
+        resp.set_cookie(
+            key="cg_uid",
+            value=uid,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
+    return uid
 
 
 def _token_path_for_uid(uid: str) -> Path:
@@ -123,33 +136,15 @@ def status(
     """
     Status endpoint for local dev + onboarding.
 
-    Important: PowerShell often starts without cookies. In that case we should
-    prefer an existing uid that already has tokens on disk, instead of creating
-    a brand new uid with no tokens.
+    RULE (Patch 4.3):
+    - If cookie is missing -> generate new uid -> set cookie -> done.
+    - Never "pick" another uid from disk.
     """
-    # 1) Start with cookie uid if present, else anon uid
-    uid = cg_uid or _get_or_set_uid(req)
+    # 1) Use cookie uid if present, else create & PRIME cookie via response
+    uid = cg_uid or _get_or_set_uid(req, response)
 
-    # 2) Try load tokens for chosen uid
+    # 2) Load tokens for this uid only (no disk-scanning fallback)
     tokens = _load_tokens(uid)
-
-    # 3) If no tokens and no cookie uid, prefer an existing token uid on disk (dev convenience)
-    if (not tokens or not tokens.get("access_token")) and not cg_uid:
-        try:
-            base = _users_dir()
-            if base.exists():
-                for p in base.glob("*/strava_tokens.json"):
-                    try:
-                        other_uid = p.parent.name
-                        other_tokens = _load_tokens(other_uid)
-                        if other_tokens and other_tokens.get("access_token"):
-                            uid = other_uid
-                            tokens = other_tokens
-                            break
-                    except Exception:
-                        continue
-        except Exception:
-            pass
 
     ok = bool(tokens and tokens.get("access_token"))
     exp = int(tokens.get("expires_at", 0)) if tokens else 0
@@ -204,7 +199,7 @@ def login(req: Request):
     resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
     resp.set_cookie("cg_oauth_state", state, httponly=True, samesite="lax", path="/")
 
-    # PATCH: stash return URL for callback redirect (from /login?next=...)
+    # stash return URL for callback redirect (from /login?next=...)
     next_url = req.query_params.get("next")
     if next_url and isinstance(next_url, str) and next_url.startswith(("http://", "https://")):
         resp.set_cookie("cg_next", next_url, httponly=True, samesite="lax", path="/")
@@ -246,7 +241,7 @@ def callback(
     }
     p = _save_tokens(uid, tokens)
 
-    # PATCH: If frontend provided a return URL via /login?next=..., send user back there.
+    # If frontend provided a return URL via /login?next=..., send user back there.
     next_url = req.cookies.get("cg_next")
     if next_url and isinstance(next_url, str) and next_url.startswith(("http://", "https://")):
         resp = RedirectResponse(url=next_url, status_code=302)

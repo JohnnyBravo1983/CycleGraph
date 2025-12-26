@@ -1,5 +1,5 @@
 {
-  "rider_weight_kg": 83.0,
+  "rider_weight_kg": 101,
   "bike_type": "road",
   "bike_weight_kg": 8.0,
   "tire_width_mm": 28,
@@ -8,8 +8,10 @@
   "bike_name": "My Bike",
   "publish_to_strava": false,
   "consent": false,
-  "version_hash": "a0c54a9e",
-  "profile_version": "v1-a0c54a9e-20251210",
-  "version_at": "20251210T00:00:00Z",
-  "crank_efficiency": 96.0
+  "version_hash": "b8c5c7b0",
+  "profile_version": "v1-b8c5c7b0-20251226",
+  "version_at": "20251226T00:00:00Z",
+  "crank_efficiency": 96.0,
+  "cda": 0.31,
+  "crr": 0.0031
 }

@@ -2,13 +2,10 @@
 import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
+import { formatStartTimeForUi } from "../lib/api";
 
-const fmtDate = (iso?: string | null): string => {
-  if (!iso) return "ukjent";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "ukjent";
-  return d.toLocaleString("nb-NO", { dateStyle: "short", timeStyle: "short" });
-};
+const fmtDate = (iso?: string | null): string =>
+  formatStartTimeForUi(iso ?? null);
 
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
@@ -49,6 +46,11 @@ const RidesPage: React.FC = () => {
   }
 
   const rows = sessionsList ?? [];
+
+  console.log(
+  "[RidesPage] rows start_time snapshot",
+  rows.map((r: any) => ({ id: r.session_id ?? r.ride_id, st: r.start_time })).slice(0, 20)
+);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">

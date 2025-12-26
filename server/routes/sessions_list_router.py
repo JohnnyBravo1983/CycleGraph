@@ -7,14 +7,15 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response, Cookie, Query
+from server.routes.auth_strava import _get_or_set_uid
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _RE_RESULT_SID = re.compile(r"^result_(\d+)")
 
@@ -131,16 +132,16 @@ def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[float]:
     """
-    Velg "avg" i riktig rekkefølge.
+    Velg "avg" i riktig rekkefÃ¸lge.
 
     Viktig: legacy docs kan ha doc.watts som ikke er "precision/model/total".
-    Derfor bruker vi ALDRI watts-mean som fallback før vi har en verifisert kontrakt.
+    Derfor bruker vi ALDRI watts-mean som fallback fÃ¸r vi har en verifisert kontrakt.
     """
     pw_avg = _to_float(doc.get("precision_watt_avg"))
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("precision_watt_avg"))
 
-    # Foretrekk modell/total før precision_watt i legacy
+    # Foretrekk modell/total fÃ¸r precision_watt i legacy
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("model_watt_wheel"))
     if pw_avg is None:
@@ -197,7 +198,7 @@ def _gather_result_files(root: Path) -> List[Path]:
 
     dbg = root / "_debug"
     if dbg.exists():
-        # FIX: filtrer bort "_direct" så vi ikke får dobbelt/rare varianter
+        # FIX: filtrer bort "_direct" sÃ¥ vi ikke fÃ¥r dobbelt/rare varianter
         files.extend(sorted([p for p in dbg.glob("result_*.json") if "_direct" not in p.name]))
 
     lr = root / "logs" / "results"
@@ -215,9 +216,9 @@ def _prefer_path(a: Path, b: Path) -> Path:
     """
     Velg "beste" path for samme rid.
 
-    Primærregel: NYESTE fil (mtime) vinner.
+    PrimÃ¦rregel: NYESTE fil (mtime) vinner.
     Tie-break #1: logs/results foretrekkes fremfor _debug, deretter out.
-    Tie-break #2: størst fil vinner (ofte full doc vs stub).
+    Tie-break #2: stÃ¸rst fil vinner (ofte full doc vs stub).
     """
 
     def tier(p: Path) -> int:
@@ -244,7 +245,7 @@ def _prefer_path(a: Path, b: Path) -> Path:
     if ta != tb:
         return a if ta < tb else b
 
-    # 3) Størst fil hvis fortsatt likt
+    # 3) StÃ¸rst fil hvis fortsatt likt
     try:
         sa = a.stat().st_size
         sb = b.stat().st_size
@@ -256,19 +257,25 @@ def _prefer_path(a: Path, b: Path) -> Path:
     return a
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Routes
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/list/all")
-async def list_all() -> List[Dict[str, Any]]:
+async def list_all(
+    req: Request,
+    response: Response,
+    cg_uid: str | None = Cookie(default=None),
+    debug: int = Query(0),
+) -> Dict[str, Any]:
     import sys
 
     root = _repo_root_from_here()
     files = _gather_result_files(root)
 
-    print(f"[list_all] __file__={__file__}", file=sys.stderr)
-    print(f"[list_all] root={root} files={len(files)}", file=sys.stderr)
+    if debug:
+        print(f"[list_all] __file__={__file__}", file=sys.stderr)
+        print(f"[list_all] root={root} files={len(files)}", file=sys.stderr)
 
     best_by_sid: Dict[str, Path] = {}
     sid_from_doc = 0
@@ -298,10 +305,11 @@ async def list_all() -> List[Dict[str, Any]]:
         except Exception:
             continue
 
-    print(
-        f"[list_all] sid_from_doc={sid_from_doc} sid_from_name={sid_from_name} sid_missing={sid_missing} unique={len(best_by_sid)}",
-        file=sys.stderr,
-    )
+    if debug:
+        print(
+            f"[list_all] sid_from_doc={sid_from_doc} sid_from_name={sid_from_name} sid_missing={sid_missing} unique={len(best_by_sid)}",
+            file=sys.stderr,
+        )
 
     rows: List[Dict[str, Any]] = []
     for sid, p in best_by_sid.items():
@@ -318,11 +326,77 @@ async def list_all() -> List[Dict[str, Any]]:
 
     rows.sort(key=lambda r: str(r.get("start_time") or ""), reverse=True)
 
-    # FIX: stabil UI (midlertidig) -> topp 9
-    rows = rows[:9]
+    # SAFE CAP (backend): keep it bounded but not UI-hardcoded
+    rows = rows[:200]
 
-    print(f"[list_all] rows={len(rows)}", file=sys.stderr)
-    return rows
+    if debug:
+        print(f"[list_all] rows={len(rows)}", file=sys.stderr)
+
+    # -------------------------------
+    # Sprint 4: per-user filtering
+    # -------------------------------
+    uid = cg_uid or _get_or_set_uid(req, response)
+
+    index_path = Path.cwd() / "state" / "users" / uid / "sessions_index.json"
+    if not index_path.exists():
+        return {"value": [], "Count": 0}
+
+    idx = None
+    wanted: set[str] = set()
+    idx_keys: list[str] = []
+
+    try:
+        idx = _read_json_utf8_sig(index_path)
+
+        if isinstance(idx, dict):
+            idx_keys = list(idx.keys())
+
+            cand = None
+            for key in ("rides", "ride_ids", "session_ids", "sessions", "ids"):
+                v = idx.get(key)
+                if isinstance(v, list) and v:
+                    cand = v
+                    break
+
+            if cand is None:
+                v = idx.get("value")
+                if isinstance(v, list) and v:
+                    cand = v
+
+            if isinstance(cand, list):
+                wanted = set(str(x) for x in cand)
+
+        elif isinstance(idx, list):
+            wanted = set(str(x) for x in idx)
+    except Exception:
+        wanted = set()
+
+    before = len(rows)
+    sample_before = [str(r.get("ride_id")) for r in rows[:12]]
+
+    rows = [r for r in rows if str(r.get("ride_id")) in wanted]
+
+    after = len(rows)
+    sample_after = [str(r.get("ride_id")) for r in rows[:12]]
+
+    out: Dict[str, Any] = {"value": rows, "Count": len(rows)}
+
+    if debug:
+        out["debug"] = {
+            "uid": uid,
+            "index_path": str(index_path).replace("\\", "/"),
+            "idx_type": type(idx).__name__ if idx is not None else None,
+            "idx_keys": idx_keys,
+            "wanted_count": len(wanted),
+            "wanted": sorted(list(wanted))[:20],
+            "rows_before": before,
+            "rows_after": after,
+            "ride_ids_before_sample": sample_before,
+            "ride_ids_after_sample": sample_after,
+        }
+
+    return out
+
 
 @router.get("/list/_debug_paths")
 async def _debug_paths() -> Dict[str, Any]:
@@ -352,7 +426,6 @@ async def _debug_paths() -> Dict[str, Any]:
         except Exception:
             return []
 
-    # helper: finn nyeste fil som matcher pattern
     def _pick_newest(paths):
         try:
             paths = list(paths or [])
@@ -363,12 +436,10 @@ async def _debug_paths() -> Dict[str, Any]:
         except Exception:
             return None
 
-    # samples
     results_samples = _glob_sorted(p_results, "result_*.json", limit=8)
     latest_result_samples = _glob_sorted(p_latest_dir, "result_*.json", limit=8)
     actual10_session_samples = _rglob_sorted(p_actual10, "session_*.json", limit=8)
 
-    # counts (best effort)
     def _count_glob(base: Path, pattern: str, recursive: bool = False) -> int:
         try:
             if not base.exists():
@@ -377,21 +448,17 @@ async def _debug_paths() -> Dict[str, Any]:
         except Exception:
             return 0
 
-    # SSOT-ish examples: plukk 3 rids fra logs/results og vis om tilsvarende finnes i latest + actual10 session
     examples = []
     try:
         if p_results.exists():
             xs = sorted(p_results.glob("result_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]
             for p in xs:
-                # result_123.json -> 123
                 name = p.name
                 rid = name.replace("result_", "").replace(".json", "")
 
-                # 1) logs/results/result_<rid>.json (som før)
                 p_logs = (root / "logs" / "results" / f"result_{rid}.json")
                 logs_results = str(p_logs).replace("\\", "/") if p_logs.exists() else None
 
-                # 2) actual10/latest: støtt både uten suffix og med suffix
                 cand_plain = p_latest_dir / f"result_{rid}.json"
                 cand_glob = list(p_latest_dir.glob(f"result_{rid}*.json")) if p_latest_dir.exists() else []
                 p_latest = cand_plain if cand_plain.exists() else _pick_newest(cand_glob)
@@ -405,7 +472,6 @@ async def _debug_paths() -> Dict[str, Any]:
                     "actual10_any_session_count": 0,
                 }
 
-                # teller antall session_<rid>.json i actual10/**
                 try:
                     ex["actual10_any_session_count"] = (
                         sum(1 for _ in p_actual10.rglob(f"session_{rid}.json")) if p_actual10.exists() else 0
@@ -418,22 +484,16 @@ async def _debug_paths() -> Dict[str, Any]:
         examples = []
 
     return {
-        # eksisterende
         "router_file": str(Path(__file__).resolve()),
         "cwd": str(Path.cwd().resolve()),
         "root_from_here": str(root.resolve()),
         "files_from_here": len(files),
         "sample_files_from_here": [str(p).replace("\\", "/") for p in files[:8]],
-
-        # nye felt
         "logs_results_count": _count_glob(p_results, "result_*.json", recursive=False),
         "logs_results_samples": results_samples,
-
         "actual10_latest_result_count": _count_glob(p_latest_dir, "result_*.json", recursive=False),
         "actual10_latest_result_samples": latest_result_samples,
-
         "actual10_session_count": _count_glob(p_actual10, "session_*.json", recursive=True),
         "actual10_session_samples": actual10_session_samples,
-
         "ssot_examples": examples,
     }

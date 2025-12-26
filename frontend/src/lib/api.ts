@@ -207,14 +207,10 @@ function adaptBackendSession(raw: unknown): any {
         ? r.source
         : "ok",
 
-    // 5) watts – bruk metrics.precision_watt hvis vi har det
-    watts: Array.isArray(r.watts)
-      ? r.watts
-      : Array.isArray(metrics.precision_watt)
-      ? metrics.precision_watt
-      : Array.isArray(metrics.watts)
-      ? metrics.watts
-      : null,
+    // 5) watts – Sprint 3 strict: ingen metrics-fallback i UI-kontrakt
+    // Hvis backend sender r.watts som array, kan vi bruke den (detail/debug).
+    // Ellers: null (ikke “finne på” fra metrics).
+    watts: Array.isArray(r.watts) ? r.watts : null,
 
     // 6) vind-relaterte felter – optional / nullable uansett
     wind_rel: r.wind_rel ?? metrics.wind_rel ?? null,
@@ -225,6 +221,64 @@ function adaptBackendSession(raw: unknown): any {
 }
 
 /**
+ * Sprint 3 Patch 3.2 — Tid/format (D4)
+ * - Hvis start_time = "YYYY-MM-DD" -> vis kun dato (lokal), f.eks "22.11.2025"
+ * - Hvis ISO datetime -> vis "dd.mm.yyyy HH:MM" (lokalt)
+ * Viktig: Ingen gjetting på UTC vs lokal; vi bare presenterer stabilt.
+ */
+export function formatStartTimeForUi(start_time: string | null | undefined): string {
+  if (!start_time) return "";
+
+  const s = String(start_time).trim();
+  if (!s) return "";
+
+  // 1) dato-only: YYYY-MM-DD
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) {
+    const yyyy = Number(m[1]);
+    const mm = Number(m[2]);
+    const dd = Number(m[3]);
+    if (
+      Number.isFinite(yyyy) &&
+      Number.isFinite(mm) &&
+      Number.isFinite(dd) &&
+      mm >= 1 &&
+      mm <= 12 &&
+      dd >= 1 &&
+      dd <= 31
+    ) {
+      const d = new Date(yyyy, mm - 1, dd);
+      return new Intl.DateTimeFormat(undefined, {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }).format(d);
+    }
+    return s;
+  }
+
+  // 2) ISO datetime → vis MED sekunder
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return new Intl.DateTimeFormat(undefined, {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(d);
+  }
+
+  // 3) fallback
+  return s;
+}
+
+  
+
+ 
+
+/**
  * Hent en session:
  * - hvis id === "mock" → bruk mockSession (kilde: "mock")
  * - ellers krever vi VITE_BACKEND_URL og kaller POST {BASE}/api/sessions/{id}/analyze (kilde: "live")
@@ -232,7 +286,7 @@ function adaptBackendSession(raw: unknown): any {
  */
 export async function fetchSession(
   id: string,
-  opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> }
+  opts?: FetchSessionOpts
 ): Promise<FetchSessionResult> {
   const base = normalizeBase(BASE);
 
@@ -240,9 +294,7 @@ export async function fetchSession(
   if (id === "mock") {
     console.warn("[API] fetchSession → bruker mockSession (id === 'mock')");
 
-    const raw = shouldSimulateInvalid()
-      ? invalidateSchemaForTest(mockSession)
-      : mockSession;
+    const raw = shouldSimulateInvalid() ? invalidateSchemaForTest(mockSession) : mockSession;
 
     const parsed = safeParseSession(raw);
     if (!parsed.ok) {
@@ -271,8 +323,7 @@ export async function fetchSession(
     console.error("[API] fetchSession (LIVE) mangler VITE_BACKEND_URL for id=", id);
     return {
       ok: false,
-      error:
-        "Mangler backend-konfigurasjon (VITE_BACKEND_URL). Kan ikke hente økten fra server.",
+      error: "Mangler backend-konfigurasjon (VITE_BACKEND_URL). Kan ikke hente økten fra server.",
       source: "live",
     };
   }
@@ -291,18 +342,18 @@ export async function fetchSession(
     const body: Record<string, any> = {};
 
     // Prioritet: opts.profileOverride > localStorage override
-    const profile_override = opts?.profileOverride ?? null;
+    const profile_override = opts?.profileOverride ?? getLocalProfileOverride() ?? null;
 
-    const payload =
-      profile_override != null ? { ...body, profile_override } : { ...body };
+    const payload = profile_override != null ? { ...body, profile_override } : { ...body };
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithTimeout(url.toString(), {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      timeoutMs: 20_000,
     });
 
     if (!res.ok) {
@@ -371,170 +422,156 @@ export async function fetchSession(
 }
 
 // -----------------------------
-// Sessions-list (/api/sessions/list)
+// Sessions-list (/api/sessions/list/all)
+// Sprint 3 Patch 3.1 — Strict summary contract
 // -----------------------------
 
 export type SessionListItem = {
   session_id: string;
   ride_id: string;
-  start_time: string | null;
+  start_time: string | null; // strict: kun raw.start_time
   distance_km: number | null;
-  precision_watt_avg: number | null;
+  precision_watt_avg: number | null; // strict: kun raw.precision_watt_avg
   profile_label: string | null;
   weather_source: string | null;
 };
 
 type RawSession = {
-  id?: string | number;
-  session_id?: string | number;
-  ride_id?: string | number;
-  sid?: string | number;
+  // strict contract: vi forventer session_id, men lar types være litt robuste for parsing
+  session_id?: string | number | null;
+  ride_id?: string | number | null;
 
-  // mulige feltnavn for tid/dato
+  // strict contract: kun start_time
   start_time?: string | null;
-  started_at?: string | null;
-  start?: string | null;
-  date?: string | null;
 
-  // distanse
+  // behold disse hvis UI bruker dem (men ikke “gjetting”)
   distance_km?: number | null;
-  distance?: number | null;
-  distance_m?: number | null;
-
-  // watt / precision
-  precision_watt_avg?: number | null;
-  avg_watt?: number | null; // finnes kanskje i backend, men SKAL IKKE brukes
-  precision_watt?: number | null;
-  metrics?: {
-    precision_watt?: number | null;
-    model_watt_wheel?: number | null;
-  } | null;
-
   profile_label?: string | null;
-  profile_used?: string | null;
-  profile?: string | null;
-  profile_version?: string | null;
-
   weather_source?: string | null;
-  weather?: { source?: string | null } | null;
+
+  // eksplisitt: ignorert i strict mapping (ikke bruk!)
+  // started_at?: string | null;
+  // start?: string | null;
+  // date?: string | null;
+  // metrics?: any;
 };
 
+function toSessionListItemStrict(raw: RawSession, idx: number): SessionListItem | null {
+  const sid = raw?.session_id;
+
+  // ✅ Strict: id/sid i frontend = raw.session_id (ingen fallback til ride_id/id/sid)
+  if (sid === null || sid === undefined || String(sid).trim() === "") {
+    console.warn(
+      `[api.fetchSessionsList] Strict: hopper over entry uten session_id (index ${idx}):`,
+      raw
+    );
+    return null;
+  }
+
+  const session_id = String(sid);
+
+  // ✅ ride_id beholdes (kan være null i backend, da setter vi lik session_id)
+  const ride_id =
+    raw.ride_id !== null && raw.ride_id !== undefined && String(raw.ride_id).trim() !== ""
+      ? String(raw.ride_id)
+      : session_id;
+
+  // ✅ Strict: start_time = raw.start_time ?? null (ingen fallback)
+  const start_time = raw.start_time ?? null;
+
+  // ✅ Strict: precision_watt_avg = raw.precision_watt_avg (ingen metrics fallback)
+  const precision_watt_avg =
+    typeof (raw as any).precision_watt_avg === "number" ? (raw as any).precision_watt_avg : null;
+
+  // ✅ behold disse hvis UI bruker dem, men uten å “finne på” andre felter
+  const distance_km = typeof raw.distance_km === "number" ? raw.distance_km : null;
+  const profile_label = raw.profile_label ?? null;
+  const weather_source = raw.weather_source ?? null;
+
+  return {
+    session_id,
+    ride_id,
+    start_time,
+    distance_km,
+    precision_watt_avg,
+    profile_label,
+    weather_source,
+  };
+}
+
 export async function fetchSessionsList(): Promise<SessionListItem[]> {
-  if (!BASE) {
+  const base = normalizeBase(BASE);
+  if (!base) {
     console.log("[api.fetchSessionsList] Mangler VITE_BACKEND_URL – returnerer tom liste.");
     return [];
   }
 
-  // Merk: backend-routen er /api/sessions/list
-  const url = `${BASE}/api/sessions/list/all`;
-  console.log("[API] fetchSessionsList →", url);
 
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch (err) {
-    console.error("[api.fetchSessionsList] Nettverksfeil:", err);
-    return [];
-  }
+// ✅ Bruk robust URL-builder (tåler BASE med /api)
+const url = buildApiUrl(base, "/api/sessions/list/all");
+console.log("[API] fetchSessionsList →", url.toString());
 
-  console.log("[API] fetchSessionsList status:", res.status, res.statusText);
+let res: Response;
+try {
+  res = await fetchWithTimeout(url.toString(), { timeoutMs: 15_000 });
+} catch (err) {
+  console.error("[api.fetchSessionsList] Nettverksfeil:", err);
+  return [];
+}
 
-  if (!res.ok) {
-    console.error(
-      "[api.fetchSessionsList] Backend svarte ikke OK:",
-      res.status,
-      res.statusText
-    );
-    return [];
-  }
+console.log("[API] fetchSessionsList status:", res.status, res.statusText);
 
-  let json: unknown;
-  try {
-    json = await res.json();
-  } catch (err) {
-    console.error("[api.fetchSessionsList] Klarte ikke å parse JSON:", err);
-    return [];
-  }
-
-  console.log("[API] fetchSessionsList raw JSON:", json);
-
-  // Støtt både:
-  // 1) [ { ... }, { ... } ]
-  // 2) { sessions: [ ... ] }
-  const rawList: RawSession[] = Array.isArray(json)
-    ? (json as RawSession[])
-    : json &&
-      typeof json === "object" &&
-      Array.isArray((json as { sessions?: unknown }).sessions)
-    ? ((json as { sessions: RawSession[] }).sessions)
-    : [];
-
-  if (!Array.isArray(rawList) || rawList.length === 0) {
-    console.warn("[api.fetchSessionsList] Ingen sessions i responsen.");
-    return [];
-  }
-
-  const mapped: SessionListItem[] = rawList
-    .map((raw, idx): SessionListItem | null => {
-      // IMPORTANT: map backend session_id -> frontend sid (robust)
-      const sid = String(raw.session_id ?? raw.ride_id ?? raw.sid ?? raw.id ?? "");
-
-      if (!sid) {
-        console.warn(
-          `[api.fetchSessionsList] Hopper over entry uten session_id/ride_id (index ${idx}):`,
-          raw
-        );
-        return null;
-      }
-
-      // 🔹 Velg beste kandidat for start_time
-      const startTime = raw.start_time ?? raw.started_at ?? raw.start ?? raw.date ?? null;
-
-      // 🔹 Distanse: km hvis mulig, ellers m → km
-      const distanceKm =
-        typeof raw.distance_km === "number"
-          ? raw.distance_km
-          : typeof raw.distance === "number"
-          ? raw.distance
-          : typeof raw.distance_m === "number"
-          ? raw.distance_m / 1000
-          : null;
-
-      // ✅ Listevisning: alltid wheel avg fra backend (ALDRI avg_watt)
-      const precisionAvg =
-        typeof raw.precision_watt_avg === "number"
-          ? raw.precision_watt_avg
-          : typeof raw.metrics?.precision_watt === "number"
-          ? raw.metrics.precision_watt
-          : typeof raw.metrics?.model_watt_wheel === "number"
-          ? raw.metrics.model_watt_wheel
-          : null;
-
-      const profileLabel =
-        raw.profile_label ??
-        raw.profile_used ??
-        raw.profile ??
-        raw.profile_version ??
-        null;
-
-      const weatherSource = raw.weather_source ?? raw.weather?.source ?? null;
-
-      return {
-        session_id: sid,
-        ride_id: String(raw.ride_id ?? raw.session_id ?? sid),
-        start_time: startTime,
-        distance_km: distanceKm,
-        precision_watt_avg: precisionAvg,
-        profile_label: profileLabel,
-        weather_source: weatherSource,
-      };
-    })
-    .filter((x): x is SessionListItem => x !== null);
-
-  console.log(
-    `[api.fetchSessionsList] Mappet ${mapped.length} økter (fra ${rawList.length})`,
-    mapped
+if (!res.ok) {
+  const text = await safeReadText(res);
+  console.error(
+    "[api.fetchSessionsList] Backend svarte ikke OK:",
+    res.status,
+    res.statusText,
+    text
   );
+  return [];
+}
 
-  return mapped;
+let json: unknown;
+try {
+  json = await res.json();
+} catch (err) {
+  console.error("[api.fetchSessionsList] Klarte ikke å parse JSON:", err);
+  return [];
+}
+
+console.log("[API] fetchSessionsList raw JSON:", json);
+
+// Støtt både:
+// 1) [ { ... }, { ... } ]
+// 2) { sessions: [ ... ] }
+const rawList: RawSession[] = Array.isArray(json)
+  ? (json as RawSession[])
+  : json &&
+    typeof json === "object" &&
+    Array.isArray((json as { sessions?: unknown }).sessions)
+  ? ((json as { sessions: RawSession[] }).sessions)
+  : [];
+
+if (!Array.isArray(rawList) || rawList.length === 0) {
+  console.warn("[api.fetchSessionsList] Ingen sessions i responsen.");
+  return [];
+}
+
+// ✅ Strict summary mapping
+const mapped: SessionListItem[] = rawList
+  .map((raw, idx) => toSessionListItemStrict(raw, idx))
+  .filter((x): x is SessionListItem => x !== null);
+
+console.log(
+  `[api.fetchSessionsList] Strict mappet ${mapped.length} økter (fra ${rawList.length})`,
+  mapped
+);
+
+// ✅ DEBUG: eksponer formatter for DevTools (kun i DEV)
+if (import.meta.env.DEV) {
+  (window as any).formatStartTimeForUi = formatStartTimeForUi;
+}
+
+return mapped;
 }

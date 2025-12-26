@@ -13,6 +13,7 @@ pub fn wrap360(mut x: f64) -> f64 {
     }
     x
 }
+
 #[inline]
 pub fn deg_to_rad(d: f64) -> f64 {
     d * std::f64::consts::PI / 180.0
@@ -44,7 +45,7 @@ fn cda_for(bike_type: Option<&str>) -> f64 {
 // Avhengige typer (hos deg i crate-roten)
 // ===============================
 use crate::smoothing;
-use crate::{Profile, Sample, Weather}; // smooth_altitude(samples)
+use crate::{Profile, Sample, Weather};
 
 // -------------------------------
 // Vindgeometri – utilities (brukes i tester)
@@ -89,15 +90,9 @@ fn air_density(air_temp_c: f64, air_pressure_hpa: f64) -> f64 {
 }
 
 // ------------------------------------------------------
-// Gravity component (Sprint 14.7 – isolert testversjon)
-// ------------------------------------------------------
 // Gravity component (Sprint 14.7 – verifiserbar versjon)
 // ------------------------------------------------------
-pub fn compute_gravity_component(
-    mass_kg: f64,
-    altitude_series: &[f64],
-    dt_series: &[f64],
-) -> Vec<f64> {
+pub fn compute_gravity_component(mass_kg: f64, altitude_series: &[f64], dt_series: &[f64]) -> Vec<f64> {
     let n = altitude_series.len();
     let mut out = Vec::with_capacity(n);
     let win: usize = 2;
@@ -126,10 +121,7 @@ pub fn compute_gravity_component(
 
         #[cfg(debug_assertions)]
         if i < 10 {
-            eprintln!(
-                "[DBG_GRAV_SAMPLE] i={} dh/dt={:.6} grav={:.2} W",
-                i, dh_dt, p_g
-            );
+            eprintln!("[DBG_GRAV_SAMPLE] i={} dh/dt={:.6} grav={:.2} W", i, dh_dt, p_g);
         }
 
         out.push(p_g);
@@ -137,6 +129,7 @@ pub fn compute_gravity_component(
 
     out
 }
+
 // -------------------------------
 // Outputs
 // -------------------------------
@@ -149,7 +142,7 @@ pub struct PowerOutputs {
 
 #[inline]
 fn sample_heading_deg(i: usize, samples: &[Sample]) -> f64 {
-    let s = samples[i];
+    let s = &samples[i];
     // Hos deg er heading_deg et f64. Bruk direkte hvis finitt, ellers beregn bearing.
     let h = s.heading_deg;
     if h.is_finite() {
@@ -167,11 +160,7 @@ fn sample_heading_deg(i: usize, samples: &[Sample]) -> f64 {
 // ==========================================
 // Hovedberegning (med v_rel / wind_rel ut)
 // ==========================================
-pub fn compute_power_with_wind(
-    samples: &[Sample],
-    profile: &Profile,
-    weather: &Weather,
-) -> PowerOutputs {
+pub fn compute_power_with_wind(samples: &[Sample], profile: &Profile, weather: &Weather) -> PowerOutputs {
     let n = samples.len();
     if n == 0 {
         return PowerOutputs {
@@ -196,10 +185,13 @@ pub fn compute_power_with_wind(
         .windows(2)
         .map(|w| (w[1].t - w[0].t).abs().max(0.01))
         .collect();
+
+    // Pad til samme lengde som alt hvis nødvendig
     if dt_series.len() < alt.len() {
         let pad = *dt_series.last().unwrap_or(&1.0);
         dt_series.resize(alt.len(), pad);
     }
+
     let g_raw = compute_gravity_component(mass, &alt, &dt_series);
     let first5_len = g_raw.len().min(5);
     eprintln!(
@@ -210,26 +202,10 @@ pub fn compute_power_with_wind(
 
     // --- Lufttetthet (T/P → rho) ---
     // Weather-feltene er f64 hos deg. Bruk fornuftige defaults ved ikke-finite.
-    let t_c = if weather.air_temp_c.is_finite() {
-        weather.air_temp_c
-    } else {
-        15.0
-    };
-    let p_hpa = if weather.air_pressure_hpa.is_finite() {
-        weather.air_pressure_hpa
-    } else {
-        1013.25
-    };
-    let w_ms = if weather.wind_ms.is_finite() {
-        weather.wind_ms
-    } else {
-        0.0
-    };
-    let w_deg = if weather.wind_dir_deg.is_finite() {
-        weather.wind_dir_deg
-    } else {
-        0.0
-    };
+    let t_c = if weather.air_temp_c.is_finite() { weather.air_temp_c } else { 15.0 };
+    let p_hpa = if weather.air_pressure_hpa.is_finite() { weather.air_pressure_hpa } else { 1013.25 };
+    let w_ms = if weather.wind_ms.is_finite() { weather.wind_ms } else { 0.0 };
+    let w_deg = if weather.wind_dir_deg.is_finite() { weather.wind_dir_deg } else { 0.0 };
 
     let rho = air_density(t_c, p_hpa);
 
@@ -244,13 +220,13 @@ pub fn compute_power_with_wind(
     let mut v_rel_out = Vec::with_capacity(n);
 
     for i in 0..n {
-        let s = samples[i];
+        let s = &samples[i];
 
         // Tid og forrige fart
         let (dt, v_prev) = if i == 0 {
             (1.0, s.v_ms.max(0.0))
         } else {
-            let sp = samples[i - 1];
+            let sp = &samples[i - 1];
             (((s.t - sp.t).abs()).max(1e-3), sp.v_ms.max(0.0))
         };
 
@@ -277,7 +253,7 @@ pub fn compute_power_with_wind(
 
         // Komponenter
         let p_roll = mass * G * crr * v_mid; // rullewatt bruker bakketempo
-        let p_aero = 0.5 * rho * cda * v_rel.powi(3); // *** drag bruker v_rel^3 ***
+        let p_aero = 0.5 * rho * cda * v_rel.powi(3); // drag bruker v_rel^3
         let p_grav = g_raw[i].max(0.0);
         let p_acc = (mass * a * v_mid).max(0.0);
 
@@ -399,24 +375,12 @@ pub fn compute_components(
         let p_climb = (mass * G * v * grad[i]).max(0.0);
         let p = p_drag + p_roll + p_climb;
 
-        drag.push(if p_drag.is_finite() {
-            p_drag.max(0.0)
-        } else {
-            0.0
-        });
-        rolling.push(if p_roll.is_finite() {
-            p_roll.max(0.0)
-        } else {
-            0.0
-        });
+        drag.push(if p_drag.is_finite() { p_drag.max(0.0) } else { 0.0 });
+        rolling.push(if p_roll.is_finite() { p_roll.max(0.0) } else { 0.0 });
         total.push(if p.is_finite() { p.max(0.0) } else { 0.0 });
     }
 
-    Components {
-        total,
-        drag,
-        rolling,
-    }
+    Components { total, drag, rolling }
 }
 
 // ---------------------------------------
@@ -520,16 +484,8 @@ pub fn estimate_crr(bike_type: &str, tire_width_mm: f64, tire_quality: &str) -> 
 
 // Match analyze_session-signaturen: (rider_weight_kg, bike_weight_kg)
 pub fn total_mass(rider_weight_kg: f64, bike_weight_kg: f64) -> f64 {
-    let rw = if rider_weight_kg.is_finite() {
-        rider_weight_kg
-    } else {
-        70.0
-    };
-    let bw = if bike_weight_kg.is_finite() {
-        bike_weight_kg
-    } else {
-        9.0
-    };
+    let rw = if rider_weight_kg.is_finite() { rider_weight_kg } else { 70.0 };
+    let bw = if bike_weight_kg.is_finite() { bike_weight_kg } else { 9.0 };
     (rw + bw).max(40.0)
 }
 

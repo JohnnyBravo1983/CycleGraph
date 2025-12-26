@@ -1,4 +1,5 @@
 import type { SessionListItem } from "./session";
+import { formatStartTimeForUi } from "../lib/api";
 
 /**
  * Hover-visning skal være lett, stabil og basert på sessions-lista.
@@ -29,11 +30,7 @@ export function fmtKm(km?: number | null): string {
 }
 
 export function fmtStartTime(start?: string | null): string {
-  if (!start) return "—";
-  // bevisst: ikke Date.parse-hardfail; viser raw hvis parsing feiler
-  const d = new Date(start);
-  if (Number.isNaN(d.getTime())) return start;
-  return d.toLocaleString();
+  return formatStartTimeForUi(start ?? null);
 }
 
 export function fmtWeather(src?: string | null): string {
