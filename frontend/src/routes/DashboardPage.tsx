@@ -1,10 +1,16 @@
 // frontend/src/routes/DashboardPage.tsx
 import { StravaImportCard } from "../components/StravaImportCard";
+import { AccountStatus } from "../components/AccountStatus";
 import { Link } from "react-router-dom";
 
 export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-8">
+      {/* Always visible: account/status */}
+      <section className="max-w-xl">
+        <AccountStatus />
+      </section>
+
       {/* Overskrift */}
       <section>
         <h1 className="text-2xl font-semibold tracking-tight mb-2">Dashboard</h1>

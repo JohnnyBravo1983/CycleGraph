@@ -34,6 +34,66 @@ def _tokens_path(uid: str) -> Path:
     return _user_dir(uid) / "strava_tokens.json"
 
 
+# ----------------------------
+# Sprint 4: sessions_index.json helpers
+# ----------------------------
+def _sessions_index_path(uid: str) -> Path:
+    return _user_dir(uid) / "sessions_index.json"
+
+
+def _load_sessions_index(uid: str) -> list[str]:
+    p = _sessions_index_path(uid)
+    if not p.exists():
+        return []
+    try:
+        raw_txt = p.read_text(encoding="utf-8-sig") or ""
+        raw = json.loads(raw_txt)
+
+        # støtt både {"rides":[...]} og ["..."]
+        if isinstance(raw, dict):
+            xs = raw.get("rides")
+        else:
+            xs = raw
+
+        if not isinstance(xs, list):
+            return []
+
+        out: list[str] = []
+        for v in xs:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                out.append(s)
+
+        # dedupe, bevar rekkefølge
+        seen = set()
+        uniq: list[str] = []
+        for r in out:
+            if r in seen:
+                continue
+            seen.add(r)
+            uniq.append(r)
+        return uniq
+    except Exception:
+        return []
+
+
+def _save_sessions_index(uid: str, rides: list[str]) -> None:
+    p = _sessions_index_path(uid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"rides": rides}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _add_ride_to_sessions_index(uid: str, rid: str) -> list[str]:
+    rid = str(rid).strip()
+    rides = _load_sessions_index(uid)
+    if rid and rid not in rides:
+        rides.append(rid)
+        _save_sessions_index(uid, rides)
+    return rides
+
+
 def _read_json_utf8_sig(p: Path) -> Dict[str, Any]:
     try:
         with open(p, "r", encoding="utf-8-sig") as f:
@@ -167,7 +227,9 @@ def _strava_get(url_path: str, uid: str, tokens: Dict[str, Any], token_path: Pat
         raise HTTPException(status_code=502, detail="strava_bad_json")
 
 
-def _fetch_activity_and_streams(rid: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _fetch_activity_and_streams(
+    rid: str, uid: str, tokens: Dict[str, Any], token_path: Path
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     meta = _strava_get(f"/activities/{rid}", uid, tokens, token_path)
 
     # Minimum: tid/distanse/hr/cad/watts/latlng
@@ -299,7 +361,7 @@ def _trigger_analyze_local(rid: str) -> Dict[str, Any]:
     url = f"{base}/api/sessions/{rid}/analyze?force_recompute=1&debug=1"
     try:
         r = requests.post(url, json={}, timeout=60)
-        out = {"status_code": r.status_code}
+        out: Dict[str, Any] = {"status_code": r.status_code}
         try:
             out["json"] = r.json()
         except Exception:
@@ -318,6 +380,9 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
     tp = _tokens_path(uid)
     if not tp.exists():
         raise HTTPException(status_code=401, detail="missing_server_tokens_for_user")
+
+    # Sprint 4: sørg for at denne rid’en blir en del av "mine rides"
+    rides_now = _add_ride_to_sessions_index(uid, str(rid))
 
     tokens = _read_json_utf8_sig(tp)
 
@@ -350,6 +415,8 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
         "ok": True,
         "uid": uid,
         "rid": str(rid),
+        "index_rides_count": len(rides_now),
+        "index_path": str(_sessions_index_path(uid)).replace("\\", "/"),
         "session_paths": paths,
         "samples_len": len(samples),
         "analyze": analyze,
