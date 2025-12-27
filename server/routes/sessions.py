@@ -412,6 +412,9 @@ def _paths_for_sid(sid: str) -> dict:
         "debug_result":  os.path.join(root, "_debug", f"result_{sid}.json"),
         "results":       os.path.join(root, "logs", "results", f"result_{sid}.json"),
         "inline_samples":os.path.join(root, "logs", f"inline_samples_{sid}.json"),
+        # ==================== PATCH 3: Legg til actual10_latest_session ====================
+        "actual10_latest_session": os.path.join(root, "logs", "actual10", "latest", f"session_{sid}.json"),
+        # ==================== END PATCH 3 ====================
         "raw_streams":   os.path.join(root, "data", "raw", f"streams_{sid}.json"),
         "raw_activity":  os.path.join(root, "data", "raw", f"activity_{sid}.json"),
         "gpx":           os.path.join(root, "data", "gpx", f"{sid}.gpx"),
@@ -420,13 +423,26 @@ def _paths_for_sid(sid: str) -> dict:
 def _input_availability(sid: str) -> dict:
     p = _paths_for_sid(sid)
     exists = {k: os.path.exists(v) for k, v in p.items()}
+    
+    # ==================== PATCH 3B: alias actual10/latest session into debug_session candidate ====================
+    try:
+        if exists.get("actual10_latest_session") and not exists.get("debug_session"):
+            p["debug_session"] = p["actual10_latest_session"]
+            exists["debug_session"] = True
+    except Exception:
+        pass
+    # ==================== END PATCH 3B ====================
+    
     # "input" betyr at vi kan bygge samples på nytt
+    # ==================== PATCH 3: Oppdater has_any_input ====================
     has_any_input = (
         exists["debug_session"]
         or exists["inline_samples"]
+        or exists.get("actual10_latest_session", False)  # Bruk get for sikkerhet
         or exists["raw_streams"]
         or exists["gpx"]
     )
+    # ==================== END PATCH 3 ====================
     return {"paths": p, "exists": exists, "has_any_input": bool(has_any_input)}
 
 def _http409_missing_input(sid: str, dbg: dict) -> None:
@@ -1077,7 +1093,7 @@ async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Opt
         # Dato + time i UTC fra ts_hour
         dt_utc = datetime.datetime.utcfromtimestamp(int(ts_hour))
         day = dt_utc.strftime("%Y-%m-%d")
-        wanted_iso = dt_utc.strftime("%Y-%m-%dT%H:00")
+        wanted_iso = dt_utc.strftime("%Y-%m-dT%H:00")
 
         # Bruk samme param/key-format som din manuelle "fasit"-URL
         url = (
@@ -1886,14 +1902,17 @@ async def analyze_session(
         "streams_probe": None,  # Nytt felt for streams probe
     }
     
+    # ==================== PATCH 3: Oppdater input_candidates med actual10_latest_session ====================
     # Definer input kandidater i prioritert rekkefølge
     input_candidates = [
         avail["paths"]["debug_session"],
         avail["paths"]["inline_samples"],
+        avail["paths"]["actual10_latest_session"],  # <-- Legg til actual10_latest_session
         avail["paths"]["raw_streams"],
         avail["paths"]["raw_activity"],
         avail["paths"]["gpx"],
     ]
+    # ==================== END PATCH 3 ====================
     
     input_used = None
     # Sjekk om vi bruker request body samples
@@ -2128,13 +2147,23 @@ async def analyze_session(
     center_lat, center_lon, ts_hour, wx_err = _canonical_weather_key_from_samples(samples, want_debug=want_debug)
     
     # ==================== PATCH 1F: Håndter error og returner JSONResponse ====================
+    # HVIS wx_err er satt, deaktiver vær og fortsett analyse, ikke returner feil.
     if wx_err is not None:
-        # Hard error - returner JSONResponse med garantert JSON body
-        status = 500
-        if want_debug:
-            return JSONResponse(status_code=status, content={"detail": wx_err})
-        # Uten debug: returner bare error-strengen
-        return JSONResponse(status_code=status, content={"detail": {"error": wx_err.get("error", "WEATHER_CANONICAL_ERROR")}})
+        # Weather canonicalization errors must NOT stop analyze.
+        # Fallback: run analyze without weather.
+        print(f"[SVR] Weather canonicalization error: {wx_err}. Disabling weather.", file=sys.stderr)
+        weather_applied = False
+        wx_used = None
+        wx_meta = {}
+        fp = None
+        # Sett no_weather flagg for å unngå å prøve å hente vær senere
+        no_weather = True
+        # Legg til feilen i debug
+        dbg = body.get("debug") or {}
+        if not isinstance(dbg, dict):
+            dbg = {}
+        dbg["weather_error"] = wx_err.get("error") if isinstance(wx_err, dict) else str(wx_err)
+        body["debug"] = dbg
     
     # ==================== END PATCH 1 ====================
 

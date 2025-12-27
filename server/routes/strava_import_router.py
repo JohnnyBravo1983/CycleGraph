@@ -117,7 +117,12 @@ def _now_ts_dirname() -> str:
 # ----------------------------
 def _require_strava_client() -> tuple[str, str]:
     # støtt flere env-varianter (samme som resten av repoet ditt)
-    cid = (os.getenv("STRAVA_CLIENT_ID") or os.getenv("CG_STRAVA_CLIENT_ID") or os.getenv("STRAVA_CLIENTID") or "").strip()
+    cid = (
+        os.getenv("STRAVA_CLIENT_ID")
+        or os.getenv("CG_STRAVA_CLIENT_ID")
+        or os.getenv("STRAVA_CLIENTID")
+        or ""
+    ).strip()
     csec = (
         os.getenv("STRAVA_CLIENT_SECRET")
         or os.getenv("CG_STRAVA_CLIENT_SECRET")
@@ -342,7 +347,7 @@ def _build_samples_v1(meta: Dict[str, Any], streams: Dict[str, Any]) -> List[Dic
     return samples
 
 
-def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, str]:
+def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]:
     root = _repo_root_from_here()
     logs = root / "logs"
     ts = _now_ts_dirname()
@@ -352,7 +357,30 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, str]
 
     _write_json(p1, doc)
     _write_json(p2, doc)
-    return {"ts_path": str(p1), "latest_path": str(p2)}
+
+    # --- Patch 3C: write debug_session mirror for analyze input ---
+    debug_session_written = False
+    debug_session_path = None
+    try:
+        p_debug = root / "_debug" / f"session_{rid}.json"
+        debug_session_path = str(p_debug)
+        p_debug.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy from latest actual10 session file (p2)
+        # Ensure p2 exists first
+        if p2.exists():
+            p_debug.write_text(p2.read_text(encoding="utf-8"), encoding="utf-8")
+            debug_session_written = True
+    except Exception:
+        debug_session_written = False
+    # --- end Patch 3C ---
+
+    return {
+        "ts_path": str(p1),
+        "latest_path": str(p2),
+        "debug_session_written": debug_session_written,
+        "debug_session_path": debug_session_path,
+    }
 
 
 def _trigger_analyze_local(rid: str) -> Dict[str, Any]:
@@ -373,6 +401,13 @@ def _trigger_analyze_local(rid: str) -> Dict[str, Any]:
 
 @router.post("/import/{rid}")
 def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
+    FP = "STRAVA_IMPORT_ROUTER_FP_3X_20251227"
+    print("[STRAVA_IMPORT]", FP, "rid=", rid)
+
+    # If earlier patches are not present for some reason, ensure fields exist in response
+    debug_session_written: Any = "UNSET"
+    debug_session_path: Any = "UNSET"
+
     uid = request.cookies.get("cg_uid") or ""
     if not uid:
         raise HTTPException(status_code=401, detail="missing_cg_uid_cookie")
@@ -409,6 +444,10 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
 
     paths = _write_session_v1(uid, rid, session_doc)
 
+    # Pull debug fields up to function scope so we can always include them in response
+    debug_session_written = paths.get("debug_session_written", debug_session_written)
+    debug_session_path = paths.get("debug_session_path", debug_session_path)
+
     analyze = _trigger_analyze_local(rid)
 
     return {
@@ -417,7 +456,14 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
         "rid": str(rid),
         "index_rides_count": len(rides_now),
         "index_path": str(_sessions_index_path(uid)).replace("\\", "/"),
-        "session_paths": paths,
+        "session_paths": {
+            "ts_path": paths.get("ts_path"),
+            "latest_path": paths.get("latest_path"),
+        },
         "samples_len": len(samples),
         "analyze": analyze,
+        # Patch 3X: proof of running code + debug mirror status
+        "fingerprint": FP,
+        "debug_session_written": debug_session_written,
+        "debug_session_path": debug_session_path,
     }

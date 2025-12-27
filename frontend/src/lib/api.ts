@@ -11,6 +11,14 @@ export type FetchSessionResult = Ok | Err;
 // Hent Vite-variabler (.env.local).
 const BASE = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
+/**
+ * 🔧 Sprint 4: Stabil cookie-binding (cg_uid)
+ * Alle backend-kall SKAL sende cookies:
+ */
+const FETCH_WITH_COOKIES = {
+  credentials: "include" as const,
+};
+
 /** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
   if (!url) return undefined;
@@ -208,8 +216,6 @@ function adaptBackendSession(raw: unknown): any {
         : "ok",
 
     // 5) watts – Sprint 3 strict: ingen metrics-fallback i UI-kontrakt
-    // Hvis backend sender r.watts som array, kan vi bruke den (detail/debug).
-    // Ellers: null (ikke “finne på” fra metrics).
     watts: Array.isArray(r.watts) ? r.watts : null,
 
     // 6) vind-relaterte felter – optional / nullable uansett
@@ -222,9 +228,6 @@ function adaptBackendSession(raw: unknown): any {
 
 /**
  * Sprint 3 Patch 3.2 — Tid/format (D4)
- * - Hvis start_time = "YYYY-MM-DD" -> vis kun dato (lokal), f.eks "22.11.2025"
- * - Hvis ISO datetime -> vis "dd.mm.yyyy HH:MM" (lokalt)
- * Viktig: Ingen gjetting på UTC vs lokal; vi bare presenterer stabilt.
  */
 export function formatStartTimeForUi(start_time: string | null | undefined): string {
   if (!start_time) return "";
@@ -273,10 +276,6 @@ export function formatStartTimeForUi(start_time: string | null | undefined): str
   // 3) fallback
   return s;
 }
-
-  
-
- 
 
 /**
  * Hent en session:
@@ -338,7 +337,6 @@ export async function fetchSession(
   console.log("[API] fetchSession (LIVE) →", url.toString());
 
   try {
-    // Default: eksisterende body (beholdt minimalistisk)
     const body: Record<string, any> = {};
 
     // Prioritet: opts.profileOverride > localStorage override
@@ -347,6 +345,7 @@ export async function fetchSession(
     const payload = profile_override != null ? { ...body, profile_override } : { ...body };
 
     const res = await fetchWithTimeout(url.toString(), {
+      ...FETCH_WITH_COOKIES, // ✅ KRITISK: sender cg_uid cookie
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -376,10 +375,8 @@ export async function fetchSession(
       };
     }
 
-    // Ekstra logging av rå JSON fra backend
     console.log("[API] fetchSession LIVE raw JSON:", json);
 
-    // 🔹 Tilpass backend-responsen til det schemaet vårt forventer
     const adaptedBase = adaptBackendSession(json);
     console.log("[API] fetchSession LIVE adapted for schema:", adaptedBase);
 
@@ -400,7 +397,6 @@ export async function fetchSession(
 
     const session = parsed.data;
 
-    // 🔹 Vi sjekker fortsatt schema_version, men lar det være en WARNING
     try {
       ensureSemver(session.schema_version as string | undefined);
     } catch (err) {
@@ -423,155 +419,112 @@ export async function fetchSession(
 
 // -----------------------------
 // Sessions-list (/api/sessions/list/all)
-// Sprint 3 Patch 3.1 — Strict summary contract
+// Sprint 4 Patch: støtt { value: [...] } OG [...]
 // -----------------------------
 
 export type SessionListItem = {
   session_id: string;
   ride_id: string;
-  start_time: string | null; // strict: kun raw.start_time
+  start_time: string | null;
   distance_km: number | null;
-  precision_watt_avg: number | null; // strict: kun raw.precision_watt_avg
+  precision_watt_avg: number | null;
   profile_label: string | null;
   weather_source: string | null;
 };
 
-type RawSession = {
-  // strict contract: vi forventer session_id, men lar types være litt robuste for parsing
-  session_id?: string | number | null;
-  ride_id?: string | number | null;
+// PATCH: Replace fetchSessionsList() komplett
+export async function fetchSessionsList(): Promise<SessionListItem[]> {
+  // NB: fallback for safety (slik patchen din foreslår)
+  const base = normalizeBase(BASE) ?? "http://localhost:5175";
+  const url = buildApiUrl(base, "/api/sessions/list/all");
+  console.log("[API] fetchSessionsList →", url.toString());
 
-  // strict contract: kun start_time
-  start_time?: string | null;
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    credentials: "include",
+  });
 
-  // behold disse hvis UI bruker dem (men ikke “gjetting”)
-  distance_km?: number | null;
-  profile_label?: string | null;
-  weather_source?: string | null;
-
-  // eksplisitt: ignorert i strict mapping (ikke bruk!)
-  // started_at?: string | null;
-  // start?: string | null;
-  // date?: string | null;
-  // metrics?: any;
-};
-
-function toSessionListItemStrict(raw: RawSession, idx: number): SessionListItem | null {
-  const sid = raw?.session_id;
-
-  // ✅ Strict: id/sid i frontend = raw.session_id (ingen fallback til ride_id/id/sid)
-  if (sid === null || sid === undefined || String(sid).trim() === "") {
-    console.warn(
-      `[api.fetchSessionsList] Strict: hopper over entry uten session_id (index ${idx}):`,
-      raw
-    );
-    return null;
+  console.log("[API] fetchSessionsList status:", res.status, res.statusText);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`fetchSessionsList failed ${res.status}: ${txt.slice(0, 200)}`);
   }
 
-  const session_id = String(sid);
+  const json: unknown = await res.json();
+  console.log("[API] fetchSessionsList raw JSON:", json);
 
-  // ✅ ride_id beholdes (kan være null i backend, da setter vi lik session_id)
-  const ride_id =
-    raw.ride_id !== null && raw.ride_id !== undefined && String(raw.ride_id).trim() !== ""
-      ? String(raw.ride_id)
-      : session_id;
+  // ✅ Støtt både:
+  // A) { value: [...], Count: n }
+  // B) [...] (legacy)
+  const rows: unknown[] = Array.isArray(json)
+    ? json
+    : Array.isArray((json as any)?.value)
+    ? ((json as any).value as unknown[])
+    : [];
 
-  // ✅ Strict: start_time = raw.start_time ?? null (ingen fallback)
-  const start_time = raw.start_time ?? null;
-
-  // ✅ Strict: precision_watt_avg = raw.precision_watt_avg (ingen metrics fallback)
-  const precision_watt_avg =
-    typeof (raw as any).precision_watt_avg === "number" ? (raw as any).precision_watt_avg : null;
-
-  // ✅ behold disse hvis UI bruker dem, men uten å “finne på” andre felter
-  const distance_km = typeof raw.distance_km === "number" ? raw.distance_km : null;
-  const profile_label = raw.profile_label ?? null;
-  const weather_source = raw.weather_source ?? null;
-
-  return {
-    session_id,
-    ride_id,
-    start_time,
-    distance_km,
-    precision_watt_avg,
-    profile_label,
-    weather_source,
-  };
-}
-
-export async function fetchSessionsList(): Promise<SessionListItem[]> {
-  const base = normalizeBase(BASE);
-  if (!base) {
-    console.log("[api.fetchSessionsList] Mangler VITE_BACKEND_URL – returnerer tom liste.");
+  if (!Array.isArray(rows)) {
+    console.warn(
+      "[api.fetchSessionsList] Uventet format, forventet array eller {value: array}.",
+      json
+    );
     return [];
   }
 
+  if (rows.length === 0) {
+    console.warn("[api.fetchSessionsList] Ingen sessions i responsen.");
+    return [];
+  }
 
-// ✅ Bruk robust URL-builder (tåler BASE med /api)
-const url = buildApiUrl(base, "/api/sessions/list/all");
-console.log("[API] fetchSessionsList →", url.toString());
+  const out: SessionListItem[] = [];
 
-let res: Response;
-try {
-  res = await fetchWithTimeout(url.toString(), { timeoutMs: 15_000 });
-} catch (err) {
-  console.error("[api.fetchSessionsList] Nettverksfeil:", err);
-  return [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const rec = r as any;
+
+    // ✅ Definer eksplisitt (dette var mangelen hos deg)
+    const session_id = rec.session_id != null ? String(rec.session_id) : null;
+    const ride_id = rec.ride_id != null ? String(rec.ride_id) : null;
+
+    if (!session_id || !ride_id) continue;
+
+    out.push({
+      session_id,
+      ride_id,
+      start_time: rec.start_time != null ? String(rec.start_time) : null,
+      distance_km:
+        typeof rec.distance_km === "number"
+          ? rec.distance_km
+          : rec.distance_km != null
+          ? Number(rec.distance_km)
+          : null,
+      precision_watt_avg:
+        typeof rec.precision_watt_avg === "number"
+          ? rec.precision_watt_avg
+          : rec.precision_watt_avg != null
+          ? Number(rec.precision_watt_avg)
+          : null,
+      profile_label: rec.profile_label != null ? String(rec.profile_label) : null,
+      weather_source: rec.weather_source != null ? String(rec.weather_source) : null,
+    });
+  }
+
+  if (!out.length) {
+    console.warn(
+      "[api.fetchSessionsList] Rader fantes, men ingen kunne normaliseres trygt.",
+      { rows_len: rows.length, sample: rows[0] }
+    );
+    return [];
+  }
+
+  // ✅ DEBUG: eksponer formatter for DevTools (kun i DEV)
+  if (import.meta.env.DEV) {
+    (window as any).formatStartTimeForUi = formatStartTimeForUi;
+  }
+
+  return out;
 }
 
-console.log("[API] fetchSessionsList status:", res.status, res.statusText);
 
-if (!res.ok) {
-  const text = await safeReadText(res);
-  console.error(
-    "[api.fetchSessionsList] Backend svarte ikke OK:",
-    res.status,
-    res.statusText,
-    text
-  );
-  return [];
-}
 
-let json: unknown;
-try {
-  json = await res.json();
-} catch (err) {
-  console.error("[api.fetchSessionsList] Klarte ikke å parse JSON:", err);
-  return [];
-}
 
-console.log("[API] fetchSessionsList raw JSON:", json);
 
-// Støtt både:
-// 1) [ { ... }, { ... } ]
-// 2) { sessions: [ ... ] }
-const rawList: RawSession[] = Array.isArray(json)
-  ? (json as RawSession[])
-  : json &&
-    typeof json === "object" &&
-    Array.isArray((json as { sessions?: unknown }).sessions)
-  ? ((json as { sessions: RawSession[] }).sessions)
-  : [];
-
-if (!Array.isArray(rawList) || rawList.length === 0) {
-  console.warn("[api.fetchSessionsList] Ingen sessions i responsen.");
-  return [];
-}
-
-// ✅ Strict summary mapping
-const mapped: SessionListItem[] = rawList
-  .map((raw, idx) => toSessionListItemStrict(raw, idx))
-  .filter((x): x is SessionListItem => x !== null);
-
-console.log(
-  `[api.fetchSessionsList] Strict mappet ${mapped.length} økter (fra ${rawList.length})`,
-  mapped
-);
-
-// ✅ DEBUG: eksponer formatter for DevTools (kun i DEV)
-if (import.meta.env.DEV) {
-  (window as any).formatStartTimeForUi = formatStartTimeForUi;
-}
-
-return mapped;
-}
