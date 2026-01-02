@@ -33,6 +33,28 @@ export type SessionListItem = {
   debug_source_path?: string | null;
 };
 
+// ✅ PATCH 1: legg til ProfileGetResp
+export type ProfileGetResp = {
+  ok?: boolean;
+  profile_version?: string;
+  version_hash?: string;
+  profile?: Record<string, unknown>;
+  [k: string]: unknown;
+};
+
+// ✅ PATCH: profileSave() typer
+export type ProfileSaveResp = {
+  profile?: Record<string, unknown>;
+  profile_version?: string;
+  version_hash?: string;
+  version_at?: string;
+  [k: string]: unknown;
+};
+
+export type ProfileSaveBody =
+  | Record<string, unknown>
+  | { profile: Record<string, unknown> };
+
 const BASE =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
   (import.meta.env.VITE_BACKEND_BASE as string | undefined) ??
@@ -65,17 +87,24 @@ function buildApiUrl(base: string, pathStartingWithApi: string): URL {
   return new URL(rel, baseForUrl);
 }
 
+// ✅ liten helper så patchen kan bruke baseUrl() uten å være avhengig av cgApi-objektet
+function baseUrl(): string {
+  return normalizeBase(BASE) ?? "http://localhost:5175";
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
 function extractErrorMessage(json: unknown): unknown {
   if (!isRecord(json)) return null;
-  return (json as any).detail ??
+  return (
+    (json as any).detail ??
     (json as any).reason ??
     (json as any).error ??
     (json as any).message ??
-    null;
+    null
+  );
 }
 
 /**
@@ -142,8 +171,54 @@ async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promi
   return (json ?? null) as T;
 }
 
+// ✅ PATCH 1: implementer profileGet() i samme stil (bruker buildApiUrl + include cookies)
+async function profileGet(): Promise<ProfileGetResp> {
+  const base = normalizeBase(BASE) ?? "http://localhost:5175";
+  const url = buildApiUrl(base, "/api/profile/get");
+
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`profileGet failed ${res.status}: ${txt.slice(0, 200)}`);
+  }
+
+  return (await res.json()) as ProfileGetResp;
+}
+
+// ✅ PATCH: profileSave() (SSOT -> backend)
+async function profileSave(body: ProfileSaveBody): Promise<ProfileSaveResp> {
+  const base = baseUrl();
+  const url = buildApiUrl(base, "/api/profile/save");
+  console.log("[cgApi] profileSave →", url.toString(), body);
+
+  const res = await fetch(url.toString(), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  console.log("[cgApi] profileSave status:", res.status, res.statusText);
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`profileSave failed ${res.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const json: unknown = await res.json().catch(() => null);
+  console.log("[cgApi] profileSave raw JSON:", json);
+  return (json ?? {}) as ProfileSaveResp;
+}
+
 export const cgApi = {
-  baseUrl: () => normalizeBase(BASE) ?? "http://localhost:5175",
+  baseUrl: () => baseUrl(),
 
   async status(): Promise<StatusResp> {
     return cgFetchJson<StatusResp>("/status", { method: "GET" });
@@ -161,4 +236,10 @@ export const cgApi = {
     const json = await cgFetchJson<unknown>("/api/sessions/list/all", { method: "GET" });
     return normalizeListAll(json);
   },
+
+  // ✅ PATCH 1: eksporter profileGet
+  profileGet,
+
+  // ✅ PATCH: eksporter profileSave
+  profileSave,
 };

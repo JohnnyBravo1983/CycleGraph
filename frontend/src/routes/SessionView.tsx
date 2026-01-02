@@ -1,5 +1,5 @@
 // frontend/src/pages/SessionView.tsx
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 
 import { useSessionStore } from "../state/sessionStore";
@@ -7,6 +7,7 @@ import type { SessionReport } from "../types/session";
 
 import ErrorBanner from "../components/ErrorBanner";
 import { ROUTES } from "../lib/routes";
+import { cgApi } from "../lib/cgApi";
 
 // ─────────────────────────────────────────────────────────────
 // Helpers (tåler number og string med komma/punktum)
@@ -48,7 +49,8 @@ function fmtC(x: unknown): string {
 }
 
 const SessionView: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams<{ id: string }>();
+  const id = params.id;
   const location = useLocation();
 
   const {
@@ -137,6 +139,50 @@ const SessionView: React.FC = () => {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // ✅ Patch: Auto re-analyze ved profile_version mismatch (NOOP midlertidig)
+  // ─────────────────────────────────────────────────────────────
+  // NOTE: beholdt ref + effect for debugging/logging, men vi trigger IKKE loadSession().
+  // MIDDELTIDIG: disable auto re-analyze, den skaper request-storm + timeout
+  const autoKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    (async () => {
+      const s = currentSession as any;
+      const sid = String(params.id ?? "");
+      if (!sid || !s) return;
+
+      // 1) Hent UI profile_version (safe)
+      const ui = await cgApi.profileGet().catch(() => null);
+      const uiPv = String((ui as any)?.profile_version ?? "");
+
+      // 2) Finn "usedPv" fra analyze-respons (toppnivå først)
+      const usedPv =
+        String(s?.profile_version ?? "") ||
+        String(s?.metrics?.profile_used?.profile_version ?? "");
+
+      if (!uiPv || !usedPv) return;
+
+      // 3) Guard: maks én log per (id + uiPv) i StrictMode
+      const key = `${sid}::${uiPv}`;
+      if (autoKeyRef.current === key) return;
+
+      if (uiPv !== usedPv) {
+        autoKeyRef.current = key;
+
+        console.log("[SessionView] Auto re-analyze DISABLED (profile_version mismatch)", {
+          id: sid,
+          uiPv,
+          usedPv,
+        });
+
+        // NOOP:
+        // await loadSession(sid, { forceRecompute: true } as any);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSession, params.id]);
+
   // ─────────────────────────────────────────────────────
   // Tydelig rendering state – ingen silent fallback
   // ─────────────────────────────────────────────────────
@@ -189,7 +235,7 @@ const SessionView: React.FC = () => {
   // metrics (total_watt, drag_watt, osv.) kan ligge i session.metrics
   const metrics: any = (session as any)?.metrics ?? null;
 
-  const profileUsed: any = metrics?.profile_used ?? null;
+  const profileUsed: any = metrics?.profile_used ?? (session as any)?.profile_used ?? null;
   const weatherUsed: any = metrics?.weather_used ?? null;
 
   const totalWeight: unknown = profileUsed

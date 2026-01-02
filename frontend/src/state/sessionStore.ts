@@ -1,5 +1,4 @@
-﻿// frontend/src/state/sessionStore.ts
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import type { SessionListItem, SessionReport } from "../types/session";
 import {
   fetchSessionsList,
@@ -13,17 +12,11 @@ type LoadSessionOpts = {
 };
 
 interface SessionState {
-  // ─────────────────────────────────────────────────────────────
-  // Listevisning (/api/sessions/list)
-  // ─────────────────────────────────────────────────────────────
   sessionsList: SessionListItem[] | null;
   loadingList: boolean;
   errorList: string | null;
   loadSessionsList: () => Promise<void>;
 
-  // ─────────────────────────────────────────────────────────────
-  // Enkelt-økt (navn som SessionView forventer)
-  // ─────────────────────────────────────────────────────────────
   currentSession: SessionReport | null;
   loadingSession: boolean;
   errorSession: string | null;
@@ -31,9 +24,6 @@ interface SessionState {
   loadSession: (id: string, opts?: LoadSessionOpts) => Promise<void>;
   clearCurrentSession: () => void;
 
-  // ─────────────────────────────────────────────────────────────
-  // Backward compatibility (gamle navn)
-  // ─────────────────────────────────────────────────────────────
   session: SessionReport | null;
   loading: boolean;
   error: string | null;
@@ -41,33 +31,30 @@ interface SessionState {
   fetchSession: (id: string, opts?: LoadSessionOpts) => Promise<void>;
 }
 
-export const useSessionStore = create<SessionState>((set) => {
-  // ✅ Intern helper: unngår self-reference til useSessionStore i initializer
+export const useSessionStore = create<SessionState>((set, get) => {
   const runLoadSession = async (id: string, opts?: LoadSessionOpts): Promise<void> => {
     console.log("[sessionStore.loadSession] KALT med id:", id, "opts:", opts);
 
     set({
       loadingSession: true,
-      loading: true, // alias
+      loading: true,
       errorSession: null,
-      error: null, // alias
+      error: null,
     });
 
     let result: FetchSessionResult;
     try {
-      // Viktig: apiFetchSession må støtte opts (eller ignorerer dem).
-      // Vi bruker `as any` for å holde dette kompatibelt inntil api.ts er oppdatert.
       result = await (apiFetchSession as any)(id, opts);
     } catch (err) {
       console.error("[sessionStore.loadSession] Uventet feil:", err);
       const msg = "Klarte ikke å hente analyse for økten.";
       set({
         loadingSession: false,
-        loading: false, // alias
+        loading: false,
         currentSession: null,
-        session: null, // alias
+        session: null,
         errorSession: msg,
-        error: msg, // alias
+        error: msg,
       });
       return;
     }
@@ -77,16 +64,16 @@ export const useSessionStore = create<SessionState>((set) => {
         "[sessionStore.loadSession] analyze-feil:",
         result.error,
         "source=",
-        result.source,
+        result.source
       );
       const msg = result.error || "Noe gikk galt ved henting av økt.";
       set({
         loadingSession: false,
-        loading: false, // alias
+        loading: false,
         currentSession: null,
-        session: null, // alias
+        session: null,
         errorSession: msg,
-        error: msg, // alias
+        error: msg,
       });
       return;
     }
@@ -94,39 +81,86 @@ export const useSessionStore = create<SessionState>((set) => {
     console.log(
       "[sessionStore.loadSession] OK – har session-data (source=",
       result.source,
-      ")",
+      ")"
     );
 
-    set({
-      loadingSession: false,
-      loading: false, // alias
-      errorSession: null,
-      error: null, // alias
-      currentSession: result.data,
-      session: result.data, // alias
+    set((state) => {
+      const data: any = result.data as any;
+
+      const patch: any = {};
+      if (typeof data.precision_watt_avg === "number")
+        patch.precision_watt_avg = data.precision_watt_avg;
+      if (typeof data.start_time === "string" || data.start_time === null)
+        patch.start_time = data.start_time;
+      if (typeof data.distance_km === "number" || data.distance_km === null)
+        patch.distance_km = data.distance_km;
+      if (typeof data.weather_source === "string" || data.weather_source === null)
+        patch.weather_source = data.weather_source;
+      if (typeof data.profile_label === "string" || data.profile_label === null)
+        patch.profile_label = data.profile_label;
+      if (typeof data.debug_source_path === "string" || data.debug_source_path === null)
+        patch.debug_source_path = data.debug_source_path;
+
+      const prev = state.sessionsList ?? null;
+      let nextList = prev;
+
+      if (Array.isArray(prev)) {
+        const target = String(id);
+        let hit = false;
+
+        nextList = prev.map((it: any) => {
+          const sid = String(it?.session_id ?? "");
+          const rid = String(it?.ride_id ?? "");
+          if (sid === target || rid === target) {
+            hit = true;
+            return { ...it, ...patch };
+          }
+          return it;
+        });
+
+        if (hit) {
+          console.log("[sessionStore.loadSession] patched sessionsList row", {
+            id: target,
+            precision_watt_avg: patch.precision_watt_avg,
+          });
+        } else {
+          console.log("[sessionStore.loadSession] no matching row in sessionsList", {
+            id: target,
+          });
+        }
+      }
+
+      return {
+        loadingSession: false,
+        loading: false,
+        errorSession: null,
+        error: null,
+        currentSession: result.data,
+        session: result.data,
+        sessionsList: nextList,
+      };
     });
   };
 
   return {
-    // 🚩 Init state – liste
     sessionsList: null,
     loadingList: false,
     errorList: null,
 
-    // 🚩 Init state – enkelt-session (nye)
     currentSession: null,
     loadingSession: false,
     errorSession: null,
 
-    // 🚩 Init state – enkelt-session (aliases)
     session: null,
     loading: false,
     error: null,
 
-    // -----------------------------
-    // Liste: /api/sessions/list
-    // -----------------------------
     loadSessionsList: async (): Promise<void> => {
+      if (get().loadingList) {
+        console.log("[sessionStore.loadSessionsList] SKIP (already loading)");
+        return;
+      }
+
       console.log("[sessionStore.loadSessionsList] KALT");
       set({ loadingList: true, errorList: null });
 
@@ -134,7 +168,7 @@ export const useSessionStore = create<SessionState>((set) => {
         const sessions = await fetchSessionsList();
         console.log(
           "[sessionStore.loadSessionsList] Ferdig – antall sessions:",
-          sessions.length,
+          sessions.length
         );
         set({
           sessionsList: sessions,
@@ -150,36 +184,27 @@ export const useSessionStore = create<SessionState>((set) => {
       }
     },
 
-    // -----------------------------
-    // Clear (brukes av SessionView)
-    // -----------------------------
     clearCurrentSession: (): void => {
       set({
         currentSession: null,
-        session: null, // alias
+        session: null,
         errorSession: null,
-        error: null, // alias
+        error: null,
         loadingSession: false,
-        loading: false, // alias
+        loading: false,
       });
     },
 
-    // -----------------------------
-    // Ny action (SessionView bruker denne)
-    // -----------------------------
     loadSession: async (
       id: string,
-      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> },
+      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> }
     ): Promise<void> => {
       await runLoadSession(id, opts);
     },
 
-    // -----------------------------
-    // Gammel action (alias til loadSession)
-    // -----------------------------
     fetchSession: async (
       id: string,
-      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> },
+      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> }
     ): Promise<void> => {
       await runLoadSession(id, opts);
     },

@@ -337,12 +337,14 @@ export async function fetchSession(
   console.log("[API] fetchSession (LIVE) →", url.toString());
 
   try {
-    const body: Record<string, any> = {};
-
+    // ✅ PATCH: backend forventer payload med nøkkel "profile"
     // Prioritet: opts.profileOverride > localStorage override
-    const profile_override = opts?.profileOverride ?? getLocalProfileOverride() ?? null;
+    const profile =
+      (opts?.profileOverride as Record<string, any> | undefined) ??
+      (getLocalProfileOverride() as unknown as Record<string, any> | null) ??
+      null;
 
-    const payload = profile_override != null ? { ...body, profile_override } : { ...body };
+    const bodyObj = profile ? { profile } : {};
 
     const res = await fetchWithTimeout(url.toString(), {
       ...FETCH_WITH_COOKIES, // ✅ KRITISK: sender cg_uid cookie
@@ -351,7 +353,7 @@ export async function fetchSession(
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(bodyObj),
       timeoutMs: 20_000,
     });
 
@@ -523,8 +525,3 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
 
   return out;
 }
-
-
-
-
-

@@ -1,0 +1,19 @@
+Ny Økt Annalyse Sjekk Av rides Pr 02 Januar 2026
+
+
+
+
+
+Rides Liste Med Vekt Vekt pluss Default Sykkelvekt 8 og DefaultVerdier
+                       |140KG|130,4KG|114KG|104KG|
+Dato       | Ride Nr   |Precision Watt           |          |Strava W|Kommentar
+14.12.2025 |16743906198|247W |237W   |222W |212  |          |177W    |Lever
+11.12.2025 |16712572748|268W |260W   |248W |240W |          |179W    |                                           
+22.11.2025 |16530586366|256W |249W   |237W |229W |          |168W    |               
+14.11.2025 |16473718378|227W |220W   |208W |201W |          |161W    |
+25.10.2025 |16251885270|227W |219W   |204W |195W |          |166W    |Lever 
+23.10.2025 |16231049823|292W |283W   |266W |256W |          |200W    | 
+13.10.2025 |16127771071|285W |275W   |257W |247W |          |205W    |
+ 2.10.2025 |16007374633|264W |256W   |243W |235W |          |196W    | Død Uendret alle tre annalyser 
+
+    
