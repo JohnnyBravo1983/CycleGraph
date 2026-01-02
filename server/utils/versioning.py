@@ -6,7 +6,7 @@ import json
 import os
 from typing import Dict, Any
 
-CANON_KEYS = ("rider_weight_kg","bike_type","bike_weight_kg","tire_width_mm","tire_quality","device")
+CANON_KEYS = ("rider_weight_kg", "bike_type", "bike_weight_kg", "tire_width_mm", "tire_quality", "device")
 
 DEFAULT_PROFILE = {
     "rider_weight_kg": 75.0,
@@ -42,7 +42,7 @@ def _ensure_dirs(uid: str) -> None:
     os.makedirs(_user_dir(uid), exist_ok=True)
 
 
-def _normalize_bike_weight(profile: Dict[str,Any]) -> None:
+def _normalize_bike_weight(profile: Dict[str, Any]) -> None:
     bt = (profile.get("bike_type") or "road").lower()
     if bt == "road":
         profile["bike_weight_kg"] = float(profile.get("bike_weight_kg", 8.0)) or 8.0
@@ -54,10 +54,10 @@ def _normalize_bike_weight(profile: Dict[str,Any]) -> None:
 
 def json_canon(obj: Dict[str, Any]) -> str:
     sub = {k: obj.get(k) for k in CANON_KEYS}
-    return json.dumps(sub, sort_keys=True, separators=(",",":"), ensure_ascii=False)
+    return json.dumps(sub, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def compute_version(profile_subset: Dict[str, Any]) -> Dict[str,str]:
+def compute_version(profile_subset: Dict[str, Any]) -> Dict[str, str]:
     s = json_canon(profile_subset)
     h = hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
     ymd = dt.datetime.utcnow().strftime("%Y%m%d")
@@ -66,15 +66,15 @@ def compute_version(profile_subset: Dict[str, Any]) -> Dict[str,str]:
 
 def decide_crank_eff_pct(now_utc: dt.datetime | None = None) -> float:
     m = (now_utc or dt.datetime.utcnow()).month
-    return 96.0 if m in (11,12,1,2,3) else 97.0
+    return 96.0 if m in (11, 12, 1, 2, 3) else 97.0
 
 
-def _write_profile_file(profile_path: str, doc: Dict[str,Any]) -> None:
+def _write_profile_file(profile_path: str, doc: Dict[str, Any]) -> None:
     with open(profile_path, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
 
 
-def _append_audit_line(audit_path: str, profile_version: str, version_hash: str, subset: Dict[str,Any]) -> None:
+def _append_audit_line(audit_path: str, profile_version: str, version_hash: str, subset: Dict[str, Any]) -> None:
     line = {
         "ts": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "profile_version": profile_version,
@@ -85,7 +85,7 @@ def _append_audit_line(audit_path: str, profile_version: str, version_hash: str,
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
-def load_profile(uid: str) -> Dict[str,Any]:
+def load_profile(uid: str) -> Dict[str, Any]:
     """Les profil per uid. Hvis den ikke finnes, opprett initial profil uten å kalle save_profile (unngå rekursjon)."""
     if not uid:
         raise ValueError("uid is required")
@@ -97,9 +97,9 @@ def load_profile(uid: str) -> Dict[str,Any]:
         _normalize_bike_weight(prof)
         subset = {k: prof.get(k) for k in CANON_KEYS}
         v = compute_version(subset)
-        prof["version_hash"]     = v["version_hash"]
-        prof["profile_version"]  = v["profile_version"]
-        prof["version_at"]       = v["version_at"]
+        prof["version_hash"] = v["version_hash"]
+        prof["profile_version"] = v["profile_version"]
+        prof["version_at"] = v["version_at"]
         prof["crank_efficiency"] = decide_crank_eff_pct()
         _write_profile_file(profile_path, prof)
         _append_audit_line(audit_path, prof["profile_version"], prof["version_hash"], subset)
@@ -113,9 +113,9 @@ def load_profile(uid: str) -> Dict[str,Any]:
 
     subset = {k: prof.get(k) for k in CANON_KEYS}
     v = compute_version(subset)
-    prof["version_hash"]     = v["version_hash"]
-    prof["profile_version"]  = v["profile_version"]
-    prof["version_at"]       = v["version_at"]
+    prof["version_hash"] = v["version_hash"]
+    prof["profile_version"] = v["profile_version"]
+    prof["version_at"] = v["version_at"]
     if "crank_efficiency" not in prof:
         prof["crank_efficiency"] = decide_crank_eff_pct()
 
@@ -123,12 +123,28 @@ def load_profile(uid: str) -> Dict[str,Any]:
     return prof
 
 
-def save_profile(uid: str, incoming: Dict[str,Any]) -> Dict[str,Any]:
+def save_profile(uid: str, incoming: Dict[str, Any]) -> Dict[str, Any]:
     """Lagre profil per uid."""
     if not uid:
         raise ValueError("uid is required")
     _ensure_dirs(uid)
     profile_path, audit_path = _paths(uid)
+
+    # --- PATCH: normaliser incoming fra UI ---
+    # UI (onboarding) kan sende flate felter:
+    #   { "rider_weight_kg": 140, "bike_weight_kg": 8, "cda": 0.32 }
+    # Backend kan også få inn format:
+    #   { "profile": { ... } }
+    # Vi normaliserer til "incoming_profile" dict.
+    if incoming is None or not isinstance(incoming, dict):
+        incoming = {}
+
+    if "profile" in incoming and isinstance(incoming.get("profile"), dict):
+        incoming_profile = incoming.get("profile") or {}
+    else:
+        incoming_profile = incoming  # flatt payload → behandles som profile-felter
+
+    # ------------------------------------------------------------
 
     if os.path.exists(profile_path):
         try:
@@ -139,14 +155,22 @@ def save_profile(uid: str, incoming: Dict[str,Any]) -> Dict[str,Any]:
     else:
         current = DEFAULT_PROFILE.copy()
 
-    merged = {**DEFAULT_PROFILE, **current, **{k:v for k,v in (incoming or {}).items() if k!="crank_efficiency"}}
+    # MERGE:
+    # - behold DEFAULT + current
+    # - oppdater med incoming_profile
+    # - ignorer crank_efficiency fra UI (server bestemmer)
+    merged = {
+        **DEFAULT_PROFILE,
+        **current,
+        **{k: v for k, v in (incoming_profile or {}).items() if k != "crank_efficiency"},
+    }
     _normalize_bike_weight(merged)
 
     subset = {k: merged.get(k) for k in CANON_KEYS}
     v = compute_version(subset)
-    merged["version_hash"]     = v["version_hash"]
-    merged["profile_version"]  = v["profile_version"]
-    merged["version_at"]       = v["version_at"]
+    merged["version_hash"] = v["version_hash"]
+    merged["profile_version"] = v["profile_version"]
+    merged["version_at"] = v["version_at"]
     merged["crank_efficiency"] = decide_crank_eff_pct()
 
     prev_version = current.get("profile_version")
@@ -158,7 +182,7 @@ def save_profile(uid: str, incoming: Dict[str,Any]) -> Dict[str,Any]:
     return merged
 
 
-def get_profile_export(uid: str) -> Dict[str,Any]:
+def get_profile_export(uid: str) -> Dict[str, Any]:
     prof = load_profile(uid)
     subset = {k: prof.get(k) for k in CANON_KEYS}
     v = compute_version(subset)  # deterministisk for GET

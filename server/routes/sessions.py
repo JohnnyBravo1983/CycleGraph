@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import JSONResponse  # <-- PATCH 1F: Import JSONResponse
 from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
-from server.utils.versioning import compute_version, load_profile
+from server.utils.versioning import compute_version, load_profile, get_profile_export  # <-- PATCH 1: Added get_profile_export
 from datetime import datetime, timezone
 
 import os
@@ -63,6 +63,26 @@ from pathlib import Path
 from typing import Any, Dict, Tuple, Optional, List
 import statistics as _stats  # <-- PATCH 2: Import for median
 
+# ==================== PATCH: PERSIST HELPER FUNCTIONS ====================
+def _results_dir() -> Path:
+    """Returner paths til logs/results mappen."""
+    return _repo_root_from_here() / "logs" / "results"
+
+def _result_path(sid: str) -> Path:
+    """Returner full path til result_{sid}.json med safe navn."""
+    safe = re.sub(r"[^0-9A-Za-z_-]+", "", sid)
+    return _results_dir() / f"result_{safe}.json"
+
+def _write_json_atomic(path: Path, obj: dict) -> None:
+    """
+    Atomisk skriving av JSON-fil med tmp-fil og rename.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+# ==================== END PATCH ====================
+
 # ==================== PATCH S2B: Weather FP from key function ====================
 def _weather_fp_from_key(ts_hour: int, lat: float, lon: float, source: str) -> str:
     """
@@ -113,7 +133,7 @@ def _parse_ts_hour_to_epoch(ts_hour: object) -> int | None:
         fmts = [
             "%Y-%m-%dT%H:%M",
             "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%d %H:%M",
+            "%Y-%m-d %H:%M",
             "%Y-%m-d %H:%M:%S",
             "%Y-%m-dT%H:00",   # hvis noen ganger lagres på '...T00:00' uten minutter
         ]
@@ -266,7 +286,7 @@ def _canonical_weather_key_from_samples(samples: list[dict], want_debug: bool = 
             err.update(_dbg_snapshot())
         return None, None, None, err
 
-    # ==================== PATCH 2: t_abs extraction ====================
+    # ==================== PATCH WX-1: t_abs extraction with ISO8601 'Z' support ====================
     t0 = samples[0].get("t_abs")
     if not isinstance(t0, (int, float, str)):
         err = {"error": "WEATHER_CANONICAL_ERROR: samples[0].t_abs missing/invalid"}
@@ -275,7 +295,26 @@ def _canonical_weather_key_from_samples(samples: list[dict], want_debug: bool = 
         return None, None, None, err
 
     try:
-        t0 = int(float(t0))
+        # 1) Numeric epoch seconds (int/float or numeric string)
+        if isinstance(t0, (int, float)):
+            t0_sec = int(float(t0))
+        else:
+            s = str(t0).strip()
+
+            # numeric string?
+            try:
+                t0_sec = int(float(s))
+            except Exception:
+                # 2) ISO8601 string support, incl trailing 'Z'
+                # Example: '2025-10-23T09:53:13Z' -> '2025-10-23T09:53:13+00:00'
+                if s.endswith("Z"):
+                    s = s[:-1] + "+00:00"
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                t0_sec = int(dt.timestamp())
+
+        t0 = t0_sec
     except Exception:
         err = {"error": f"WEATHER_CANONICAL_ERROR: bad t_abs0={t0!r}"}
         if want_debug:
@@ -283,7 +322,7 @@ def _canonical_weather_key_from_samples(samples: list[dict], want_debug: bool = 
         return None, None, None, err
 
     ts_hour = (t0 // 3600) * 3600  # floor til time
-    # ==================== END PATCH 2 ====================
+    # ==================== END PATCH WX-1 ====================
 
     # ==================== PATCH 2: lat_deg/lon_deg median ====================
     lats: list[float] = []
@@ -358,7 +397,7 @@ def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon
         meta["lon_used"] = float(lon)
 
         import datetime
-        meta["hour_iso_utc"] = datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00")
+        meta["hour_iso_utc"] = datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-dT%H:00")
 
         if fp:
             meta["fp"] = fp
@@ -370,10 +409,39 @@ def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon
         return
 # ==================== END PATCH S3D ====================
 
-# ─────────────────────────────────────────────────────────────
-# Rust adapter: preferer cyclegraph_core, fallback til cli.rust_bindings
-# ─────────────────────────────────────────────────────────────
-_adapter_import_error = None
+# ==================== PATCH 1: Helper function for UI profile ====================
+from fastapi import HTTPException, Request
+
+def _load_ui_profile_for_request(req: Request) -> dict:
+    """
+    Bruk samme SSOT som /api/profile/get (profile_router).
+    IKKE fall back til load_profile() (den krever uid og kan gi 500).
+    Mangler cookie -> 401 (kontrollert), ikke 500.
+    """
+    uid = req.cookies.get("cg_uid")
+    if not uid or not isinstance(uid, str):
+        raise HTTPException(status_code=401, detail="Missing cg_uid cookie")
+
+    exp = get_profile_export(uid) or {}
+    prof = exp.get("profile") or {}
+    pv = exp.get("profile_version")
+
+    # Sørg for at analyze får core-feltene den forventer
+    rider = prof.get("rider_weight_kg")
+    bike = prof.get("bike_weight_kg") or 0.0
+
+    if rider is not None and "total_weight_kg" not in prof:
+        prof["total_weight_kg"] = float(rider) + float(bike)
+
+    # Alias som sessions.py noen steder forventer
+    if "weight_kg" not in prof and "total_weight_kg" in prof:
+        prof["weight_kg"] = prof["total_weight_kg"]
+
+    if pv and "profile_version" not in prof:
+        prof["profile_version"] = pv
+
+    return prof
+
 
 def _load_rs_power_json():
     global _adapter_import_error
@@ -504,6 +572,7 @@ def _probe_streams_file(path: str) -> dict:
         return {"error": "json_decode_error", "message": str(e), "path": path}
     except Exception as e:
         return {"error": "unexpected_error", "message": str(e), "path": path}
+# ==================== END STREAMS PROBE HELPER ====================
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -1667,123 +1736,146 @@ async def analyze_session(
                     doc.pop("weather_source", None)
                     # ==================== END PATCH S3A ====================
 
-                    # PATCH C: Legg til start_time fra trend_sessions.csv hvis mangler
-                    if not doc.get("start_time"):
-                        st = _trend_sessions_lookup_start_time(sid)
-                        if st:
-                            doc["start_time"] = st
-
-                    dbg = doc.get("debug") or {}
-                    if isinstance(dbg, dict):
-                        dbg.setdefault("reason", "persisted_hit")
-                        dbg.setdefault("persist_path", str(persisted_path))
-                        doc["debug"] = dbg
-
-                    doc.setdefault("source", "persisted")
-                    print(
-                        f"[SVR] persisted_hit sid={sid} path={persisted_path}",
-                        file=sys.stderr,
-                    )
-                    
-                    # ==================== PATCH S3B: LEGG TIL WEATHER PÅ NYTT BASERT PÅ CANONICAL KEY ====================
-                    # Vi må nå beregne weather på nytt basert på canonical key
-                    # Last samples hvis de ikke allerede er tilgjengelige
-                    samples = None
-                    sess_path = _pick_best_session_path(sid)
-                    if sess_path is not None:
-                        try:
-                            loaded = _load_samples_from_session_file(sess_path)
-                            samples = loaded
-                            dbg = doc.get("debug") or {}
-                            if not isinstance(dbg, dict):
-                                dbg = {}
-                            dbg["session_path"] = str(sess_path)
-                            dbg["samples_loaded"] = len(samples)
-                            doc["debug"] = dbg
-                        except Exception as e:
-                            print(
-                                f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
-                                file=sys.stderr,
-                            )
-                    
-                    # Beregn canonical key fra samples
-                    if isinstance(samples, list) and len(samples) > 0:
-                        center_lat, center_lon, ts_hour, wx_err = _canonical_weather_key_from_samples(samples, want_debug=False)
-                        if wx_err is None and center_lat is not None and center_lon is not None and ts_hour is not None:
-                            # Hent vær for denne nøkkelen
-                            wx_fetched = await _fetch_open_meteo_hour_ms(float(center_lat), float(center_lon), int(ts_hour))
-                            if wx_fetched:
-                                wx_used = wx_fetched
-                                wx_used["dir_is_from"] = True
-                                wx_meta = {
-                                    "provider": "open-meteo/era5",
-                                    "lat_used": float(center_lat),
-                                    "lon_used": float(center_lon),
-                                    "ts_hour": int(ts_hour),
-                                    "height": "10m->2m",
-                                    "unit_wind": "m/s",
-                                    "cache_key": f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}",
-                                }
-                                # ==================== PATCH 1B: Robust weather FP with fallback ====================
-                                try:
-                                    fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
-                                except Exception:
-                                    fp = None
-                                # Oppdater doc med det nye været
-                                metrics = doc.get("metrics") or {}
-                                metrics["weather_used"] = wx_used
-                                metrics["weather_meta"] = wx_meta
-                                if isinstance(fp, str) and fp:
-                                    metrics["weather_fp"] = fp
-                                metrics["weather_applied"] = True
-                                doc["metrics"] = metrics
-                                doc["weather_source"] = wx_meta.get("provider")
-                                doc["weather_applied"] = True
-                                
-                                # ==================== PATCH 1B: Robust weather key injection ====================
-                                try:
-                                    _inject_weather_key_meta_into_resp(doc, int(ts_hour), float(center_lat), float(center_lon), fp)
-                                except Exception:
-                                    pass
-                                # ==================== END PATCH 1B ====================
-                                
-                                # Oppdater også debug hvis det finnes
-                                dbg = doc.get("debug") or {}
-                                if isinstance(dbg, dict):
-                                    dbg["weather_source"] = wx_meta.get("provider")
-                                    dbg["weather_applied"] = True
-                                    if want_debug:
-                                        dbg["wx_key"] = {"ts_hour": ts_hour, "lat": center_lat, "lon": center_lon}
-                                    doc["debug"] = dbg
-                                
-                                fp8 = fp[:8] if isinstance(fp, str) else "no-fp"
-                                print(f"[SVR][PATCH S3] Recalculated weather for persisted doc: ts_hour={ts_hour}, lat={center_lat}, lon={center_lon}, fp={fp8}", file=sys.stderr)
-                            else:
-                                print(f"[SVR][PATCH S3] Failed to fetch weather for persisted doc", file=sys.stderr)
-                        else:
-                            print(f"[SVR][PATCH S3] Could not calculate canonical key for persisted doc", file=sys.stderr)
-                    # ==================== END PATCH S3B ====================
+                    # ==================== PATCH: INVALIDATE PERSISTED RESULT IF PROFILE_VERSION HAS CHANGED ====================
                     try:
-                        m = doc.get("metrics") or {}
-                        pu = (m.get("profile_used") or {}) if isinstance(m, dict) else {}
-                        pv = pu.get("profile_version")
-                        if not doc.get("profile_version") and isinstance(pv, str) and pv:
-                            doc["profile_version"] = pv
-                    except Exception:
-                        pass            
-                        
-                    dbg = doc.get("debug") or {}
-                    if not isinstance(dbg, dict):
-                        dbg = {}
-                    dbg.setdefault("reason", "persisted_hit")
-                    dbg["persist_path"] = str(persisted_path)
+                        # current profile (UI truth) - bruk samme metode som i PATCH 1
+                        current_profile = _load_ui_profile_for_request(request)
+                        # Hent profilversjonen fra current_profile (den kan være i current_profile["profile_version"])
+                        current_pv = current_profile.get("profile_version")
+                    except Exception as e:
+                        print(f"[SVR] error loading current profile for version check: {e}")
+                        current_pv = None
 
-                    doc["debug"] = dbg
-                    
-                    
-                    
-                    
-                    return _RET(doc)
+                    # Hent profilversjonen fra persisted-doc
+                    persisted_pv = None
+                    if isinstance(doc, dict):
+                        # prøv begge (avhengig av format)
+                        persisted_pv = doc.get("profile_version") or (doc.get("profile_used") or {}).get("profile_version")
+
+                    if current_pv and persisted_pv and current_pv != persisted_pv:
+                        print(f"[SVR] persisted_bypass sid={sid} reason=profile_version_mismatch current={current_pv} persisted={persisted_pv}")
+                        # Invalider doc slik at vi ikke returnerer den
+                        doc = None
+                        # Sett persisted_path = None for å gå inn i rekompute-path
+                        persisted_path = None
+                    # ==================== END PATCH ====================
+
+                    if doc is not None:  # Hvis doc ikke ble invalidert
+                        # PATCH C: Legg til start_time fra trend_sessions.csv hvis mangler
+                        if not doc.get("start_time"):
+                            st = _trend_sessions_lookup_start_time(sid)
+                            if st:
+                                doc["start_time"] = st
+
+                        dbg = doc.get("debug") or {}
+                        if isinstance(dbg, dict):
+                            dbg.setdefault("reason", "persisted_hit")
+                            dbg.setdefault("persist_path", str(persisted_path))
+                            doc["debug"] = dbg
+
+                        doc.setdefault("source", "persisted")
+                        print(
+                            f"[SVR] persisted_hit sid={sid} path={persisted_path}",
+                            file=sys.stderr,
+                        )
+                        
+                        # ==================== PATCH S3B: LEGG TIL WEATHER PÅ NYTT BASERT PÅ CANONICAL KEY ====================
+                        # Vi må nå beregne weather på nytt basert på canonical key
+                        # Last samples hvis de ikke allerede er tilgjengelige
+                        samples = None
+                        sess_path = _pick_best_session_path(sid)
+                        if sess_path is not None:
+                            try:
+                                loaded = _load_samples_from_session_file(sess_path)
+                                samples = loaded
+                                dbg = doc.get("debug") or {}
+                                if not isinstance(dbg, dict):
+                                    dbg = {}
+                                dbg["session_path"] = str(sess_path)
+                                dbg["samples_loaded"] = len(samples)
+                                doc["debug"] = dbg
+                            except Exception as e:
+                                print(
+                                    f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
+                                    file=sys.stderr,
+                                )
+                        
+                        # Beregn canonical key fra samples
+                        if isinstance(samples, list) and len(samples) > 0:
+                            center_lat, center_lon, ts_hour, wx_err = _canonical_weather_key_from_samples(samples, want_debug=False)
+                            if wx_err is None and center_lat is not None and center_lon is not None and ts_hour is not None:
+                                # Hent vær for denne nøkkelen
+                                wx_fetched = await _fetch_open_meteo_hour_ms(float(center_lat), float(center_lon), int(ts_hour))
+                                if wx_fetched:
+                                    wx_used = wx_fetched
+                                    wx_used["dir_is_from"] = True
+                                    wx_meta = {
+                                        "provider": "open-meteo/era5",
+                                        "lat_used": float(center_lat),
+                                        "lon_used": float(center_lon),
+                                        "ts_hour": int(ts_hour),
+                                        "height": "10m->2m",
+                                        "unit_wind": "m/s",
+                                        "cache_key": f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}",
+                                    }
+                                    # ==================== PATCH 1B: Robust weather FP with fallback ====================
+                                    try:
+                                        fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
+                                    except Exception:
+                                        fp = None
+                                    # Oppdater doc med det nye været
+                                    metrics = doc.get("metrics") or {}
+                                    metrics["weather_used"] = wx_used
+                                    metrics["weather_meta"] = wx_meta
+                                    if isinstance(fp, str) and fp:
+                                        metrics["weather_fp"] = fp
+                                    metrics["weather_applied"] = True
+                                    doc["metrics"] = metrics
+                                    doc["weather_source"] = wx_meta.get("provider")
+                                    doc["weather_applied"] = True
+                                    
+                                    # ==================== PATCH 1B: Robust weather key injection ====================
+                                    try:
+                                        _inject_weather_key_meta_into_resp(doc, int(ts_hour), float(center_lat), float(center_lon), fp)
+                                    except Exception:
+                                        pass
+                                    # ==================== END PATCH 1B ====================
+                                    
+                                    # Oppdater også debug hvis det finnes
+                                    dbg = doc.get("debug") or {}
+                                    if isinstance(dbg, dict):
+                                        dbg["weather_source"] = wx_meta.get("provider")
+                                        dbg["weather_applied"] = True
+                                        if want_debug:
+                                            dbg["wx_key"] = {"ts_hour": ts_hour, "lat": center_lat, "lon": center_lon}
+                                        doc["debug"] = dbg
+                                    
+                                    fp8 = fp[:8] if isinstance(fp, str) else "no-fp"
+                                    print(f"[SVR][PATCH S3] Recalculated weather for persisted doc: ts_hour={ts_hour}, lat={center_lat}, lon={center_lon}, fp={fp8}", file=sys.stderr)
+                                else:
+                                    print(f"[SVR][PATCH S3] Failed to fetch weather for persisted doc", file=sys.stderr)
+                            else:
+                                print(f"[SVR][PATCH S3] Could not calculate canonical key for persisted doc", file=sys.stderr)
+                        # ==================== END PATCH S3B ====================
+                        try:
+                            m = doc.get("metrics") or {}
+                            pu = (m.get("profile_used") or {}) if isinstance(m, dict) else {}
+                            pv = pu.get("profile_version")
+                            if not doc.get("profile_version") and isinstance(pv, str) and pv:
+                                doc["profile_version"] = pv
+                        except Exception:
+                            pass            
+                            
+                        dbg = doc.get("debug") or {}
+                        if not isinstance(dbg, dict):
+                            dbg = {}
+                        dbg.setdefault("reason", "persisted_hit")
+                        dbg["persist_path"] = str(persisted_path)
+
+                        doc["debug"] = dbg
+                        
+                        return _RET(doc)
+                    # Hvis doc ble invalidert, fortsett til rekompute-grenen
                 else:
                     print(
                         f"[SVR] persisted_skip sid={sid} path={persisted_path} reason=not_full_doc",
@@ -2049,10 +2141,12 @@ async def analyze_session(
     profile = _ensure_profile_device((body.get("profile") or {}))
     body["profile"] = profile
 
+    # ==================== PATCH 1: USE UI PROFILE WHEN CLIENT DOESN'T SEND PROFILE ====================
     if not client_sent_profile:
-        up = load_user_profile()
+        up = _load_ui_profile_for_request(request)  # <-- Bruk UI profil
         profile = _ensure_profile_device(up)
         body["profile"] = profile
+    # ==================== END PATCH 1 ====================
 
     # === PATCH B: apply profile_override after base profile is selected ===
     override = body.get("profile_override") or {}
@@ -2108,7 +2202,8 @@ async def analyze_session(
             )
         }
     else:
-        prof_disk = load_profile()
+        # ==================== PATCH 1: USE UI PROFILE FOR VERSIONING ====================
+        prof_disk = _load_ui_profile_for_request(request)  # <-- Bruk UI profil
         subset = {
             k: prof_disk.get(k)
             for k in (
@@ -2640,23 +2735,18 @@ async def analyze_session(
 
                     ensured = _set_basic_ride_fields(ensured, sid)
 
-                    _write_observability(ensured)
+                    try:
+                        _write_observability(ensured)
+                    except Exception as e:
+                        print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
 
-                    rid = str(sid)
-                    safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
-                    outdir = Path("logs") / "results"
-                    outdir.mkdir(parents=True, exist_ok=True)
-
-                    result_data = json.dumps(
-                        ensured,
-                        ensure_ascii=False,
-                        indent=2,
-                        separators=(",", ": "),
-                    )
-                    (outdir / f"result_{safe}.json").write_text(
-                        result_data,
-                        encoding="utf-8",
-                    )
+                    # ==================== PATCH: SKRIV RESULTAT TIL FIL ETTER REKOMPUTE ====================
+                    try:
+                        _write_json_atomic(_result_path(sid), ensured)
+                        print(f"[SVR] persisted_write sid={sid} path={_result_path(sid)}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[SVR] persisted_write FAILED sid={sid} err={e}", file=sys.stderr)
+                    # ==================== END PATCH ====================
 
                     # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
                     # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
@@ -2673,6 +2763,14 @@ async def analyze_session(
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
                     resp2 = _ensure_contract_shape(resp)
                     resp2 = _set_basic_ride_fields(resp2, sid)
+                    
+                    # ==================== PATCH: SKRIV RESULTAT TIL FIL ETTER REKOMPUTE (fallback ved feil) ====================
+                    try:
+                        _write_json_atomic(_result_path(sid), resp2)
+                        print(f"[SVR] persisted_write (fallback) sid={sid} path={_result_path(sid)}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[SVR] persisted_write (fallback) FAILED sid={sid} err={e}", file=sys.stderr)
+                    # ==================== END PATCH ====================
                     
                     # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
                     # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
@@ -2834,19 +2932,14 @@ async def analyze_session(
     try:
         _write_observability(resp)
 
-        rid = str(sid)
-        safe = re.sub(r"[^0-9A-Za-z_-]+", "", rid)
-        outdir = Path("logs") / "results"
-        outdir.mkdir(parents=True, exist_ok=True)
-        (outdir / f"result_{safe}.json").write_text(
-            json.dumps(
-                resp,
-                ensure_ascii=False,
-                indent=2,
-                separators=(",", ": "),
-            ),
-            encoding="utf-8",
-        )
+        # ==================== PATCH: SKRIV RESULTAT TIL FIL FOR FALLBACK ====================
+        try:
+            _write_json_atomic(_result_path(sid), resp)
+            print(f"[SVR] persisted_write (fallback) sid={sid} path={_result_path(sid)}", file=sys.stderr)
+        except Exception as e:
+            print(f"[SVR] persisted_write (fallback) FAILED sid={sid} err={e}", file=sys.stderr)
+        # ==================== END PATCH ====================
+
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
 

@@ -383,20 +383,37 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-def _trigger_analyze_local(rid: str) -> Dict[str, Any]:
+# ----------------------------
+# Patch: internal analyze call MUST forward cg_uid cookie
+# ----------------------------
+def _trigger_analyze_local(rid: str, uid: Optional[str]) -> Dict[str, Any]:
     # intern call: unngår å import-koble oss til analyze_session-signaturen
     base = os.getenv("CG_API_BASE") or "http://localhost:5175"
     url = f"{base}/api/sessions/{rid}/analyze?force_recompute=1&debug=1"
+
+    cookies: Dict[str, str] = {}
+    if uid:
+        cookies["cg_uid"] = str(uid)
+
     try:
-        r = requests.post(url, json={}, timeout=60)
-        out: Dict[str, Any] = {"status_code": r.status_code}
+        # ✅ viktig: send faktisk JSON body + forward cookie
+        r = requests.post(url, json={}, cookies=cookies, timeout=60)
+
+        out: Dict[str, Any] = {
+            "status_code": r.status_code,
+            "url": url,
+            "forwarded_cookies": list(cookies.keys()),
+        }
+
+        # ✅ alltid gi oss hint (json hvis mulig ellers tekst med større cap)
         try:
             out["json"] = r.json()
         except Exception:
-            out["text"] = r.text[:500]
+            out["text"] = (r.text or "")[:5000]
+
         return out
     except Exception as e:
-        return {"status_code": 0, "error": repr(e), "url": url}
+        return {"status_code": 0, "error": repr(e), "url": url, "forwarded_cookies": list(cookies.keys())}
 
 
 @router.post("/import/{rid}")
@@ -448,7 +465,8 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
     debug_session_written = paths.get("debug_session_written", debug_session_written)
     debug_session_path = paths.get("debug_session_path", debug_session_path)
 
-    analyze = _trigger_analyze_local(rid)
+    # ✅ Patch: forward cg_uid into internal analyze call (so it matches browser call)
+    analyze = _trigger_analyze_local(rid, uid)
 
     return {
         "ok": True,
@@ -463,7 +481,6 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
         "samples_len": len(samples),
         "analyze": analyze,
         # Patch 3X: proof of running code + debug mirror status
-        "fingerprint": FP,
         "debug_session_written": debug_session_written,
         "debug_session_path": debug_session_path,
     }
