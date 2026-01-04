@@ -191,74 +191,119 @@ def _fmt_dt(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+# -------------------------------
+# PATCH C4-REPLACE: “siste mile”
+# - result_<sid>.json: bruk samples hvis finnes
+# - ellers fallback til session_<sid>.json i logs/actual*/latest/
+# - BOM-safe
+# -------------------------------
+
+def _json_load_any(p: Path) -> Optional[dict]:
+    try:
+        # BOM-safe
+        return json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            print("[LIST/ALL][C4] json load failed sid=", p.stem, "err=", repr(e))
+            return None
+
+
+def _extract_end_and_km_from_samples(samples: list) -> Tuple[Optional[str], Optional[float]]:
+    if not samples:
+        return None, None
+
+    # end_time = siste sample som har t_abs
+    end_time: Optional[str] = None
+    for s in reversed(samples):
+        if not isinstance(s, dict):
+            continue
+        ta = s.get("t_abs")
+        if isinstance(ta, str) and ta:
+            end_time = ta
+            break
+
+    # distance_km: prøv sample["distance_m"] (mange har ikke distanse per sample)
+    dist_m: Optional[float] = None
+    for s in reversed(samples):
+        if not isinstance(s, dict):
+            continue
+        dm = s.get("distance_m")
+        if isinstance(dm, (int, float)):
+            dist_m = float(dm)
+            break
+
+    km = (dist_m / 1000.0) if dist_m is not None else None
+    return end_time, km
+
+
+def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optional[float]]:
+    print("[LIST/ALL][C4 ENTER] sid=", sid)
+
+    # 1) først: resultfil (debug foretrekkes via _pick_result_path)
+    rp = _pick_result_path(sid)
+    if rp and rp.exists():
+        print("[LIST/ALL][C4] using file:", str(rp))
+        doc = _json_load_any(rp)
+        if isinstance(doc, dict):
+            samples = doc.get("samples")
+            if isinstance(samples, list) and len(samples) > 0:
+                end_time, km = _extract_end_and_km_from_samples(samples)
+
+                # top-level distance hvis den finnes
+                if km is None:
+                    dk = doc.get("distance_km")
+                    if isinstance(dk, (int, float)):
+                        km = float(dk)
+
+                print("[LIST/ALL][C4 RETURN]", end_time, km)
+                return end_time, km
+
+            # noen resultfiler har start_time men ikke samples -> fallthrough til session file
+
+    # 2) fallback: session_<sid>.json (actual10/latest + evt andre actual*/latest)
+    cand: List[Path] = []
+
+    # de faktiske stedene du har i loggene
+    cand.append(root / "logs" / "actual10" / "latest" / f"session_{sid}.json")
+
+    # evt flere actual*/latest
+    try:
+        cand.extend(sorted(root.glob(f"logs/actual*/latest/session_{sid}.json")))
+    except Exception:
+        pass
+
+    # _debug fallback
+    cand.append(root / "_debug" / f"session_{sid}.json")
+
+    # (vi ignorerer .gz her – du ba om “gjør kun dette”, uten ny gzip-dep)
+    for sp in cand:
+        if sp.exists() and sp.is_file():
+            print("[LIST/ALL][C4] fallback session file:", str(sp))
+            sdoc = _json_load_any(sp)
+            if isinstance(sdoc, dict):
+                ss = sdoc.get("samples")
+                if isinstance(ss, list) and len(ss) > 0:
+                    end_time, km = _extract_end_and_km_from_samples(ss)
+                    if km is None:
+                        dk = sdoc.get("distance_km")
+                        if isinstance(dk, (int, float)):
+                            km = float(dk)
+                    print("[LIST/ALL][C4 RETURN]", end_time, km)
+                    return end_time, km
+
+    print("[LIST/ALL][C4 RETURN] None None")
+    return None, None
+
+
 def _extract_end_time_and_km(session_id: str) -> tuple[Optional[str], Optional[float]]:
     """
-    ✅ PATCH C4 (BOM-safe + robust fallback)
-    - Les JSON BOM-safe
-    - distance_km fra metrics/top-level
-    - end_time: samples[-1].t_abs hvis samples finnes
-    - fallback: start_time + duration fra metrics hvis samples mangler
+    ✅ (Legacy signature beholdt) - men nå er den en tynn wrapper rundt _compute_end_time_and_km(...)
+    for å la resten av fila stå uendret.
     """
-    p = _pick_result_path(session_id)
-    if not p:
-        print("[LIST/ALL][C4] no result file for sid=", session_id)
-        return None, None
-
-    print("[LIST/ALL][C4] using file:", str(p))
-
-    try:
-        try:
-            txt = p.read_text(encoding="utf-8-sig")  # ✅ BOM safe
-        except Exception:
-            txt = p.read_text(encoding="utf-8", errors="replace")
-        obj = json.loads(txt)
-    except Exception as e:
-        print("[LIST/ALL][C4] json load failed sid=", session_id, "err=", repr(e))
-        return None, None
-
-    km: Optional[float] = None
-    metrics = obj.get("metrics")
-    if isinstance(obj.get("distance_km"), (int, float)):
-        km = float(obj["distance_km"])
-    elif isinstance(metrics, dict):
-        for k in ("distance_km", "dist_km", "distance", "distance_m", "dist_m", "total_distance_m"):
-            v = metrics.get(k)
-            if isinstance(v, (int, float)) and v > 0:
-                km = float(v) / 1000.0 if k.endswith("_m") else float(v)
-                break
-
-        if km is None:
-            dist_keys = [k for k in metrics.keys() if "dist" in k.lower()]
-            if dist_keys:
-                print("[LIST/ALL][C4] metrics dist_keys:", dist_keys)
-
-    samples = obj.get("samples")
-    if isinstance(samples, list) and samples:
-        last = samples[-1]
-        end_abs = last.get("t_abs") if isinstance(last, dict) else None
-        print("[LIST/ALL][C4 RETURN]", end_abs, km)
-        return end_abs, km
-
-    st = obj.get("start_time")
-    dt0 = _parse_dt(st) if isinstance(st, str) else None
-
-    dur_s: Optional[float] = None
-    if isinstance(metrics, dict):
-        for k in ("duration_s", "duration_sec", "elapsed_s", "elapsed_sec", "time_s", "moving_time_s"):
-            v = metrics.get(k)
-            if isinstance(v, (int, float)) and v > 0:
-                dur_s = float(v)
-                break
-
-    if dt0 and dur_s:
-        dt1 = dt0 + timedelta(seconds=dur_s)
-        end_abs = _fmt_dt(dt1)
-        print("[LIST/ALL][C4 RETURN]", end_abs, km)
-        return end_abs, km
-
-    print("[LIST/ALL][C4] no samples + no duration fallback sid=", session_id, "keys=", list(obj.keys())[:30])
-    print("[LIST/ALL][C4 RETURN]", None, km)
-    return None, km
+    root = _repo_root_from_here()
+    return _compute_end_time_and_km(root, session_id)
 
 
 # -------------------------------
@@ -673,7 +718,6 @@ async def list_all(
             file=sys.stderr,
         )
 
-    # ✅ hent uid én gang (brukes også i Patch E lookup)
     uid_for_session = cg_uid or _get_or_set_uid(req, response)
 
     rows: List[Dict[str, Any]] = []
@@ -737,13 +781,10 @@ async def list_all(
 
             # --- PATCH C4: end_time + distance_km (result JSON fallback) ---
             try:
-                print("[LIST/ALL][C4 ENTER] sid=", sid_item)
-
                 need_end = row.get("end_time") is None
                 need_km = row.get("distance_km") is None
-
                 if need_end or need_km:
-                    end_abs, km = _extract_end_time_and_km(sid_item)
+                    end_abs, km = _compute_end_time_and_km(root, sid_item)
                     if need_end and end_abs:
                         row["end_time"] = end_abs
                     if need_km and km is not None:
@@ -772,10 +813,6 @@ async def list_all(
 
     if debug:
         print(f"[list_all] rows={len(rows)}", file=sys.stderr)
-
-    # -------------------------------
-    # Sprint 4: per-user filtering
-    # -------------------------------
 
     root = _repo_root_from_here()
     index_path = root / "state" / "users" / uid_for_session / "sessions_index.json"
@@ -938,4 +975,4 @@ async def _debug_paths() -> Dict[str, Any]:
         "actual10_session_count": _count_glob(p_actual10, "session_*.json", recursive=True),
         "actual10_session_samples": actual10_session_samples,
         "ssot_examples": examples,
-    }
+    } 

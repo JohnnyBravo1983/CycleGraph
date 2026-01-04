@@ -7,34 +7,6 @@ import { cgApi, type SessionListItem } from "../lib/cgApi";
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 
-function fmtDateOnly(input?: string | null): string {
-  if (!input) return "Ukjent dato";
-
-  // 1) YYYY-MM-DD (vanlig fra backend)
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.trim());
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]) - 1;
-    const d = Number(m[3]);
-    const dt = new Date(y, mo, d, 12, 0, 0); // lokal midt på dagen
-    return new Intl.DateTimeFormat("nb-NO", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(dt);
-  }
-
-  // 2) ISO datetime
-  const t = Date.parse(input);
-  if (!Number.isFinite(t)) return "Ukjent dato";
-
-  return new Intl.DateTimeFormat("nb-NO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(t));
-}
-
 function parseTime(v?: string | null): number {
   if (!v) return -1;
   const t = Date.parse(v);
@@ -61,6 +33,40 @@ function weatherBadge(src?: string | null): { label: string; tone: "good" | "war
   return { label: s, tone: "neutral" };
 }
 
+// ✅ PATCH: varighet i minutter
+function minutesBetween(start?: string | null, end?: string | null): number | null {
+  if (!start || !end) return null;
+  const a = Date.parse(start);
+  const b = Date.parse(end);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const mins = Math.round((b - a) / 60000);
+  return mins >= 0 ? mins : null;
+}
+
+// ✅ PATCH: "Strava-ish" formatters
+function formatStartDateTime(start?: string | null): string {
+  if (!start) return "Ukjent";
+  const t = Date.parse(start);
+  if (!Number.isFinite(t)) return "Ukjent";
+  return new Date(t).toLocaleString("nb-NO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatEndTime(end?: string | null): string | null {
+  if (!end) return null;
+  const t = Date.parse(end);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleTimeString("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.ReactNode }> = ({
   tone,
   children,
@@ -83,7 +89,7 @@ const RidesPage: React.FC = () => {
   const navigate = useNavigate();
   const { sessionsList, loadingList, errorList, loadSessionsList } = useSessionStore();
 
-  // Track ui profile_version + reload list når den endres (beholdt fra deg)
+  // Track ui profile_version + reload list når den endres
   const [uiProfileVersion, setUiProfileVersion] = useState<string>("");
 
   // DEV toggle (for console/debug)
@@ -221,6 +227,16 @@ const RidesPage: React.FC = () => {
 
             const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
+            // ✅ PATCH: time range + mins + km
+            const mins = minutesBetween(s.start_time ?? null, (s as any).end_time ?? null);
+            const startTxt = formatStartDateTime(s.start_time ?? null);
+            const endTxt = formatEndTime((s as any).end_time ?? null);
+
+            const timeRange =
+              endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+
+            const kmTxt = distOk ? `${(s.distance_km as number).toFixed(1)} km` : "—";
+
             return (
               <div
                 key={sid}
@@ -236,9 +252,7 @@ const RidesPage: React.FC = () => {
                   <div className="min-w-0 space-y-2">
                     {/* Headline */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-sm font-semibold text-slate-900">
-                        {fmtDateOnly(s.start_time ?? null)}
-                      </div>
+                      <div className="text-sm font-semibold text-slate-900">{timeRange}</div>
 
                       <Badge tone={wx.tone}>Vær: {wx.label}</Badge>
                       <Badge tone="neutral">Profil: {s.profile_label ?? "ukjent"}</Badge>
@@ -246,14 +260,10 @@ const RidesPage: React.FC = () => {
 
                     {/* Metrics */}
                     <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-700">
-                      {distOk ? (
-                        <div>
-                          <span className="text-slate-500">Distance:</span>{" "}
-                          <span className="font-medium text-slate-900">
-                            {fmtNum(s.distance_km, 1)} km
-                          </span>
-                        </div>
-                      ) : null}
+                      <div>
+                        <span className="text-slate-500">Km:</span>{" "}
+                        <span className="font-medium text-slate-900">{kmTxt}</span>
+                      </div>
 
                       <div>
                         <span className="text-slate-500">Precision Watt:</span>{" "}
@@ -281,6 +291,14 @@ const RidesPage: React.FC = () => {
                         <div>
                           <span className="text-slate-500">start_time(raw):</span>{" "}
                           <span className="font-mono">{String(s.start_time ?? "")}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">end_time(raw):</span>{" "}
+                          <span className="font-mono">{String((s as any).end_time ?? "")}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">mins:</span>{" "}
+                          <span className="font-mono">{mins == null ? "—" : String(mins)}</span>
                         </div>
                       </div>
                     ) : null}
