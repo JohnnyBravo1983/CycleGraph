@@ -1,4 +1,4 @@
-# server/routes/sessions_list_router.py
+# frontend/server/routes/sessions_list_router.py
 from __future__ import annotations
 
 import csv
@@ -7,28 +7,104 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Request, Response, Cookie, Query
+from fastapi import APIRouter, Cookie, Query, Request, Response
 from server.routes.auth_strava import _get_or_set_uid
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Helpers
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -------------------------------
+# PATCH B2/B3: start_time fra resultfil + fingerprint/debug
+# -------------------------------
+_TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
+
+# PATCH C2: end_time fra resultfil (siste t_abs i fil-tail)
+_LAST_TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
+
+
+def _pick_result_path(session_id: str) -> Optional[Path]:
+    # Bruk eksisterende repo-root helper i denne fila
+    root = _repo_root_from_here()
+    cand = [
+        root / "_debug" / f"result_{session_id}.json",
+        root / "logs" / "results" / f"result_{session_id}.json",
+    ]
+    for p in cand:
+        if p.exists() and p.is_file():
+            return p
+    return None
+
+
+def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
+    """
+    Les kun starten av resultfilen og plukk første forekomst av "t_abs": "...."
+    Unngår å parse hele JSON / samples-arrayet.
+    """
+    try:
+        with path.open("rb") as f:
+            chunk = f.read(64_000)  # PATCH: lettvekts-lesing
+        text = chunk.decode("utf-8", errors="ignore")
+        m = _TABS_RE.search(text)
+        if not m:
+            return None
+        return m.group(1)
+    except Exception:
+        return None
+
+
+def _extract_last_t_abs_fast(p: Path) -> Optional[str]:
+    """
+    PATCH C2: Leser siste forekomst av "t_abs": "..." ved å lese bare slutten av fila.
+    Dette er raskt nok og unngår å parse hele JSON.
+    """
+    try:
+        data = p.read_bytes()
+    except Exception:
+        return None
+
+    # Les bare siste ~256k for speed (nok til å fange siste samples-blokk)
+    tail = data[-262144:] if len(data) > 262144 else data
+    try:
+        txt = tail.decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    matches = list(_LAST_TABS_RE.finditer(txt))
+    if not matches:
+        return None
+    return matches[-1].group(1)
+
+
+def _needs_start_time_fix(st: object) -> bool:
+    """
+    PATCH C3.1: Fix hvis:
+    - None/null
+    - ikke string
+    - tom string
+    - bare YYYY-MM-DD (len=10)
+    """
+    if not isinstance(st, str):
+        return True
+    s = st.strip()
+    if not s:
+        return True
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        return True
+    return False
+
+
+# -----------------------------------
+# Existing helpers
+# -----------------------------------
 
 _RE_RESULT_SID = re.compile(r"^result_(\d+)")
 
 
 def _repo_root_from_here() -> Path:
-    p = Path(__file__).resolve().parent
-    for _ in range(0, 10):
-        if (p / "logs").exists():
-            return p
-        if p.parent == p:
-            break
-        p = p.parent
-    return Path.cwd()
+    # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
+    # parents[0]=routes, parents[1]=server, parents[2]=frontend, parents[3]=CycleGraph (i mange oppsett)
+    # MEN: i ditt tilfelle peker parents[3] feil (Karriere). Vi bruker parents[2] som SSOT iht PATCH C2.
+    return Path(__file__).resolve().parents[2]
 
 
 def _read_json_utf8_sig(path: Path) -> Any:
@@ -132,16 +208,16 @@ def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[float]:
     """
-    Velg "avg" i riktig rekkefÃ¸lge.
+    Velg "avg" i riktig rekkefølge.
 
     Viktig: legacy docs kan ha doc.watts som ikke er "precision/model/total".
-    Derfor bruker vi ALDRI watts-mean som fallback fÃ¸r vi har en verifisert kontrakt.
+    Derfor bruker vi ALDRI watts-mean som fallback før vi har en verifisert kontrakt.
     """
     pw_avg = _to_float(doc.get("precision_watt_avg"))
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("precision_watt_avg"))
 
-    # Foretrekk modell/total fÃ¸r precision_watt i legacy
+    # Foretrekk modell/total før precision_watt i legacy
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("model_watt_wheel"))
     if pw_avg is None:
@@ -172,6 +248,7 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "session_id": sid,
         "ride_id": str(doc.get("ride_id")) if doc.get("ride_id") is not None else sid,
         "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
         "distance_km": distance_km,
         "precision_watt_avg": pw_avg,
         "profile_label": doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label"),
@@ -198,7 +275,7 @@ def _gather_result_files(root: Path) -> List[Path]:
 
     dbg = root / "_debug"
     if dbg.exists():
-        # FIX: filtrer bort "_direct" sÃ¥ vi ikke fÃ¥r dobbelt/rare varianter
+        # FIX: filtrer bort "_direct" så vi ikke får dobbelt/rare varianter
         files.extend(sorted([p for p in dbg.glob("result_*.json") if "_direct" not in p.name]))
 
     lr = root / "logs" / "results"
@@ -216,9 +293,9 @@ def _prefer_path(a: Path, b: Path) -> Path:
     """
     Velg "beste" path for samme rid.
 
-    PrimÃ¦rregel: NYESTE fil (mtime) vinner.
+    Primærregel: NYESTE fil (mtime) vinner.
     Tie-break #1: logs/results foretrekkes fremfor _debug, deretter out.
-    Tie-break #2: stÃ¸rst fil vinner (ofte full doc vs stub).
+    Tie-break #2: størst fil vinner (ofte full doc vs stub).
     """
 
     def tier(p: Path) -> int:
@@ -245,7 +322,7 @@ def _prefer_path(a: Path, b: Path) -> Path:
     if ta != tb:
         return a if ta < tb else b
 
-    # 3) StÃ¸rst fil hvis fortsatt likt
+    # 3) Størst fil hvis fortsatt likt
     try:
         sa = a.stat().st_size
         sb = b.stat().st_size
@@ -257,9 +334,10 @@ def _prefer_path(a: Path, b: Path) -> Path:
     return a
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -----------------------------------
 # Routes
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -----------------------------------
+
 
 @router.get("/list/all")
 async def list_all(
@@ -268,6 +346,38 @@ async def list_all(
     cg_uid: str | None = Cookie(default=None),
     debug: int = Query(0),
 ) -> Dict[str, Any]:
+    # ✅ PATCH C2: fjernet C1 early return, så listing kjører igjen.
+
+    # ✅ PATCH A: Én enkel backend-print som gir oss fasit
+    FP_DIAG = "LIST_ALL_DIAG_20260103"
+    uid_cookie = req.cookies.get("cg_uid")
+    root_diag = _repo_root_from_here()
+    print("[/list/all]", FP_DIAG, "uid=", uid_cookie, "root=", root_diag)
+
+    try:
+        users_dir = root_diag / "state" / "users"
+        print("[/list/all]", FP_DIAG, "users_dir=", users_dir, "exists=", users_dir.exists())
+        if uid_cookie:
+            udir = users_dir / str(uid_cookie)
+            print("[/list/all]", FP_DIAG, "uid_dir=", udir, "exists=", udir.exists())
+            idx = udir / "sessions_index.json"
+            print(
+                "[/list/all]",
+                FP_DIAG,
+                "index_path=",
+                idx,
+                "exists=",
+                idx.exists(),
+                "size=",
+                (idx.stat().st_size if idx.exists() else None),
+            )
+    except Exception as e:
+        print("[/list/all]", FP_DIAG, "users_dir debug error:", repr(e))
+
+    # PATCH B3: fingerprint helt øverst (beholdt)
+    FP = "LIST_ALL_FP_B3_20260103"
+    print("[/list/all]", FP, "HIT")
+
     import sys
 
     root = _repo_root_from_here()
@@ -316,8 +426,58 @@ async def list_all(
         try:
             raw = _read_json_utf8_sig(p)
             doc = _normalize_doc(raw)
-            row = _row_from_doc(doc, p, fallback_sid=sid)
-            rows.append(row)
+            item = _row_from_doc(doc, p, fallback_sid=sid)
+
+            sid_item = str(item.get("session_id") or item.get("ride_id") or "")
+
+            # PATCH: Minimal debug kun for én sid (B3-loop debug)
+            DEBUG_SID = "16597678157"
+            if sid_item == DEBUG_SID:
+                root3 = _repo_root_from_here()
+                p_dbg = root3 / "_debug" / f"result_{sid_item}.json"
+                p_logs = root3 / "logs" / "results" / f"result_{sid_item}.json"
+                print(
+                    "[/list/all]",
+                    FP,
+                    "sid=",
+                    sid_item,
+                    "st_before=",
+                    item.get("start_time"),
+                    "exists_dbg=",
+                    p_dbg.exists(),
+                    "exists_logs=",
+                    p_logs.exists(),
+                    "root=",
+                    str(root3),
+                )
+
+            # --- C3.1: Backfill start_time fra resultfil (UTC ISO), kun når missing/DATE-only ---
+            try:
+                st = item.get("start_time")
+                if _needs_start_time_fix(st):
+                    rp = _pick_result_path(sid_item or sid)
+                    if rp:
+                        t_abs = _extract_first_t_abs_fast(rp)
+                        if t_abs:
+                            item["start_time"] = t_abs
+                            print("[/list/all]", "START_TIME_BACKFILL", "sid=", (sid_item or sid), "t_abs=", t_abs)
+            except Exception as e:
+                print("[/list/all]", "START_TIME_BACKFILL_ERR", "sid=", (sid_item or sid), "err=", repr(e))
+
+            # --- PATCH C2: Backfill end_time fra resultfil (siste t_abs), kun når mangler ---
+            try:
+                end_time = item.get("end_time")
+                if end_time is None:
+                    rp2 = _pick_result_path(sid_item or sid)
+                    if rp2 is not None:
+                        last_abs = _extract_last_t_abs_fast(rp2)
+                        if last_abs:
+                            item["end_time"] = last_abs
+                            print("[/list/all]", "END_TIME_BACKFILL", "sid=", (sid_item or sid), "t_abs=", last_abs)
+            except Exception as e:
+                print("[/list/all]", "END_TIME_BACKFILL_ERR", "sid=", (sid_item or sid), "err=", repr(e))
+
+            rows.append(item)
         except Exception:
             continue
 
@@ -337,7 +497,10 @@ async def list_all(
     # -------------------------------
     uid = cg_uid or _get_or_set_uid(req, response)
 
-    index_path = Path.cwd() / "state" / "users" / uid / "sessions_index.json"
+    # ✅ bruk repo-root (SSOT), ikke cwd
+    root = _repo_root_from_here()
+    index_path = root / "state" / "users" / uid / "sessions_index.json"
+
     if not index_path.exists():
         return {"value": [], "Count": 0}
 
@@ -456,7 +619,7 @@ async def _debug_paths() -> Dict[str, Any]:
                 name = p.name
                 rid = name.replace("result_", "").replace(".json", "")
 
-                p_logs = (root / "logs" / "results" / f"result_{rid}.json")
+                p_logs = root / "logs" / "results" / f"result_{rid}.json"
                 logs_results = str(p_logs).replace("\\", "/") if p_logs.exists() else None
 
                 cand_plain = p_latest_dir / f"result_{rid}.json"

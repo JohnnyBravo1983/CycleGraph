@@ -26,7 +26,7 @@
       "crr": 0.004,
       "crank_eff_pct": 95.5,
       "device": "strava",
-      "profile_version": "v1-b71548fc-20260104"
+      "profile_version": "v1-2f73fe51-20260103"
     },
     "rolling_watt": 23.091947800868972,
     "total_watt": 87.81927199480526,
@@ -4186,14 +4186,17 @@
     "streams_probe": null
   },
   "weather_source": "open-meteo/era5",
-  "profile_version": "v1-b71548fc-20260104",
+  "profile_version": "v1-2f73fe51-20260103",
   "profile_used": {
     "rider_weight_kg": 104,
-    "bike_weight_kg": 8,
+    "bike_weight_kg": 8.0,
     "weight_kg": 112.0,
     "total_weight_kg": 112.0,
+    "bike_type": "road",
+    "tire_width_mm": 28,
+    "tire_quality": "performance",
     "device": "strava",
-    "profile_version": "v1-b71548fc-20260104"
+    "profile_version": "v1-2f73fe51-20260103"
   },
   "start_time": "2025-11-29T07:42:28Z"
 }

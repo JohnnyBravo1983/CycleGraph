@@ -574,6 +574,34 @@ def _probe_streams_file(path: str) -> dict:
         return {"error": "unexpected_error", "message": str(e), "path": path}
 # ==================== END STREAMS PROBE HELPER ====================
 
+# ==================== PATCH: SESSIONS META SUPPORT ====================
+def _sessions_index_path(uid: str) -> Path:
+    """Returner path til sessions_index.json for en gitt bruker."""
+    return _repo_root_from_here() / "state" / "users" / uid / "sessions_index.json"
+
+def _sessions_meta_path(uid: str) -> Path:
+    """Returner path til sessions_meta.json for en gitt bruker (alltid ved siden av index)."""
+    return _sessions_index_path(uid).with_name("sessions_meta.json")
+
+def _load_sessions_meta(uid: str) -> Dict[str, Any]:
+    """Last inn sessions_meta.json eller returner tom dict."""
+    p = _sessions_meta_path(uid)
+    try:
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def _write_sessions_meta(uid: str, meta: Dict[str, Any]) -> None:
+    """Skriv sessions_meta.json atomisk."""
+    p = _sessions_meta_path(uid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
+    tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+# ==================== END PATCH: SESSIONS META SUPPORT ====================
+
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
@@ -823,6 +851,39 @@ def _dedupe_profile_keys_for_rust(p: dict) -> dict:
     # du har en nested/sekundær profil liggende. Pass på å ikke legge inn igjen.
     # (Hvis du har en slik struktur, fjern den her.)
     return out
+
+# ==================== PATCH D1: START_TIME FROM SAMPLES ====================
+
+def _extract_start_time_from_samples(samples: list) -> str | None:
+    """
+    Hent start_time fra første sample's t_abs.
+    Returnerer ISO format string eller None.
+    """
+    try:
+        if not isinstance(samples, list) or len(samples) == 0:
+            return None
+            
+        first_sample = samples[0]
+        if not isinstance(first_sample, dict):
+            return None
+            
+        t_abs = first_sample.get("t_abs")
+        if not t_abs:
+            return None
+            
+        # Hvis t_abs allerede er en string, bruk den direkte
+        if isinstance(t_abs, str):
+            return t_abs
+            
+        # Hvis t_abs er numerisk (epoch sekunder), konverter til ISO
+        if isinstance(t_abs, (int, float)):
+            dt_obj = datetime.fromtimestamp(float(t_abs), tz=timezone.utc)
+            return dt_obj.isoformat()
+            
+    except Exception as e:
+        print(f"[SVR] Error extracting start_time from samples: {e}")
+        
+    return None
 
 # ==================== ORIGINAL HELPER FUNCTIONS ====================
 
@@ -1673,6 +1734,11 @@ async def analyze_session(
     print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
     print(f"[SVR] HIT /sessions/{sid}/analyze force_recompute={force_recompute} debug={debug}", file=sys.stderr)
 
+    # ==================== PATCH D1: START_TIME FROM SAMPLES ====================
+    # Vi trenger å lagre start_time fra samples for senere bruk i både Rust og fallback grener
+    start_time_from_samples = None
+    # ==================== END PATCH D1 ====================
+
     # ==================== PATCH 1: HARD INPUT GATE ====================
     avail = _input_availability(sid)
     if force_recompute and not avail["has_any_input"]:
@@ -1794,6 +1860,14 @@ async def analyze_session(
                                 dbg["session_path"] = str(sess_path)
                                 dbg["samples_loaded"] = len(samples)
                                 doc["debug"] = dbg
+                                
+                                # ==================== PATCH D1: EXTRACT START_TIME FROM SAMPLES ====================
+                                # Hent start_time fra samples for å bruke den senere
+                                start_time_from_samples = _extract_start_time_from_samples(samples)
+                                if start_time_from_samples and not doc.get("start_time"):
+                                    doc["start_time"] = start_time_from_samples
+                                # ==================== END PATCH D1 ====================
+                                
                             except Exception as e:
                                 print(
                                     f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
@@ -2115,6 +2189,48 @@ async def analyze_session(
     if not isinstance(samples, list) or not isinstance(profile_in, dict):
         raise HTTPException(status_code=400, detail="Missing 'samples' or 'profile'")
 
+    # ==================== PATCH: SESSIONS META WRITE (Sprint A) ====================
+    # Skriv sessions_meta.json etter at samples er lastet og vi har uid
+    try:
+        uid = request.cookies.get("cg_uid")
+        if uid and isinstance(samples, list) and len(samples) > 0 and isinstance(samples[0], dict):
+            FP = "META_WRITE_FP_A2_20260104"
+            print(f"[META] {FP} enter uid={uid} sid={sid} samples_len={len(samples)}", file=sys.stderr)
+            
+            # Hent t_abs fra første og siste sample
+            t0 = samples[0].get("t_abs")
+            t1 = samples[-1].get("t_abs") if len(samples) > 1 else None
+            
+            # Konverter til ISO string hvis det er numerisk
+            if isinstance(t0, (int, float)):
+                t0 = datetime.fromtimestamp(float(t0), tz=timezone.utc).isoformat()
+            if isinstance(t1, (int, float)):
+                t1 = datetime.fromtimestamp(float(t1), tz=timezone.utc).isoformat()
+            
+            # Hvis t0 er en string, skriv meta
+            if isinstance(t0, str) and t0:
+                meta = _load_sessions_meta(uid)
+                entry = meta.get(str(sid), {})
+                if not isinstance(entry, dict):
+                    entry = {}
+                
+                entry["start_time"] = t0
+                if isinstance(t1, str) and t1:
+                    entry["end_time"] = t1
+                
+                meta[str(sid)] = entry
+                _write_sessions_meta(uid, meta)
+                
+                print(f"[META] {FP} wrote {_sessions_meta_path(uid)} t0={t0}", file=sys.stderr)
+    except Exception as e:
+        print(f"[META] FAIL sid={sid} err={repr(e)}", file=sys.stderr)
+    # ==================== END PATCH: SESSIONS META WRITE ====================
+
+    # ==================== PATCH D1: HENT START_TIME FRA SAMPLES ====================
+    # Hent start_time fra samples nå som vi har dem
+    start_time_from_samples = _extract_start_time_from_samples(samples)
+    # ==================== END PATCH D1 ====================
+
     # --- Trinn 8A: Guardrail for 'nominal' (kun i test-modus) ---
     test_mode = bool(int(os.environ.get("CG_TESTMODE", "0")))
     if not test_mode and isinstance(body, dict) and "nominal" in body:
@@ -2143,6 +2259,9 @@ async def analyze_session(
 
     # ==================== PATCH 1: USE UI PROFILE WHEN CLIENT DOESN'T SEND PROFILE ====================
     if not client_sent_profile:
+        print("[ANALYZE] cookies keys=", list(request.cookies.keys()))
+        print("[ANALYZE] cg_uid=", request.cookies.get("cg_uid"))
+        
         up = _load_ui_profile_for_request(request)  # <-- Bruk UI profil
         profile = _ensure_profile_device(up)
         body["profile"] = profile
@@ -2727,11 +2846,11 @@ async def analyze_session(
 
                 try:
                     ensured = _ensure_contract_shape(resp)
-
-                    mu_top = ensured.setdefault("profile_used", {})
-                    mm = ensured.setdefault("metrics", {})
-                    mm.setdefault("profile_used", {})
-                    mm["profile_used"] = dict(mu_top)
+                    
+                    # ==================== PATCH D1: SET START_TIME FROM SAMPLES IF NOT SET ====================
+                    if not ensured.get("start_time") and start_time_from_samples:
+                        ensured["start_time"] = start_time_from_samples
+                    # ==================== END PATCH D1 ====================
 
                     ensured = _set_basic_ride_fields(ensured, sid)
 
@@ -2762,6 +2881,12 @@ async def analyze_session(
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
                     resp2 = _ensure_contract_shape(resp)
+                    
+                    # ==================== PATCH D1: SET START_TIME FROM SAMPLES IF NOT SET ====================
+                    if not resp2.get("start_time") and start_time_from_samples:
+                        resp2["start_time"] = start_time_from_samples
+                    # ==================== END PATCH D1 ====================
+                    
                     resp2 = _set_basic_ride_fields(resp2, sid)
                     
                     # ==================== PATCH: SKRIV RESULTAT TIL FIL ETTER REKOMPUTE (fallback ved feil) ====================
@@ -2804,6 +2929,12 @@ async def analyze_session(
                 # Legg til input debug info
                 err["debug"].update(input_debug_info)
                 err = _ensure_contract_shape(err)
+                
+                # ==================== PATCH D1: SET START_TIME FROM SAMPLES IF NOT SET ====================
+                if not err.get("start_time") and start_time_from_samples:
+                    err["start_time"] = start_time_from_samples
+                # ==================== END PATCH D1 ====================
+                
                 err = _set_basic_ride_fields(err, sid)
                 try:
                     _write_observability(err)
@@ -2921,6 +3052,11 @@ async def analyze_session(
     mu_top.update({**profile, "profile_version": profile_version})
 
     resp = _ensure_contract_shape(resp)
+    
+    # ==================== PATCH D1: SET START_TIME FROM SAMPLES IF NOT SET ====================
+    if not resp.get("start_time") and start_time_from_samples:
+        resp["start_time"] = start_time_from_samples
+    # ==================== END PATCH D1 ====================
 
     mu_top = resp.setdefault("profile_used", {})
     mm = resp.setdefault("metrics", {})

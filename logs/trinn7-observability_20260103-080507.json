@@ -20,13 +20,12 @@
     "precision_watt_crank": 62.12210147362265,
     "precision_watt_pedal": 211.82424628962747,
     "profile_used": {
-      "calibrated": false,
+      "rider_weight_kg": 104,
+      "bike_weight_kg": 8,
       "weight_kg": 112.0,
-      "cda": 0.3,
-      "crr": 0.004,
-      "crank_eff_pct": 95.5,
+      "total_weight_kg": 112.0,
       "device": "strava",
-      "profile_version": "v1-b71548fc-20260104"
+      "profile_version": "v1-b71548fc-20260103"
     },
     "rolling_watt": 13.125262842913582,
     "total_watt": 59.326606907309625,
@@ -7663,14 +7662,13 @@
     "streams_probe": null
   },
   "weather_source": "open-meteo/era5",
-  "profile_version": "v1-b71548fc-20260104",
+  "profile_version": "v1-b71548fc-20260103",
   "profile_used": {
     "rider_weight_kg": 104,
     "bike_weight_kg": 8,
     "weight_kg": 112.0,
     "total_weight_kg": 112.0,
     "device": "strava",
-    "profile_version": "v1-b71548fc-20260104"
-  },
-  "start_time": "2025-12-14T11:14:57+00:00"
+    "profile_version": "v1-b71548fc-20260103"
+  }
 }
