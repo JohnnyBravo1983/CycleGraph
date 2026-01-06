@@ -9,6 +9,9 @@ import ErrorBanner from "../components/ErrorBanner";
 import { ROUTES } from "../lib/routes";
 import { cgApi } from "../lib/cgApi";
 
+import { isDemoMode } from "../demo/demoMode";
+import { demoDashboard } from "../demo/demoData";
+
 // ─────────────────────────────────────────────────────────────
 // Helpers (tåler number og string med komma/punktum)
 // ─────────────────────────────────────────────────────────────
@@ -48,18 +51,110 @@ function fmtC(x: unknown): string {
   return n === null ? "—" : `${n.toFixed(1)} °C`;
 }
 
-const SessionView: React.FC = () => {
+// ─────────────────────────────────────────────────────────────
+// PATCH 4C: Demo view (ingen backend-kall)
+// ─────────────────────────────────────────────────────────────
+const DemoSessionView: React.FC = () => {
+  const params = useParams<{ id: string }>();
+  const id = params.id ?? "";
+
+  const ride = useMemo(() => {
+    return demoDashboard.recentRides.find((r) => String(r.id) === String(id)) ?? null;
+  }, [id]);
+
+  if (!id) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Økt</h1>
+        <div className="rounded-xl border bg-white p-4 text-slate-700">Mangler økt-id i URL.</div>
+        <div className="flex gap-3">
+          <Link to="/rides" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+            ← Tilbake til Rides
+          </Link>
+          <Link to="/dashboard" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+            Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!ride) {
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Økt</h1>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+          Fant ikke demo-økt med ID <span className="font-mono">{id}</span>.
+        </div>
+        <div className="flex gap-3">
+          <Link to="/rides" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+            ← Tilbake til Rides
+          </Link>
+          <Link to="/dashboard" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+            Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h1 className="text-2xl font-semibold tracking-tight mb-2">{ride.title}</h1>
+        <p className="text-slate-600">Demo-detaljer (hardcoded) – ingen backend-kall.</p>
+      </section>
+
+      <section className="rounded-2xl border bg-white p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <div>
+            <div className="text-slate-500">Dato</div>
+            <div className="font-medium">{new Date(ride.date).toLocaleString("nb-NO")}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Økt-ID</div>
+            <div className="font-mono">{ride.id}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Distance</div>
+            <div className="font-medium">{Math.round(ride.distanceKm)} km</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Varighet</div>
+            <div className="font-medium">{ride.durationMin} min</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Precision Watt (avg)</div>
+            <div className="font-semibold">{ride.precisionWattAvg} W</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="flex gap-3">
+        <Link
+          to="/rides"
+          className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+        >
+          ← Tilbake til Rides
+        </Link>
+        <Link
+          to="/dashboard"
+          className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+        >
+          Dashboard
+        </Link>
+      </section>
+    </div>
+  );
+};
+
+const RealSessionView: React.FC = () => {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const location = useLocation();
 
-  const {
-    currentSession,
-    loadingSession,
-    errorSession,
-    loadSession,
-    clearCurrentSession,
-  } = useSessionStore();
+  const { currentSession, loadingSession, errorSession, loadSession, clearCurrentSession } =
+    useSessionStore();
 
   // Last session via store, og rydd på unmount / ved id-bytt
   useEffect(() => {
@@ -158,8 +253,7 @@ const SessionView: React.FC = () => {
 
       // 2) Finn "usedPv" fra analyze-respons (toppnivå først)
       const usedPv =
-        String(s?.profile_version ?? "") ||
-        String(s?.metrics?.profile_used?.profile_version ?? "");
+        String(s?.profile_version ?? "") || String(s?.metrics?.profile_used?.profile_version ?? "");
 
       if (!uiPv || !usedPv) return;
 
@@ -238,9 +332,7 @@ const SessionView: React.FC = () => {
   const profileUsed: any = metrics?.profile_used ?? (session as any)?.profile_used ?? null;
   const weatherUsed: any = metrics?.weather_used ?? null;
 
-  const totalWeight: unknown = profileUsed
-    ? profileUsed.total_weight_kg ?? profileUsed.weight_kg
-    : undefined;
+  const totalWeight: unknown = profileUsed ? profileUsed.total_weight_kg ?? profileUsed.weight_kg : undefined;
 
   return (
     <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -269,10 +361,7 @@ const SessionView: React.FC = () => {
               onClick={() => {
                 const override = readLocalProfileOverride();
                 console.log("[SessionView] reAnalyzeNow override =", override);
-                console.log(
-                  "[SessionView] reAnalyzeNow rider_weight_kg =",
-                  override?.rider_weight_kg
-                );
+                console.log("[SessionView] reAnalyzeNow rider_weight_kg =", override?.rider_weight_kg);
                 reAnalyzeNow();
               }}
               disabled={reAnalyzing}
@@ -330,9 +419,7 @@ const SessionView: React.FC = () => {
             </dl>
           </section>
         ) : (
-          <p className="text-sm text-slate-500">
-            Ingen analyse-data tilgjengelig for denne økten ennå.
-          </p>
+          <p className="text-sm text-slate-500">Ingen analyse-data tilgjengelig for denne økten ennå.</p>
         )}
 
         {/* PROFIL-INFO */}
@@ -341,8 +428,7 @@ const SessionView: React.FC = () => {
             <h2 className="text-lg font-semibold">Profil brukt i analysen</h2>
 
             <p className="text-slate-500">
-              Versjon:{" "}
-              <span className="font-mono">{profileUsed.profile_version ?? "ukjent"}</span>
+              Versjon: <span className="font-mono">{profileUsed.profile_version ?? "ukjent"}</span>
             </p>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
@@ -399,6 +485,10 @@ const SessionView: React.FC = () => {
       </div>
     </div>
   );
+};
+
+const SessionView: React.FC = () => {
+  return isDemoMode() ? <DemoSessionView /> : <RealSessionView />;
 };
 
 export default SessionView;

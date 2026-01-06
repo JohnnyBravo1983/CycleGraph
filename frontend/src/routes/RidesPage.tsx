@@ -1,8 +1,10 @@
 // frontend/src/routes/RidesPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import { cgApi, type SessionListItem } from "../lib/cgApi";
+import { isDemoMode } from "../demo/demoMode";
+import { demoDashboard } from "../demo/demoData";
 
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
@@ -85,7 +87,51 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
   );
 };
 
-const RidesPage: React.FC = () => {
+// -------------------------------
+// PATCH 4B: Demo vs Real wrapper
+// -------------------------------
+const DemoRidesPage: React.FC = () => {
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h1 className="text-2xl font-semibold tracking-tight mb-2">Rides</h1>
+        <p className="text-slate-600 max-w-xl">Demo-visning av dine økter (hardcoded data).</p>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        {demoDashboard.recentRides.map((r) => (
+          <Link
+            key={r.id}
+            to={`/session/${r.id}`}
+            className="px-4 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-between gap-4"
+          >
+            <div className="min-w-0">
+              <div className="font-medium text-slate-900 truncate">{r.title}</div>
+              <div className="text-xs text-slate-600">{new Date(r.date).toLocaleString("nb-NO")}</div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-sm font-semibold">{r.precisionWattAvg} W</div>
+              <div className="text-xs text-slate-600">
+                {Math.round(r.distanceKm)} km · {r.durationMin} min
+              </div>
+            </div>
+          </Link>
+        ))}
+      </section>
+
+      <section className="flex gap-3">
+        <Link
+          to="/dashboard"
+          className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+        >
+          ← Back to Dashboard
+        </Link>
+      </section>
+    </div>
+  );
+};
+
+const RealRidesPage: React.FC = () => {
   const navigate = useNavigate();
   const { sessionsList, loadingList, errorList, loadSessionsList } = useSessionStore();
 
@@ -232,8 +278,7 @@ const RidesPage: React.FC = () => {
             const startTxt = formatStartDateTime(s.start_time ?? null);
             const endTxt = formatEndTime((s as any).end_time ?? null);
 
-            const timeRange =
-              endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+            const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
 
             const kmTxt = distOk ? `${(s.distance_km as number).toFixed(1)} km` : "—";
 
@@ -328,6 +373,10 @@ const RidesPage: React.FC = () => {
       )}
     </div>
   );
+};
+
+const RidesPage: React.FC = () => {
+  return isDemoMode() ? <DemoRidesPage /> : <RealRidesPage />;
 };
 
 export default RidesPage;

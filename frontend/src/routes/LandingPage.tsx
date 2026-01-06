@@ -1,27 +1,40 @@
 // frontend/src/routes/LandingPage.tsx
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { setDemoMode } from "../demo/demoMode";
 
 export function LandingPage() {
+  const navigate = useNavigate();
+
   return (
     <div className="flex flex-col gap-8">
       <section>
-        <h1 className="text-3xl font-bold tracking-tight mb-2">
-          CycleGraph
-        </h1>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">CycleGraph</h1>
         <p className="text-slate-700 max-w-xl">
           CycleGraph hjelper deg å forstå{" "}
-          <span className="font-semibold">Precision Watt</span>, se utviklingen
-          i treningen din over tid og koble sammen økter, profiler og mål.
+          <span className="font-semibold">Precision Watt</span>, se utviklingen i
+          treningen din over tid og koble sammen økter, profiler og mål.
         </p>
       </section>
 
       <section className="flex flex-col md:flex-row gap-4">
+        <button
+          type="button"
+          className="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-slate-800 font-medium bg-black text-white hover:opacity-90"
+          onClick={() => {
+            setDemoMode(true);
+            navigate("/dashboard");
+          }}
+        >
+          View Live Demo
+        </button>
+
         <Link
           to="/login"
           className="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-slate-800 font-medium bg-slate-900 text-white hover:bg-slate-800"
         >
           Logg inn
         </Link>
+
         <Link
           to="/signup"
           className="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-slate-300 font-medium bg-white text-slate-900 hover:bg-slate-50"
