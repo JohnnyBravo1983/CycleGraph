@@ -1,0 +1,16 @@
+Dag |Task                    |Timer |Priority    |Deadline Date|Finished Date| Aprox Hours Used|
+1-2 |Demo Mode setup         |3-4   |🔥 Critical |08.01.2026   |             |
+1-2 |Select showcase rides   |2-3   |🔥 Critical |08.01.2026   | 
+1-2 |Landing page copy       |1-2   |🔥 Critical |08.01.2026   |
+3-4 |Comparison view         |4-6   |🔥 Critical |10.01.2026   |
+3-4 |Ride detail polish      |3-4   |⚠️ High     |10.01.2026  | 
+5-6 |Leaderboards            |3-4   |⚠️ High     |12.01.2026  |
+5-6 |Dashboard polish        |2-3   |⚠️ High     |12.01.2026  |
+7   | Tech/How It Works      |2-3   |📘 Medium   |13.01.2026  |
+7   |About/Story page        |1-2   |📘 Medium   |13.01.2026  |
+7   |Design consistency      |2-3   |⚠️ High     |13.01.2026  |
+8   |Mobile responsive       |3-4   |🔥 Critical |14.01.2026  | 
+8   |Video + screenshots     |2-3   |🔥 Critical |14.01.2026  |
+9   |Deploy                  |2-3   |🔥 Critical |15.01.2026  |
+9   |Portfolio prep          |2-3   |⚠️ High     |15.01.2026  |
+9   |Soft launch             |1-2   |📘 Medium   |15.01.2026  |

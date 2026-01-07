@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import { cgApi, type SessionListItem } from "../lib/cgApi";
 import { isDemoMode } from "../demo/demoMode";
-import { demoDashboard } from "../demo/demoData";
+import { demoRides } from "../demo/demoRides";
 
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
@@ -88,35 +88,54 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
 };
 
 // -------------------------------
-// PATCH 4B: Demo vs Real wrapper
+// DEMO PAGE (uses demoRides SSOT)
 // -------------------------------
 const DemoRidesPage: React.FC = () => {
+  // newest first
+  const rows = useMemo(() => {
+    return [...demoRides].sort((a, b) => b.date.localeCompare(a.date));
+  }, []);
+
   return (
     <div className="flex flex-col gap-6">
       <section>
         <h1 className="text-2xl font-semibold tracking-tight mb-2">Rides</h1>
-        <p className="text-slate-600 max-w-xl">Demo-visning av dine økter (hardcoded data).</p>
+        <p className="text-slate-600 max-w-xl">
+          Demo-visning av dine økter (hardcoded data). Viser {rows.length} økt(er).
+        </p>
+        <div className="mt-2 text-xs text-slate-500">
+          Kilde: <span className="font-mono">demoRides.ts</span>
+        </div>
       </section>
 
       <section className="flex flex-col gap-2">
-        {demoDashboard.recentRides.map((r) => (
-          <Link
-            key={r.id}
-            to={`/session/${r.id}`}
-            className="px-4 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-between gap-4"
-          >
-            <div className="min-w-0">
-              <div className="font-medium text-slate-900 truncate">{r.title}</div>
-              <div className="text-xs text-slate-600">{new Date(r.date).toLocaleString("nb-NO")}</div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-sm font-semibold">{r.precisionWattAvg} W</div>
-              <div className="text-xs text-slate-600">
-                {Math.round(r.distanceKm)} km · {r.durationMin} min
+        {rows.map((r) => {
+          const durationMin = r.duration > 0 ? Math.round(r.duration / 60) : 0;
+          const km = r.distance > 0 ? r.distance / 1000 : 0;
+
+          return (
+            <Link
+              key={String(r.id)}
+              to={`/session/${r.id}`}
+              className="px-4 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-between gap-4"
+            >
+              <div className="min-w-0">
+                <div className="font-medium text-slate-900 truncate">{r.name}</div>
+                <div className="text-xs text-slate-600">
+                  {new Date(`${r.date}T12:00:00`).toLocaleDateString("nb-NO")} ·{" "}
+                  <span className="capitalize">{r.rideType.replace("-", " ")}</span>
+                </div>
               </div>
-            </div>
-          </Link>
-        ))}
+
+              <div className="text-right shrink-0">
+                <div className="text-sm font-semibold">{Math.round(r.precisionWatt)} W</div>
+                <div className="text-xs text-slate-600">
+                  {km.toFixed(1)} km · {durationMin} min
+                </div>
+              </div>
+            </Link>
+          );
+        })}
       </section>
 
       <section className="flex gap-3">
@@ -131,6 +150,9 @@ const DemoRidesPage: React.FC = () => {
   );
 };
 
+// -------------------------------
+// REAL PAGE (unchanged)
+// -------------------------------
 const RealRidesPage: React.FC = () => {
   const navigate = useNavigate();
   const { sessionsList, loadingList, errorList, loadSessionsList } = useSessionStore();
@@ -278,7 +300,8 @@ const RealRidesPage: React.FC = () => {
             const startTxt = formatStartDateTime(s.start_time ?? null);
             const endTxt = formatEndTime((s as any).end_time ?? null);
 
-            const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+            const timeRange =
+              endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
 
             const kmTxt = distOk ? `${(s.distance_km as number).toFixed(1)} km` : "—";
 
