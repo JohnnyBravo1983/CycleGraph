@@ -19,6 +19,9 @@ import GoalsPage from "./routes/GoalsPage";
 import ProfilePage from "./routes/ProfilePage";
 import OnboardingPage from "./routes/OnboardingPage";
 
+// Patch B: How it works page
+import { HowItWorksPage } from "./routes/HowItWorksPage";
+
 // Installer dev-rewrite for axios FØR appen starter (kun i dev)
 if (import.meta.env.DEV) {
   installAxiosDevRewrite();
@@ -54,6 +57,9 @@ const router = createBrowserRouter([
       { path: "trends", element: <TrendsPage /> },
       { path: "goals", element: <GoalsPage /> },
       { path: "profile", element: <ProfilePage /> },
+
+      // Patch B: How it works
+      { path: "how-it-works", element: <HowItWorksPage /> },
 
       // Legacy truth-økt
       { path: "session/:id", element: <SessionView /> },

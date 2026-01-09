@@ -1,5 +1,5 @@
 // frontend/src/App.tsx
-import { Outlet } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 import DemoBanner from "./components/DemoBanner";
 
 export default function App() {
@@ -7,10 +7,35 @@ export default function App() {
     <div className="min-h-screen bg-slate-50">
       <header className="border-b bg-white">
         <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-lg font-semibold tracking-tight">
-            CycleGraph
-          </div>
-          {/* Navigation comes later (Dashboard / Rides / Profile etc.) */}
+          <div className="text-lg font-semibold tracking-tight">CycleGraph</div>
+
+          {/* Patch C: minimal navigation */}
+          <nav className="flex items-center gap-2">
+            <Link
+              to="/"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Dashboard
+            </Link>
+            <Link
+              to="/rides"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Rides
+            </Link>
+            <Link
+              to="/leaderboards"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Leaderboards
+            </Link>
+            <Link
+              to="/how-it-works"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              How it works
+            </Link>
+          </nav>
         </div>
       </header>
 
