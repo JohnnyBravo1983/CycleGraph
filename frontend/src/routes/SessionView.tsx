@@ -10,7 +10,7 @@ import { ROUTES } from "../lib/routes";
 import { cgApi } from "../lib/cgApi";
 
 import { isDemoMode } from "../demo/demoMode";
-import { demoDashboard } from "../demo/demoData";
+import { demoRides } from "../demo/demoRides";
 
 // ─────────────────────────────────────────────────────────────
 // Helpers (tåler number og string med komma/punktum)
@@ -52,24 +52,35 @@ function fmtC(x: unknown): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PATCH 4C: Demo view (ingen backend-kall)
+// Patch 3B helper: Metric card (used in DemoSessionView only)
+// ─────────────────────────────────────────────────────────────
+const Metric = ({ label, value }: { label: string; value: string }) => (
+  <div className="border border-slate-200 rounded-lg p-4">
+    <div className="text-[12px] uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="mt-1 text-[18px] font-semibold text-slate-800">{value}</div>
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────
+// PATCH 4C + 3B: Demo view (ingen backend-kall)
 // ─────────────────────────────────────────────────────────────
 const DemoSessionView: React.FC = () => {
   const params = useParams<{ id: string }>();
   const id = params.id ?? "";
 
+  // Patch 3B.1: SSOT = demoRides
   const ride = useMemo(() => {
-    return demoDashboard.recentRides.find((r) => String(r.id) === String(id)) ?? null;
+    return demoRides.find((r) => String((r as any).id) === String(id)) ?? null;
   }, [id]);
 
   if (!id) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Økt</h1>
-        <div className="rounded-xl border bg-white p-4 text-slate-700">Mangler økt-id i URL.</div>
+        <h1 className="text-2xl font-semibold tracking-tight">Session</h1>
+        <div className="rounded-xl border bg-white p-4 text-slate-700">Missing session id in URL.</div>
         <div className="flex gap-3">
           <Link to="/rides" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
-            ← Tilbake til Rides
+            ← Back to Rides
           </Link>
           <Link to="/dashboard" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
             Dashboard
@@ -82,13 +93,13 @@ const DemoSessionView: React.FC = () => {
   if (!ride) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Økt</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Session</h1>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
-          Fant ikke demo-økt med ID <span className="font-mono">{id}</span>.
+          Could not find demo ride with ID <span className="font-mono">{id}</span>.
         </div>
         <div className="flex gap-3">
           <Link to="/rides" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
-            ← Tilbake til Rides
+            ← Back to Rides
           </Link>
           <Link to="/dashboard" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
             Dashboard
@@ -98,44 +109,142 @@ const DemoSessionView: React.FC = () => {
     );
   }
 
+  // Patch 3B.3: deterministisk “mock” power curve basert på rideType + duration
+  const powerSeries = useMemo(() => {
+    const minutes = Math.max(10, Math.round(((ride as any).duration ?? 0) / 60));
+    const pw = Number((ride as any).precisionWatt ?? 0);
+
+    const base =
+      (ride as any).rideType === "long-ride"
+        ? pw
+        : pw * 1.1; // litt høyere base for kortere/hardere økter
+
+    return Array.from({ length: minutes }, (_, i) => {
+      const noise = Math.sin(i / 5) * 6;
+      return Math.max(80, base + noise);
+    });
+  }, [ride]);
+
+  // Safe access helpers (for demo data variability)
+  const name = String((ride as any).name ?? "Ride");
+  const date = String((ride as any).date ?? "");
+  const rideType = String((ride as any).rideType ?? "ride").replace("-", " ");
+
+  const distanceM = Number((ride as any).distance ?? 0);
+  const durationS = Number((ride as any).duration ?? 0);
+  const precisionWatt = Number((ride as any).precisionWatt ?? 0);
+
+  const stravaWatt = Number((ride as any).stravaWatt ?? NaN);
+  const elevation = Number((ride as any).elevation ?? NaN);
+  const avgSpeed = Number((ride as any).avgSpeed ?? NaN);
+  const riderWeight = Number((ride as any).riderWeight ?? NaN);
+
+  const weather = ((ride as any).weather ?? null) as any;
+  const tempVal = weather?.temp;
+  const windSpeedVal = weather?.wind?.speed;
+  const conditionsVal = weather?.conditions;
+
   return (
     <div className="flex flex-col gap-6">
-      <section>
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">{ride.title}</h1>
-        <p className="text-slate-600">Demo-detaljer (hardcoded) – ingen backend-kall.</p>
-      </section>
+      {/* Patch 3B.2: Header redesign (EN) */}
+      <section className="flex flex-col gap-2">
+        <Link to="/rides" className="text-sm text-slate-500 hover:text-slate-700 w-fit">
+          ← Back to Rides
+        </Link>
 
-      <section className="rounded-2xl border bg-white p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-          <div>
-            <div className="text-slate-500">Dato</div>
-            <div className="font-medium">{new Date(ride.date).toLocaleString("nb-NO")}</div>
-          </div>
-          <div>
-            <div className="text-slate-500">Økt-ID</div>
-            <div className="font-mono">{ride.id}</div>
-          </div>
-          <div>
-            <div className="text-slate-500">Distance</div>
-            <div className="font-medium">{Math.round(ride.distanceKm)} km</div>
-          </div>
-          <div>
-            <div className="text-slate-500">Varighet</div>
-            <div className="font-medium">{ride.durationMin} min</div>
-          </div>
-          <div>
-            <div className="text-slate-500">Precision Watt (avg)</div>
-            <div className="font-semibold">{ride.precisionWattAvg} W</div>
-          </div>
+        <h1 className="text-[24px] font-bold text-slate-800">{name}</h1>
+
+        <div className="text-[14px] text-slate-500">
+          {new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          })}{" "}
+          · {rideType}
+        </div>
+
+        <div className="text-[14px] text-slate-500">
+          {(distanceM / 1000).toFixed(1)} km · {Math.round(durationS / 60)} min ·{" "}
+          {Math.round(precisionWatt)} W avg
+        </div>
+
+        <div className="mt-1 text-[14px] italic text-emerald-600">
+          ⚡ Analyzed with Precision Watt (beta)
         </div>
       </section>
 
+      {/* Patch 3B.3: Power over time graph */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="mb-2 text-sm font-medium text-slate-700">Power over time</div>
+
+        <svg viewBox="0 0 300 100" className="w-full h-[300px]">
+          <polyline
+            fill="none"
+            stroke="#10b981"
+            strokeWidth="2"
+            points={powerSeries
+              .map((p, i) => {
+                const x = (i / powerSeries.length) * 300;
+                const y = 100 - Math.min(100, (p / 300) * 100);
+                return `${x},${y}`;
+              })
+              .join(" ")}
+          />
+        </svg>
+
+        <div className="mt-2 text-xs text-slate-400">
+          *Illustrative curve (deterministic), not raw timeseries.
+        </div>
+      </section>
+
+      {/* Patch 3B.4: Metrics grid (4×2) */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="mb-4 text-sm font-medium text-slate-700">Power analysis</div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Metric label="Avg power" value={`${Math.round(precisionWatt)} W`} />
+          <Metric
+            label="Normalized power"
+            value={Number.isFinite(stravaWatt) ? `${Math.round(stravaWatt)} W` : "—"}
+          />
+          <Metric
+            label="Elevation gain"
+            value={Number.isFinite(elevation) ? `${Math.round(elevation)} m` : "—"}
+          />
+          <Metric
+            label="Avg speed"
+            value={Number.isFinite(avgSpeed) ? `${avgSpeed.toFixed(1)} km/h` : "—"}
+          />
+
+          <Metric
+            label="Rider weight"
+            value={Number.isFinite(riderWeight) ? `${riderWeight.toFixed(1)} kg` : "—"}
+          />
+          <Metric
+            label="Temperature"
+            value={
+              typeof tempVal === "number" && Number.isFinite(tempVal) ? `${tempVal} °C` : "— °C"
+            }
+          />
+          <Metric
+            label="Wind speed"
+            value={
+              typeof windSpeedVal === "number" && Number.isFinite(windSpeedVal)
+                ? `${windSpeedVal} m/s`
+                : "— m/s"
+            }
+          />
+          <Metric label="Conditions" value={typeof conditionsVal === "string" ? conditionsVal : "—"} />
+        </div>
+      </section>
+
+      {/* Keep navigation buttons */}
       <section className="flex gap-3">
         <Link
           to="/rides"
           className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
         >
-          ← Tilbake til Rides
+          ← Back to Rides
         </Link>
         <Link
           to="/dashboard"

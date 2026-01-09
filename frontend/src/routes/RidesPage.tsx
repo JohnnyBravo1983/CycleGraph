@@ -13,6 +13,7 @@ function parseTime(v?: string | null): number {
   if (!v) return -1;
   const t = Date.parse(v);
   if (Number.isFinite(t)) return t;
+
   // fallback for YYYY-MM-DD (should parse fine, but be safe)
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
   if (!m) return -1;
@@ -27,7 +28,9 @@ function isEra5(src?: string | null): boolean {
   return s.includes("era5");
 }
 
-function weatherBadge(src?: string | null): { label: string; tone: "good" | "warn" | "neutral" } {
+function weatherBadge(
+  src?: string | null
+): { label: string; tone: "good" | "warn" | "neutral" } {
   const s = (src ?? "").trim();
   if (!s) return { label: "ukjent", tone: "neutral" };
   if (isEra5(s)) return { label: "ERA5", tone: "good" };
@@ -117,34 +120,54 @@ const DemoRidesPage: React.FC = () => {
             <Link
               key={String(r.id)}
               to={`/session/${r.id}`}
-              className="px-4 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-between gap-4"
+              className={[
+                "group w-full rounded-xl border border-slate-200 bg-white",
+                "px-5 py-4 shadow-sm",
+                "transition-all duration-200 ease-out",
+                // ✅ PATCH B2: stronger hover shadow (Stripe/Linear-ish)
+                "hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.12)] hover:border-emerald-400",
+                "focus:outline-none focus:ring-2 focus:ring-emerald-200",
+              ].join(" ")}
+              aria-label={`Open ride ${r.name}`}
             >
-              <div className="min-w-0">
-                <div className="font-medium text-slate-900 truncate">{r.name}</div>
-                <div className="text-xs text-slate-600">
-                  {new Date(`${r.date}T12:00:00`).toLocaleDateString("nb-NO")} ·{" "}
-                  <span className="capitalize">{r.rideType.replace("-", " ")}</span>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                {/* Left */}
+                <div className="min-w-0">
+                  <div className="text-[16px] font-semibold text-slate-800 truncate">{r.name}</div>
+
+                  <div className="mt-1 text-[14px] text-slate-500">
+                    {new Date(`${r.date}T12:00:00`).toLocaleDateString("nb-NO")} ·{" "}
+                    <span className="capitalize">{r.rideType.replace("-", " ")}</span>
+                  </div>
+
+                  <div className="mt-1 text-[14px] text-slate-500">
+                    {km.toFixed(1)} km · {durationMin} min
+                  </div>
+                </div>
+
+                {/* Right */}
+                <div className="flex shrink-0 flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:justify-start">
+                  {/* ✅ PATCH B1: 22px + tracking-tight */}
+                  <div className="text-[22px] font-bold text-emerald-500 leading-none tracking-tight">
+                    {Math.round(r.precisionWatt)} W
+                  </div>
+
+                  {/* ✅ PATCH B3: title tooltip */}
+                  <div
+                    className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-600"
+                    title="Precision Watt (beta) · Target accuracy ~3–5% in good conditions"
+                  >
+                    <span aria-hidden>⚡</span> Precision
+                  </div>
                 </div>
               </div>
 
-              <div className="text-right shrink-0">
-                <div className="text-sm font-semibold">{Math.round(r.precisionWatt)} W</div>
-                <div className="text-xs text-slate-600">
-                  {km.toFixed(1)} km · {durationMin} min
-                </div>
+              <div className="mt-3 text-[12px] text-slate-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                Open ride details →
               </div>
             </Link>
           );
         })}
-      </section>
-
-      <section className="flex gap-3">
-        <Link
-          to="/dashboard"
-          className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
-        >
-          ← Back to Dashboard
-        </Link>
       </section>
     </div>
   );
