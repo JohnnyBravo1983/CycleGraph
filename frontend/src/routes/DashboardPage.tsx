@@ -8,6 +8,9 @@ import { AccountStatus } from "../components/AccountStatus";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
 
+// ✅ Patch 4a.2
+import { leaderboardMockData } from "../demo/leaderboardMockData";
+
 type YearKey = "2022" | "2023" | "2024" | "2025";
 
 // ----------------------------
@@ -189,10 +192,8 @@ function MiniTrendChart({
               maxWidth: 180,
             }}
           >
-            {/* PATCH 4 (optional): caret / nub */}
             <div className="absolute -top-2 left-3 h-3 w-3 rotate-45 border-l border-t border-slate-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.08)]" />
 
-            {/* PATCH 1 + 2: premium box + typography */}
             <div
               className={[
                 "rounded-lg border border-slate-200 bg-white",
@@ -336,6 +337,40 @@ function buildTrendPoints(
       deltaLabel: `${fmtSigned(d, deltaDigits)} ${unit} (${fmtSigned(pct, 0)}%) ${arrow}`,
     };
   });
+}
+
+// ----------------------------
+// Patch 4a.P1 – Leaderboard helpers
+// ----------------------------
+type LbEntry = {
+  name: string;
+  ftp: number;
+  weight: number;
+  wkg: number;
+  isCurrentUser?: boolean;
+};
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const a = parts[0]?.[0] ?? "?";
+  const b = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (a + b).toUpperCase();
+}
+
+function sortByMetric(rows: LbEntry[], metric: "ftp" | "wkg") {
+  return [...rows].sort((a, b) => (metric === "ftp" ? b.ftp - a.ftp : b.wkg - a.wkg));
+}
+
+// Topp N, men inkluder alltid current user (med “…” separator) hvis utenfor topp
+function topWithCurrent(rows: LbEntry[], metric: "ftp" | "wkg", n = 5) {
+  const sorted = sortByMetric(rows, metric).map((r, idx) => ({ ...r, _rank: idx + 1 }));
+  const top = sorted.slice(0, n);
+  const me = sorted.find((r) => r.isCurrentUser);
+
+  const inTop = me ? top.some((r) => r.name === me.name) : false;
+  if (!me || inTop) return { rows: top, showEllipsis: false };
+
+  return { rows: [...top, me], showEllipsis: true };
 }
 
 const DemoProgressionPanel: React.FC = () => {
@@ -610,6 +645,163 @@ const DemoProgressionPanel: React.FC = () => {
             View all demo rides →
           </Link>
         </div>
+      </section>
+
+      {/* ✅ Patch 4a.P2: Premium Leaderboards teaser widget */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5 mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-slate-800">🏆 Leaderboards</h2>
+          <Link to="/leaderboards" className="text-sm font-medium text-emerald-600 hover:underline">
+            View all →
+          </Link>
+        </div>
+
+        {/* FTP */}
+        {(() => {
+          const { rows } = topWithCurrent(leaderboardMockData as any, "ftp", 5);
+          return (
+            <div className="mb-6">
+              <div className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                FTP Leaderboard
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                {rows.map((u: any, idx: number) => {
+                  const rank = u._rank ?? idx + 1;
+                  const top3 = rank <= 3;
+                  const isMe = !!u.isCurrentUser;
+
+                  return (
+                    <div
+                      key={`ftp-${u.name}`}
+                      className={[
+                        "grid grid-cols-[40px_48px_1fr_auto] gap-3 items-center",
+                        "px-4 py-3 border-b border-slate-200 last:border-b-0",
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50",
+                        "transition-colors duration-150 hover:bg-slate-100",
+                        isMe
+                          ? "bg-gradient-to-r from-emerald-50/60 to-white border-l-[3px] border-l-emerald-500 font-semibold"
+                          : "",
+                      ].join(" ")}
+                    >
+                      <div
+                        className={[
+                          "text-center text-[16px] font-bold",
+                          top3 ? "text-emerald-600" : "text-slate-500",
+                        ].join(" ")}
+                      >
+                        {rank}
+                      </div>
+
+                      <div
+                        className={[
+                          "h-10 w-10 rounded-full flex items-center justify-center",
+                          isMe
+                            ? "bg-emerald-100 text-emerald-600 text-[18px]"
+                            : "bg-slate-200 text-slate-600 text-[14px]",
+                          "font-semibold",
+                        ].join(" ")}
+                        title={isMe ? "You (demo user)" : u.name}
+                      >
+                        {isMe ? "⚡" : initials(u.name)}
+                      </div>
+
+                      <div className="text-slate-800 truncate">{u.name}</div>
+
+                      <div
+                        className={[
+                          "text-slate-800 font-semibold",
+                          isMe ? "text-emerald-600" : "",
+                        ].join(" ")}
+                      >
+                        {u.ftp} W{isMe ? " ⚡" : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* W/kg */}
+        {(() => {
+          const { rows, showEllipsis } = topWithCurrent(leaderboardMockData as any, "wkg", 5);
+          return (
+            <div>
+              <div className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                W/kg Leaderboard
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                {rows.map((u: any, idx: number) => {
+                  const rank = u._rank ?? idx + 1;
+                  const top3 = rank <= 3;
+                  const isMe = !!u.isCurrentUser;
+
+                  // Insert “…” separator before the last row if current user is outside top 5
+                  const isLast = idx === rows.length - 1;
+                  const showDotsHere = showEllipsis && isLast;
+
+                  return (
+                    <React.Fragment key={`wkg-${u.name}`}>
+                      {showDotsHere && (
+                        <div className="px-4 py-2 text-xs text-slate-400 bg-white border-b border-slate-200">
+                          …
+                        </div>
+                      )}
+
+                      <div
+                        className={[
+                          "grid grid-cols-[40px_48px_1fr_auto] gap-3 items-center",
+                          "px-4 py-3 border-b border-slate-200 last:border-b-0",
+                          idx % 2 === 0 ? "bg-white" : "bg-slate-50",
+                          "transition-colors duration-150 hover:bg-slate-100",
+                          isMe
+                            ? "bg-gradient-to-r from-emerald-50/60 to-white border-l-[3px] border-l-emerald-500 font-semibold"
+                            : "",
+                        ].join(" ")}
+                      >
+                        <div
+                          className={[
+                            "text-center text-[16px] font-bold",
+                            top3 ? "text-emerald-600" : "text-slate-500",
+                          ].join(" ")}
+                        >
+                          {rank}
+                        </div>
+
+                        <div
+                          className={[
+                            "h-10 w-10 rounded-full flex items-center justify-center",
+                            isMe
+                              ? "bg-emerald-100 text-emerald-600 text-[18px]"
+                              : "bg-slate-200 text-slate-600 text-[14px]",
+                            "font-semibold",
+                          ].join(" ")}
+                          title={isMe ? "You (demo user)" : u.name}
+                        >
+                          {isMe ? "⚡" : initials(u.name)}
+                        </div>
+
+                        <div className="text-slate-800 truncate">{u.name}</div>
+
+                        <div
+                          className={[
+                            "text-slate-800 font-semibold",
+                            isMe ? "text-emerald-600" : "",
+                          ].join(" ")}
+                        >
+                          {Number(u.wkg).toFixed(2)} W/kg{isMe ? " ⚡" : ""}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </section>
     </div>
   );

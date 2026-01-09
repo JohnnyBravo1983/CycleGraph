@@ -7,8 +7,10 @@ export default function App() {
     <div className="min-h-screen bg-slate-50">
       <header className="border-b bg-white">
         <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="text-lg font-semibold tracking-tight">CycleGraph</div>
-          {/* Navigasjon kommer senere (Dashboard / Rides / Profile osv.) */}
+          <div className="text-lg font-semibold tracking-tight">
+            CycleGraph
+          </div>
+          {/* Navigation comes later (Dashboard / Rides / Profile etc.) */}
         </div>
       </header>
 
