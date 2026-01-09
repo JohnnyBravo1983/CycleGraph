@@ -7,8 +7,9 @@ type ProfileWithStravaFlag = {
 export async function getPostAuthRoute(): Promise<string> {
   await useProfileStore.getState().init();
 
-  const profile = useProfileStore.getState().profile;
-  if (!profile) return "/onboarding";
+  const profile = useProfileStore.getState() as unknown as ProfileWithStravaFlag | null;
+
+  if (!profile || Object.keys(profile).length === 0) return "/onboarding";
 
   // Sprint 2.2+: strava_connected kommer fra backend senere
   const maybeWithStrava = profile as ProfileWithStravaFlag;

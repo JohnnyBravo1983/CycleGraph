@@ -1,6 +1,6 @@
 // frontend/src/routes/DashboardPage.tsx
 import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { StravaImportCard } from "../components/StravaImportCard";
 import { AccountStatus } from "../components/AccountStatus";
@@ -10,6 +10,222 @@ import { demoRides, progressionSummary } from "../demo/demoRides";
 
 type YearKey = "2022" | "2023" | "2024" | "2025";
 
+// ----------------------------
+// Trend helpers (for tooltips)
+// ----------------------------
+type TrendPoint = {
+  year: string;
+  value: number;
+  valueLabel: string; // "235 W" / "2.12 W/kg"
+  deltaLabel?: string; // "+25 W (+12%) ↑"
+  deltaSign?: "pos" | "neg" | "zero";
+};
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function fmtSigned(n: number, digits = 0) {
+  const s = n >= 0 ? "+" : "−";
+  return `${s}${Math.abs(n).toFixed(digits)}`;
+}
+
+function pctChange(curr: number, prev: number) {
+  if (!prev) return 0;
+  return (curr - prev) / prev;
+}
+
+// PATCH 3: exact Tailwind tones
+function deltaStyle(sign?: TrendPoint["deltaSign"]) {
+  if (sign === "pos") return "text-emerald-500"; // ~#10b981
+  if (sign === "neg") return "text-red-500"; // ~#ef4444
+  return "text-slate-500";
+}
+
+function buildSparkPoints(values: number[], w = 220, h = 46, pad = 6) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+
+  return values.map((v, i) => {
+    const x = pad + (i * (w - pad * 2)) / Math.max(values.length - 1, 1);
+    const y = pad + (1 - (v - min) / span) * (h - pad * 2);
+    return { x, y, v };
+  });
+}
+
+function pointsToPath(pts: { x: number; y: number }[]) {
+  if (!pts.length) return "";
+  return pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+}
+
+function MiniTrendChart({
+  title,
+  points,
+  width = 240,
+  height = 56,
+}: {
+  title: string;
+  points: TrendPoint[];
+  width?: number;
+  height?: number;
+}) {
+  const pad = 8;
+  const w = width;
+  const h = height;
+
+  const values = points.map((p) => p.value);
+  const pts = buildSparkPoints(values, w, h, pad);
+  const pathD = pointsToPath(pts);
+
+  const wrapRef = React.useRef<HTMLDivElement | null>(null);
+  const [activeIdx, setActiveIdx] = React.useState<number | null>(null);
+  const [locked, setLocked] = React.useState(false);
+  const [pos, setPos] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  function hide() {
+    setActiveIdx(null);
+    setLocked(false);
+  }
+
+  function setTooltipFromEvent(e: React.MouseEvent | React.TouchEvent, idx: number) {
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+
+    const clientX =
+      "touches" in e ? (e.touches[0]?.clientX ?? rect.left) : (e as React.MouseEvent).clientX;
+    const clientY =
+      "touches" in e ? (e.touches[0]?.clientY ?? rect.top) : (e as React.MouseEvent).clientY;
+
+    const x = clamp(clientX - rect.left, 0, rect.width);
+    const y = clamp(clientY - rect.top, 0, rect.height);
+
+    setPos({ x, y });
+    setActiveIdx(idx);
+  }
+
+  React.useEffect(() => {
+    function onDocDown(ev: MouseEvent | TouchEvent) {
+      const el = wrapRef.current;
+      if (!el) return;
+      if (!el.contains(ev.target as Node)) hide();
+    }
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("touchstart", onDocDown, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("touchstart", onDocDown);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const active = activeIdx != null ? points[activeIdx] : null;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-900">{title}</div>
+        <div className="text-xs text-slate-500">Hover / tap points</div>
+      </div>
+
+      <div ref={wrapRef} className="relative mt-3">
+        <svg
+          width={w}
+          height={h}
+          className="block w-full"
+          viewBox={`0 0 ${w} ${h}`}
+          onMouseLeave={() => {
+            if (!locked) setActiveIdx(null);
+          }}
+        >
+          <path
+            d={pathD}
+            fill="none"
+            stroke="currentColor"
+            className="text-slate-700"
+            strokeWidth="2"
+          />
+
+          {pts.map((p, idx) => (
+            <g key={idx}>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={10}
+                fill="transparent"
+                onMouseEnter={(e) => {
+                  setLocked(false);
+                  setTooltipFromEvent(e, idx);
+                }}
+                onMouseMove={(e) => {
+                  if (!locked) setTooltipFromEvent(e, idx);
+                }}
+                onClick={(e) => {
+                  setLocked(true);
+                  setTooltipFromEvent(e, idx);
+                }}
+                onTouchStart={(e) => {
+                  setLocked(true);
+                  setTooltipFromEvent(e, idx);
+                }}
+              />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={3.2}
+                className={idx === activeIdx ? "fill-slate-900" : "fill-slate-500"}
+              />
+            </g>
+          ))}
+        </svg>
+
+        {active && (
+          <div
+            className="absolute z-10 pointer-events-none"
+            style={{
+              left: clamp(pos.x + 10, 0, w - 180),
+              top: clamp(pos.y + 10, 0, h - 10),
+              maxWidth: 180,
+            }}
+          >
+            {/* PATCH 4 (optional): caret / nub */}
+            <div className="absolute -top-2 left-3 h-3 w-3 rotate-45 border-l border-t border-slate-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.08)]" />
+
+            {/* PATCH 1 + 2: premium box + typography */}
+            <div
+              className={[
+                "rounded-lg border border-slate-200 bg-white",
+                "shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
+                "px-4 py-3",
+                "transition-opacity duration-200 ease-in-out",
+                "text-slate-800",
+              ].join(" ")}
+            >
+              <div className="text-[13px] font-semibold text-slate-500">{active.year}</div>
+
+              <div className="text-[16px] font-medium text-slate-800 leading-tight mt-0.5">
+                {active.valueLabel}
+              </div>
+
+              {active.deltaLabel ? (
+                <div className={`text-[14px] font-normal mt-0.5 ${deltaStyle(active.deltaSign)}`}>
+                  {active.deltaLabel}
+                </div>
+              ) : (
+                <div className="text-[14px] font-normal mt-0.5 text-slate-500">Baseline</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------
+// Existing helpers (demo view)
+// ----------------------------
 function toChartPoints(values: number[], w = 220, h = 46, pad = 6) {
   if (values.length === 0) return "";
   const min = Math.min(...values);
@@ -45,8 +261,8 @@ function DemoInsightBox() {
           decisions (FTP tracking, pacing, W/kg).
         </li>
         <li>
-          • <span className="font-medium">Roadmap</span>: goals, progress tracking, and
-          friendly competitions (leaderboards) built on the same precision metrics.
+          • <span className="font-medium">Roadmap</span>: goals, progress tracking, and friendly
+          competitions (leaderboards) built on the same precision metrics.
         </li>
       </ul>
 
@@ -56,12 +272,6 @@ function DemoInsightBox() {
       </div>
     </div>
   );
-}
-
-function fmtSigned(n: number, digits = 0) {
-  const s = n >= 0 ? "+" : "−";
-  const abs = Math.abs(n);
-  return `${s}${abs.toFixed(digits)}`;
 }
 
 function fmtDeltaRow(args: {
@@ -100,14 +310,39 @@ function safeNum(v: any, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-const DemoProgressionPanel: React.FC = () => {
-  const navigate = useNavigate();
+// Build TrendPoints from series
+function buildTrendPoints(
+  years: string[],
+  vals: number[],
+  fmt: (v: number) => string,
+  unit: string,
+  deltaDigits: number
+): TrendPoint[] {
+  return years.map((y, i) => {
+    const v = vals[i];
+    if (i === 0) return { year: y, value: v, valueLabel: fmt(v) };
 
+    const prev = vals[i - 1];
+    const d = v - prev;
+    const pct = Math.round(pctChange(v, prev) * 100);
+    const sign: TrendPoint["deltaSign"] = d > 0 ? "pos" : d < 0 ? "neg" : "zero";
+    const arrow = d > 0 ? "↑" : d < 0 ? "↓" : "→";
+
+    return {
+      year: y,
+      value: v,
+      valueLabel: fmt(v),
+      deltaSign: sign,
+      deltaLabel: `${fmtSigned(d, deltaDigits)} ${unit} (${fmtSigned(pct, 0)}%) ${arrow}`,
+    };
+  });
+}
+
+const DemoProgressionPanel: React.FC = () => {
   const years: YearKey[] = ["2022", "2023", "2024", "2025"];
 
-  // progression series
   const ftp = years.map((y) =>
-    "avgFTP" in progressionSummary[y]
+    "avgFTP" in (progressionSummary[y] as any)
       ? (progressionSummary[y] as any).avgFTP
       : (progressionSummary[y] as any).currentFTP
   ) as number[];
@@ -115,12 +350,9 @@ const DemoProgressionPanel: React.FC = () => {
   const wkg = years.map((y) => safeNum((progressionSummary[y] as any).wkg));
   const weight = years.map((y) => safeNum((progressionSummary[y] as any).weight));
 
-  const ftpPts = toChartPoints(ftp);
-  const wkgPts = toChartPoints(wkg);
-
   const latest = progressionSummary["2025"] as any;
 
-  // PATCH 5: Showcase filter
+  // Showcase filter
   const [yearFilter, setYearFilter] = React.useState<string>("All");
 
   const all = demoRides as any[];
@@ -135,15 +367,13 @@ const DemoProgressionPanel: React.FC = () => {
     .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")))
     .slice(0, 6);
 
-  // PATCH 3: If delta fields are missing in data, compute simple deltas from series
-  // (Uses series year-to-year. If you later store explicit deltas, this will still work.)
+  // Compute deltas (fallback if not present in progressionSummary)
   const computedDeltas: Record<string, any> = {};
   years.forEach((y, idx) => {
     if (idx === 0) {
       computedDeltas[y] = { deltaFtpW: 0, deltaFtpPct: 0, deltaKg: 0, deltaWkgPct: 0 };
       return;
     }
-    const prevY = years[idx - 1];
     const ftpPrev = safeNum(ftp[idx - 1]);
     const ftpNow = safeNum(ftp[idx]);
     const wkgPrev = safeNum(wkg[idx - 1]);
@@ -160,13 +390,28 @@ const DemoProgressionPanel: React.FC = () => {
     computedDeltas[y] = { deltaFtpW, deltaFtpPct, deltaKg, deltaWkgPct };
   });
 
+  // Trend points for MiniTrendChart
+  const yearStrings = years.map((y) => String(y));
+  const ftpTrendPoints = buildTrendPoints(
+    yearStrings,
+    ftp.map((v) => safeNum(v)),
+    (v) => `${Math.round(v)} W`,
+    "W",
+    0
+  );
+  const wkgTrendPoints = buildTrendPoints(
+    yearStrings,
+    wkg.map((v) => safeNum(v)),
+    (v) => `${v.toFixed(2)} W/kg`,
+    "W/kg",
+    2
+  );
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            {/* PATCH 1: Demo banner text */}
             <div className="text-sm text-amber-900">
               🎬 <span className="font-semibold">Demo Mode</span> – Real training progression{" "}
               <span className="font-semibold">2022–2025</span> (offline &amp; deterministic)
@@ -175,12 +420,8 @@ const DemoProgressionPanel: React.FC = () => {
               Demo uses curated real rides analyzed through CycleGraph’s pipeline.
             </div>
 
-            <div className="mt-3 text-xs font-semibold tracking-wide text-amber-700">
-              DEMO MODE
-            </div>
-            <h2 className="text-xl font-semibold text-slate-900">
-              3-års progression (FTP · vekt · W/kg)
-            </h2>
+            <div className="mt-3 text-xs font-semibold tracking-wide text-amber-700">DEMO MODE</div>
+            <h2 className="text-xl font-semibold text-slate-900">3-års progression (FTP · vekt · W/kg)</h2>
             <p className="mt-1 text-sm text-slate-600">
               Basert på 12 kuraterte økter (solo) med vær og “Precision Watt” fra pipeline.
             </p>
@@ -197,7 +438,6 @@ const DemoProgressionPanel: React.FC = () => {
         </div>
 
         <div className="mt-4 flex flex-col gap-4">
-          {/* PATCH 2: Insight box */}
           <DemoInsightBox />
 
           {/* KPI row */}
@@ -227,7 +467,7 @@ const DemoProgressionPanel: React.FC = () => {
             </div>
           </div>
 
-          {/* PATCH 6: MVP hint (valgfri “wow”) */}
+          {/* MVP hint */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-sm font-semibold text-slate-900">Next (MVP)</div>
             <div className="mt-1 text-sm text-slate-700">
@@ -238,68 +478,13 @@ const DemoProgressionPanel: React.FC = () => {
             </div>
           </div>
 
-          {/* Trends (mini charts) */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-slate-900">FTP trend</div>
-                <div className="text-xs text-slate-500">{years.join(" → ")}</div>
-              </div>
-
-              <div className="mt-2 flex items-center gap-3">
-                <svg width="220" height="46" viewBox="0 0 220 46" className="shrink-0">
-                  <polyline
-                    points={ftpPts}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className="text-slate-900"
-                  />
-                </svg>
-
-                <div className="text-xs text-slate-600">
-                  {years.map((y, i) => (
-                    <span key={y} className="mr-2">
-                      <span className="font-mono">{y}</span>:{" "}
-                      <span className="font-semibold text-slate-900">{ftp[i]}W</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-slate-900">W/kg trend</div>
-                <div className="text-xs text-slate-500">effekt / vekt</div>
-              </div>
-
-              <div className="mt-2 flex items-center gap-3">
-                <svg width="220" height="46" viewBox="0 0 220 46" className="shrink-0">
-                  <polyline
-                    points={wkgPts}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className="text-slate-900"
-                  />
-                </svg>
-
-                <div className="text-xs text-slate-600">
-                  {years.map((y, i) => (
-                    <span key={y} className="mr-2">
-                      <span className="font-mono">{y}</span>:{" "}
-                      <span className="font-semibold text-slate-900">
-                        {wkg[i].toFixed(2)}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {/* Trends (tooltips) */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <MiniTrendChart title="FTP trend" points={ftpTrendPoints} />
+            <MiniTrendChart title="W/kg trend" points={wkgTrendPoints} />
           </div>
 
-          {/* Weight row (nice table) */}
+          {/* Årsoversikt */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-sm font-medium text-slate-900">Årsoversikt</div>
 
@@ -311,20 +496,17 @@ const DemoProgressionPanel: React.FC = () => {
                     <th className="py-2 pr-4">FTP</th>
                     <th className="py-2 pr-4">Weight</th>
                     <th className="py-2 pr-4">W/kg</th>
-
-                    {/* PATCH 4: rename header */}
                     <th className="text-left text-xs font-semibold text-slate-600 py-2 pr-4">
                       Demo rides
                       <div className="text-[11px] font-normal text-slate-400">curated</div>
                     </th>
-
                     <th className="py-2 pr-4">Total km</th>
                     <th className="py-2 pr-4">Δ (story)</th>
                   </tr>
                 </thead>
 
                 <tbody className="text-slate-700">
-                  {years.map((y, i) => {
+                  {years.map((y) => {
                     const row: any = progressionSummary[y];
                     const ftpVal = row.avgFTP ?? row.currentFTP;
 
@@ -343,8 +525,6 @@ const DemoProgressionPanel: React.FC = () => {
                         <td className="py-2 pr-4">{Number(row.wkg).toFixed(2)}</td>
                         <td className="py-2 pr-4">{row.rides}</td>
                         <td className="py-2 pr-4">{Number(row.totalKm).toFixed(1)}</td>
-
-                        {/* PATCH 3: formatted Δ */}
                         <td className="py-2 pr-4">{fmtDeltaRow(deltaArgs)}</td>
                       </tr>
                     );
@@ -361,7 +541,7 @@ const DemoProgressionPanel: React.FC = () => {
         </div>
       </section>
 
-      {/* PATCH 5: Showcase rides – 6 of 12 + year filter */}
+      {/* Showcase rides */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -400,9 +580,7 @@ const DemoProgressionPanel: React.FC = () => {
               className="rounded-2xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50 flex items-center justify-between gap-3"
             >
               <div className="min-w-0">
-                <div className="font-medium text-slate-900 truncate">
-                  {r.title ?? r.name ?? "Ride"}
-                </div>
+                <div className="font-medium text-slate-900 truncate">{r.title ?? r.name ?? "Ride"}</div>
                 <div className="text-xs text-slate-600">
                   {r.date
                     ? new Date(`${String(r.date)}T12:00:00`).toLocaleDateString("nb-NO")
@@ -419,7 +597,8 @@ const DemoProgressionPanel: React.FC = () => {
                   {Math.round(safeNum(r.precisionWatt))} W
                 </div>
                 <div className="text-xs text-slate-600">
-                  {(safeNum(r.distance) / 1000).toFixed(1)} km · {Math.round(safeNum(r.duration) / 60)} min
+                  {(safeNum(r.distance) / 1000).toFixed(1)} km · {Math.round(safeNum(r.duration) / 60)}{" "}
+                  min
                 </div>
               </div>
             </Link>
@@ -439,7 +618,6 @@ const DemoProgressionPanel: React.FC = () => {
 export default function DashboardPage() {
   const demo = isDemoMode();
 
-  // DEMO: use the new progression panel
   if (demo) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6">
@@ -448,15 +626,12 @@ export default function DashboardPage() {
     );
   }
 
-  // REAL (existing) dashboard below
   return (
     <div className="flex flex-col gap-8">
-      {/* Always visible: account/status */}
       <section className="max-w-xl">
         <AccountStatus />
       </section>
 
-      {/* Overskrift */}
       <section>
         <h1 className="text-2xl font-semibold tracking-tight mb-2">Dashboard</h1>
         <p className="text-slate-600 max-w-xl">
@@ -464,12 +639,10 @@ export default function DashboardPage() {
         </p>
       </section>
 
-      {/* Sprint 2: Strava wiring */}
       <section className="max-w-xl">
         <StravaImportCard />
       </section>
 
-      {/* Dummy rings */}
       <section className="flex flex-col md:flex-row gap-6 justify-between max-w-xl">
         <div className="flex flex-col items-center">
           <div className="h-32 w-32 rounded-full border-4 border-slate-300 flex items-center justify-center">
@@ -486,7 +659,6 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* Shortcuts */}
       <section className="flex flex-col gap-3 max-w-md">
         <h2 className="text-lg font-semibold">Utforsk dataene dine</h2>
         <div className="flex flex-col gap-2">
