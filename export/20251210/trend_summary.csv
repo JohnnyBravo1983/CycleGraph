@@ -1,0 +1,2 @@
+profile_version,precision_watt_mean,precision_watt_std,precision_watt_count,drag_watt_mean,drag_watt_std,drag_watt_count,rolling_watt_mean,rolling_watt_std,rolling_watt_count,avg_watt_mean,avg_watt_std,avg_watt_count,w_per_beat_mean,w_per_beat_std,w_per_beat_count,calibration_mae_mean,calibration_mae_std,calibration_mae_count
+v1-6568af79836a-20251112,196.132894,29.343015,9,131.877059,16.414003,9,33.546153,2.158649,9,187.306913,28.022579,9,1.330319,0.191954,9,,,0

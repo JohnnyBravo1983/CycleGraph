@@ -1,0 +1,4 @@
+sid,n,calibrated,status,mae,mean_pred,mean_dev
+s1,1,False,not_available,,164.41995,
+s1,1,False,not_available,,164.41995,
+s2,4,True,ok,45.08005,164.41995,209.5

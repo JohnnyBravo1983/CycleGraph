@@ -1,3 +1,4 @@
+// frontend/src/routes/HowItWorksPage.tsx
 import React from "react";
 import { Link } from "react-router-dom";
 import { isDemoMode } from "../demo/demoMode";
@@ -64,9 +65,8 @@ export const HowItWorksPage: React.FC = () => {
 
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               CycleGraph targets power estimation accuracy approaching – or exceeding – real power
-              meters (typically{" "}
-              <span className="font-semibold text-slate-900">10 000+ NOK</span>) without the hardware
-              cost.
+              meters (typically <span className="font-semibold text-slate-900">10 000+ NOK</span>)
+              without the hardware cost.
             </p>
           </div>
 
@@ -142,6 +142,53 @@ export const HowItWorksPage: React.FC = () => {
             hypothesis: ~3–5% accuracy with good conditions.
           </div>
         </div>
+
+        {/* Task 7 Supplement — Origin story (after 800+ HOURS OF WORK, before Integration) */}
+        <section className="mt-8">
+          <div className="rounded-xl border-l-4 border-blue-500 bg-sky-50 px-7 py-6 shadow-sm">
+            <h3 className="flex items-center gap-2 text-[1.4rem] font-semibold text-slate-900">
+              💡 Why CycleGraph exists
+            </h3>
+
+            <p className="mt-3 text-base leading-[1.7] text-slate-700">
+              CycleGraph started as a personal project in 2022. I wanted two things:
+            </p>
+
+            <ol className="ml-6 mt-3 list-decimal space-y-2 pl-2 text-base leading-[1.8] text-slate-700">
+              <li>A signature tech portfolio piece that demonstrated real engineering depth</li>
+              <li>A precision training tool I couldn’t find anywhere else</li>
+            </ol>
+
+            <p className="mt-4 text-base leading-[1.7] text-slate-700">
+              <strong className="font-semibold text-blue-600">Personal goal:</strong> Go from top
+              45% (2025) to top 10% in Hervejsløpet by 2028 — using the same physics-based insights
+              you see in this demo.
+            </p>
+
+            <p className="mt-4 text-base leading-[1.7] text-slate-700">
+              The progression you see on the dashboard (210W → 260W, 116kg → 104kg) is real data
+              from my own training. If CycleGraph works for me, it can work for you.
+            </p>
+
+            <p className="mt-5 border-t border-slate-300 pt-4 text-center text-[1.05rem] italic text-slate-500">
+              Built by a cyclist, for cyclists. Powered by physics, proven by results.
+            </p>
+          </div>
+        </section>
+
+        {/* Task 7.4 — Integration (after Origin story, before footer nav) */}
+        <section className="mt-8">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-semibold tracking-tight text-slate-900">🔗 Integration</h3>
+
+            <p className="mt-2 text-sm text-slate-700">
+              <strong>Currently:</strong> Strava (automatic analysis after upload)
+            </p>
+            <p className="mt-1 text-sm text-slate-700">
+              <strong>Next:</strong> Direct device integrations (Garmin, Wahoo, etc.)
+            </p>
+          </div>
+        </section>
 
         {/* TECH STACK */}
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">

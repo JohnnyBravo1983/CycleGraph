@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 
 import { StravaImportCard } from "../components/StravaImportCard";
 import { AccountStatus } from "../components/AccountStatus";
-
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
 
@@ -192,6 +191,7 @@ function MiniTrendChart({
               maxWidth: 180,
             }}
           >
+            {/* caret */}
             <div className="absolute -top-2 left-3 h-3 w-3 rotate-45 border-l border-t border-slate-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.08)]" />
 
             <div
@@ -253,9 +253,9 @@ function DemoInsightBox() {
 
       <ul className="mt-3 space-y-1 text-sm text-slate-700">
         <li>
-          • <span className="font-medium">Precision Watt (beta)</span>: a physics-based power
-          model aiming for <span className="font-medium">~3–5% accuracy</span> in good
-          conditions (calibrated inputs).
+          • <span className="font-medium">Precision Watt (beta)</span>: a physics-based power model
+          aiming for <span className="font-medium">~3–5% accuracy</span> in good conditions
+          (calibrated inputs).
         </li>
         <li>
           • Compared to “estimated power” views, results can be more consistent for training
@@ -268,8 +268,8 @@ function DemoInsightBox() {
       </ul>
 
       <div className="mt-3 text-xs text-slate-500">
-        Note: accuracy depends on data quality (profile, terrain, weather, device streams).
-        This demo is offline and reproducible.
+        Note: accuracy depends on data quality (profile, terrain, weather, device streams). This
+        demo is offline and reproducible.
       </div>
     </div>
   );
@@ -361,7 +361,7 @@ function sortByMetric(rows: LbEntry[], metric: "ftp" | "wkg") {
   return [...rows].sort((a, b) => (metric === "ftp" ? b.ftp - a.ftp : b.wkg - a.wkg));
 }
 
-// Topp N, men inkluder alltid current user (med “…” separator) hvis utenfor topp
+// Top N, but always include current user (with “…” separator) if outside top N
 function topWithCurrent(rows: LbEntry[], metric: "ftp" | "wkg", n = 5) {
   const sorted = sortByMetric(rows, metric).map((r, idx) => ({ ...r, _rank: idx + 1 }));
   const top = sorted.slice(0, n);
@@ -444,6 +444,53 @@ const DemoProgressionPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* HERO V2 — WOW (replaces old hero box) */}
+      <section className="mb-12">
+        <div
+          className="relative flex items-center gap-7 overflow-hidden rounded-2xl p-10 shadow-[0_12px_40px_rgba(102,126,234,0.40)] transition-transform duration-300 hover:-translate-y-1 hover:shadow-[0_16px_50px_rgba(102,126,234,0.50)] max-md:flex-col max-md:text-center max-md:p-8"
+          style={{
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: "white",
+          }}
+        >
+          {/* Subtle overlay */}
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(circle at top right, rgba(255,255,255,0.10) 0%, transparent 60%)",
+            }}
+          />
+
+          {/* Icon */}
+          <div className="relative z-10 flex-none text-6xl leading-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.30)] max-md:text-5xl">
+            ⚡
+          </div>
+
+          {/* Content */}
+          <div className="relative z-10 min-w-0 flex-1">
+            <h2 className="text-4xl font-extrabold tracking-tight leading-tight max-md:text-3xl">
+              Power estimation without the hardware cost
+            </h2>
+
+            <p className="mt-3 text-lg leading-relaxed text-white/95 max-md:text-base">
+              Targeting{" "}
+              <strong className="text-[1.2em] font-bold text-[#ffd700] drop-shadow-[0_2px_8px_rgba(0,0,0,0.20)]">
+                ~3–5% accuracy
+              </strong>{" "}
+              No power meter required.
+            </p>
+
+            <Link
+              to="/how-it-works"
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-white px-8 py-3 text-base font-semibold text-[#667eea] shadow-[0_4px_12px_rgba(0,0,0,0.15)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_20px_rgba(0,0,0,0.25)] active:translate-y-0"
+            >
+              See how it works →
+            </Link>
+          </div>
+        </div>
+      </section>
+
       <section className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
@@ -456,9 +503,11 @@ const DemoProgressionPanel: React.FC = () => {
             </div>
 
             <div className="mt-3 text-xs font-semibold tracking-wide text-amber-700">DEMO MODE</div>
-            <h2 className="text-xl font-semibold text-slate-900">3-års progression (FTP · vekt · W/kg)</h2>
+            <h2 className="text-xl font-semibold text-slate-900">
+              Multi-year progression (FTP · weight · W/kg)
+            </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Basert på 12 kuraterte økter (solo) med vær og “Precision Watt” fra pipeline.
+              Based on 12 curated rides (solo), with weather and “Precision Watt” from the pipeline.
             </p>
           </div>
 
@@ -467,7 +516,7 @@ const DemoProgressionPanel: React.FC = () => {
               to="/rides"
               className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
             >
-              Se rides →
+              View rides →
             </Link>
           </div>
         </div>
@@ -498,18 +547,7 @@ const DemoProgressionPanel: React.FC = () => {
               <div className="mt-1 text-2xl font-semibold text-slate-900">
                 {safeNum(latest.wkg).toFixed(2)}
               </div>
-              <div className="mt-1 text-xs text-slate-500">Effekt + vektreduksjon</div>
-            </div>
-          </div>
-
-          {/* MVP hint */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-sm font-semibold text-slate-900">Next (MVP)</div>
-            <div className="mt-1 text-sm text-slate-700">
-              Set goals, track progress, and compare efforts on precision-based leaderboards.
-            </div>
-            <div className="mt-3 inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-              🎯 Goals &amp; Leaderboards (coming soon)
+              <div className="mt-1 text-xs text-slate-500">Power + weight loss</div>
             </div>
           </div>
 
@@ -519,9 +557,19 @@ const DemoProgressionPanel: React.FC = () => {
             <MiniTrendChart title="W/kg trend" points={wkgTrendPoints} />
           </div>
 
-          {/* Årsoversikt */}
+          {/* Task 7.3 — Next (MVP) hint (under trends, before Showcase rides) */}
+          <section className="mt-4">
+            <div className="rounded-2xl border border-slate-200 bg-sky-50 p-5">
+              <h4 className="text-base font-semibold text-slate-900">Next (MVP)</h4>
+              <p className="mt-1 text-sm text-slate-700">
+                Set goals, track progress, and compare performance on precision-based leaderboards.
+              </p>
+            </div>
+          </section>
+
+          {/* Year overview */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-sm font-medium text-slate-900">Årsoversikt</div>
+            <div className="text-sm font-medium text-slate-900">Year overview</div>
 
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-sm">
@@ -552,15 +600,57 @@ const DemoProgressionPanel: React.FC = () => {
                       deltaWkgPct: safeNum(row.deltaWkgPct, computedDeltas[y].deltaWkgPct),
                     };
 
+                    const is2025 = String(y) === "2025";
+                    const tdBase = "py-2 pr-4";
+                    const tdFirst = is2025
+                      ? "pl-5 py-2 pr-4 font-mono text-slate-900"
+                      : "py-2 pr-4 font-mono text-slate-900";
+
+                    const ftpPctBadge = row.deltaFtpPct ?? computedDeltas[y].deltaFtpPct;
+                    const kgDeltaBadge = row.deltaKg ?? computedDeltas[y].deltaKg;
+                    const wkgPctBadge = row.deltaWkgPct ?? computedDeltas[y].deltaWkgPct;
+
                     return (
-                      <tr key={y} className="border-t">
-                        <td className="py-2 pr-4 font-mono text-slate-900">{y}</td>
-                        <td className="py-2 pr-4">{ftpVal} W</td>
-                        <td className="py-2 pr-4">{Number(row.weight).toFixed(1)} kg</td>
-                        <td className="py-2 pr-4">{Number(row.wkg).toFixed(2)}</td>
-                        <td className="py-2 pr-4">{row.rides}</td>
-                        <td className="py-2 pr-4">{Number(row.totalKm).toFixed(1)}</td>
-                        <td className="py-2 pr-4">{fmtDeltaRow(deltaArgs)}</td>
+                      <tr
+                        key={y}
+                        className={
+                          is2025
+                            ? "bg-gradient-to-r from-emerald-50 to-emerald-100 font-semibold border-l-4 border-emerald-500"
+                            : "border-t"
+                        }
+                      >
+                        <td className={tdFirst}>{y}</td>
+
+                        <td className={tdBase}>
+                          {ftpVal} W{" "}
+                          {is2025 && (
+                            <span className="ml-2 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                              {`+${Math.round(safeNum(ftpPctBadge))}%`}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className={tdBase}>
+                          {Number(row.weight).toFixed(1)} kg{" "}
+                          {is2025 && (
+                            <span className="ml-2 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                              {`${fmtSigned(safeNum(kgDeltaBadge), 1)} kg`}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className={tdBase}>
+                          {Number(row.wkg).toFixed(2)}{" "}
+                          {is2025 && (
+                            <span className="ml-2 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                              {`+${Math.round(safeNum(wkgPctBadge))}%`}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className={tdBase}>{row.rides}</td>
+                        <td className={tdBase}>{Number(row.totalKm).toFixed(1)}</td>
+                        <td className={tdBase}>{fmtDeltaRow(deltaArgs)}</td>
                       </tr>
                     );
                   })}
@@ -569,10 +659,52 @@ const DemoProgressionPanel: React.FC = () => {
             </div>
 
             <div className="mt-2 text-xs text-slate-500">
-              Vektdata per år brukes for W/kg-demonstrasjon. For “perfect realism” kan vi senere
-              hente eksakt vekt fra hver økt.
+              Weight is shown per year for the W/kg demo. For perfect realism later, we can pull the
+              exact weight for each ride.
             </div>
           </div>
+
+          {/* Task 7.2 — Profile Precision (after Year overview, before Showcase rides) */}
+          <section className="mt-8 mb-8">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold tracking-tight text-slate-900">
+                🎯 Profile precision
+              </h3>
+
+              <p className="mt-2 text-sm text-slate-600">
+                CycleGraph personalizes estimated power based on:
+              </p>
+
+              <ul className="mt-4 space-y-2 text-sm text-slate-700">
+                <li>
+                  <span className="mr-2 font-semibold text-emerald-600">✓</span>
+                  Rider: 104.4 kg (down from 116.8 kg in 2022)
+                </li>
+                <li>
+                  <span className="mr-2 font-semibold text-emerald-600">✓</span>Bike: 8 kg road bike,
+                  28mm tires
+                </li>
+                <li>
+                  <span className="mr-2 font-semibold text-emerald-600">✓</span>Drivetrain: 96% crank
+                  efficiency
+                </li>
+                <li>
+                  <span className="mr-2 font-semibold text-emerald-600">✓</span>Position: Road (CdA
+                  0.300, Crr 0.0040)
+                </li>
+              </ul>
+
+              <p className="mt-4 text-sm italic text-slate-500">
+                → A better profile = more precise estimates
+              </p>
+
+              {/* PATCH FP-5 — replace confusing disabled button with info note */}
+              <div className="mt-4 rounded-xl border-l-4 border-blue-600 bg-sky-50 p-4 text-sm text-blue-900">
+                💡 Full profile customization available at launch — adjust your bike, position, and
+                weight for optimal precision.
+              </div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -615,10 +747,12 @@ const DemoProgressionPanel: React.FC = () => {
               className="rounded-2xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50 flex items-center justify-between gap-3"
             >
               <div className="min-w-0">
-                <div className="font-medium text-slate-900 truncate">{r.title ?? r.name ?? "Ride"}</div>
+                <div className="font-medium text-slate-900 truncate">
+                  {r.title ?? r.name ?? "Ride"}
+                </div>
                 <div className="text-xs text-slate-600">
                   {r.date
-                    ? new Date(`${String(r.date)}T12:00:00`).toLocaleDateString("nb-NO")
+                    ? new Date(`${String(r.date)}T12:00:00`).toLocaleDateString("en-US")
                     : "—"}{" "}
                   ·{" "}
                   <span className="capitalize">
@@ -632,8 +766,8 @@ const DemoProgressionPanel: React.FC = () => {
                   {Math.round(safeNum(r.precisionWatt))} W
                 </div>
                 <div className="text-xs text-slate-600">
-                  {(safeNum(r.distance) / 1000).toFixed(1)} km · {Math.round(safeNum(r.duration) / 60)}{" "}
-                  min
+                  {(safeNum(r.distance) / 1000).toFixed(1)} km ·{" "}
+                  {Math.round(safeNum(r.duration) / 60)} min
                 </div>
               </div>
             </Link>
@@ -739,7 +873,6 @@ const DemoProgressionPanel: React.FC = () => {
                   const top3 = rank <= 3;
                   const isMe = !!u.isCurrentUser;
 
-                  // Insert “…” separator before the last row if current user is outside top 5
                   const isLast = idx === rows.length - 1;
                   const showDotsHere = showEllipsis && isLast;
 
@@ -827,7 +960,7 @@ export default function DashboardPage() {
       <section>
         <h1 className="text-2xl font-semibold tracking-tight mb-2">Dashboard</h1>
         <p className="text-slate-600 max-w-xl">
-          Oversikt over treningen din, kalibrering og nøyaktighet i analysene.
+          Overview of your training, calibration, and analysis accuracy.
         </p>
       </section>
 
@@ -840,43 +973,53 @@ export default function DashboardPage() {
           <div className="h-32 w-32 rounded-full border-4 border-slate-300 flex items-center justify-center">
             <span className="text-xl font-semibold">75%</span>
           </div>
-          <p className="text-sm text-slate-600 mt-2">Kalibreringsgrad</p>
+          <p className="text-sm text-slate-600 mt-2">Calibration completeness</p>
         </div>
 
         <div className="flex flex-col items-center">
           <div className="h-32 w-32 rounded-full border-4 border-slate-300 flex items-center justify-center">
             <span className="text-xl font-semibold">90%</span>
           </div>
-          <p className="text-sm text-slate-600 mt-2">Estimert watt-nøyaktighet</p>
+          <p className="text-sm text-slate-600 mt-2">Estimated power accuracy</p>
         </div>
       </section>
 
       <section className="flex flex-col gap-3 max-w-md">
-        <h2 className="text-lg font-semibold">Utforsk dataene dine</h2>
+        <h2 className="text-lg font-semibold">Explore your data</h2>
         <div className="flex flex-col gap-2">
+          <Link
+            to="/how-it-works"
+            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+          >
+            ⚙️ How CycleGraph Works <span className="ml-1 text-slate-500">Learn more →</span>
+          </Link>
+
           <Link
             to="/rides"
             className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
           >
-            🚴‍♂️ Rides / Økter
+            🚴‍♂️ Rides
           </Link>
+
           <Link
             to="/trends"
             className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
           >
-            📈 Trends / Trender
+            📈 Trends
           </Link>
+
           <Link
             to="/goals"
             className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
           >
-            🎯 Goals / Mål
+            🎯 Goals
           </Link>
+
           <Link
             to="/profile"
             className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
           >
-            👤 Profile / Profil
+            👤 Profile
           </Link>
         </div>
       </section>

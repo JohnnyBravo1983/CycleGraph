@@ -1,0 +1,2 @@
+weather_source,mean,std,count
+open-meteo/era5,1.330319,0.191954,9

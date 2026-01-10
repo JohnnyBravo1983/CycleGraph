@@ -1,3 +1,4 @@
+// frontend/src/routes/LeaderboardsPage.tsx
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { leaderboardMockData } from "../demo/leaderboardMockData";
@@ -51,9 +52,7 @@ export const LeaderboardsPage: React.FC = () => {
             className={[
               "grid grid-cols-[60px_1fr_140px_140px] px-5 py-4 border-t border-slate-100",
               "hover:bg-slate-50",
-              u.isCurrentUser
-                ? "bg-emerald-50 border-y-2 border-emerald-500"
-                : "",
+              u.isCurrentUser ? "bg-emerald-50 border-y-2 border-emerald-500" : "",
             ].join(" ")}
           >
             <div className="font-bold text-slate-800">{i + 1}</div>
@@ -69,10 +68,22 @@ export const LeaderboardsPage: React.FC = () => {
 
       {isDemoMode() && (
         <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-          💡 Demo note: Leaderboards are populated with demo data. In production,
-          you’ll compete with real users globally.
+          💡 Demo note: Leaderboards are populated with demo data. In production, you’ll compete
+          with real users globally.
         </div>
       )}
+
+      {/* Task 7.5 — Coming soon features */}
+      <section className="mt-8">
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
+          <h4 className="text-base font-semibold text-slate-900">Coming soon</h4>
+          <ul className="mt-2 list-disc list-inside space-y-1 text-sm text-slate-700">
+            <li>Best-effort intervals (60s, 20min)</li>
+            <li>Segment-specific comparisons</li>
+            <li>Custom time ranges</li>
+          </ul>
+        </div>
+      </section>
     </div>
   );
 };
