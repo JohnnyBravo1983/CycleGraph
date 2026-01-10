@@ -1,3 +1,4 @@
+// frontend/src/routes/LandingPage.tsx
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -27,6 +28,17 @@ export const LandingPage: React.FC = () => {
         <div className="absolute inset-0 bg-black/30" />
 
         <div className="relative z-10 mx-auto max-w-4xl px-6 text-center text-white">
+          {/* LOGO */}
+          <div className="mx-auto mb-5 flex items-center justify-center">
+            <div className="rounded-2xl border border-white/25 bg-white/10 px-4 py-3 backdrop-blur-md shadow-[0_10px_40px_rgba(0,0,0,0.25)]">
+              <img
+                src="/CycleGraph_Logo.png"
+                alt="CycleGraph"
+                className="h-14 w-auto object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)] max-md:h-12"
+              />
+            </div>
+          </div>
+
           <div className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/20 px-5 py-2 text-sm font-semibold backdrop-blur-md">
             🚀 Live Demo Preview
           </div>
@@ -131,7 +143,6 @@ export const LandingPage: React.FC = () => {
 
             <span className="text-slate-500">·</span>
 
-            {/* CONTACT — Gmail compose (always works) */}
             <a
               href="https://mail.google.com/mail/?view=cm&fs=1&to=johnny@cyclegraph.app&su=CycleGraph%20Live%20Demo%20Feedback"
               target="_blank"

@@ -444,6 +444,24 @@ const DemoProgressionPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* HEADER BRAND (logo + back) */}
+      <section className="flex items-center justify-between">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50"
+          title="Back to landing"
+        >
+          <img
+            src="/CycleGraph_Logo.png"
+            alt="CycleGraph"
+            className="h-8 w-auto object-contain"
+          />
+          <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
+        </Link>
+
+        <div className="text-xs text-slate-500">Demo dashboard</div>
+      </section>
+
       {/* HERO V2 — WOW (replaces old hero box) */}
       <section className="mb-12">
         <div
@@ -659,8 +677,7 @@ const DemoProgressionPanel: React.FC = () => {
             </div>
 
             <div className="mt-2 text-xs text-slate-500">
-              Weight is shown per year for the W/kg demo. For perfect realism later, we can pull the
-              exact weight for each ride.
+              Weight is captured per ride and factored directly into the W/kg calculations.
             </div>
           </div>
 
@@ -943,6 +960,20 @@ const DemoProgressionPanel: React.FC = () => {
 export default function DashboardPage() {
   const demo = isDemoMode();
 
+  // Reusable brand header for real mode too
+  const BrandHeader = () => (
+    <div className="flex items-center justify-between">
+      <Link
+        to="/"
+        className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50"
+        title="Back to landing"
+      >
+        <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
+        <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
+      </Link>
+    </div>
+  );
+
   if (demo) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6">
@@ -953,6 +984,8 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-8">
+      <BrandHeader />
+
       <section className="max-w-xl">
         <AccountStatus />
       </section>
