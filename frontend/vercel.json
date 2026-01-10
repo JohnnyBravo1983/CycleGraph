@@ -1,7 +1,6 @@
 {
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
-  ],
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/" }],
   "headers": [
     {
       "source": "/assets/(.*)\\.js",
@@ -11,17 +10,15 @@
       ]
     },
     {
-      "source": "/assets/(.*)\\.css",
-      "headers": [
-        { "key": "Content-Type", "value": "text/css; charset=utf-8" }
-      ]
-    },
-    {
       "source": "/assets/(.*)\\.mjs",
       "headers": [
         { "key": "Content-Type", "value": "text/javascript; charset=utf-8" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
+    },
+    {
+      "source": "/assets/(.*)\\.css",
+      "headers": [{ "key": "Content-Type", "value": "text/css; charset=utf-8" }]
     }
   ]
 }
