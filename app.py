@@ -23,7 +23,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Response, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
+from fastapi.responses import JSONResponse
 
 from cyclegraph.weather_client import get_weather_for_session, WeatherError
 
@@ -33,6 +33,10 @@ from server.routes.profile_router import router as profile_router
 from server.routes.sessions_list_router import router as sessions_list_router
 from server.routes.auth_strava import router as strava_auth_router  # <-- PATCH B
 from server.routes.strava_import_router import router as strava_import_router  # <-- PATCH P1 (Sprint 2 ingest)
+from server.routes.auth_local import router as local_auth_router  # <-- Task 1.1 local auth
+
+# Import for local auth middleware
+from server.auth.local_auth import COOKIE_NAME as AUTH_COOKIE_NAME, verify_session as verify_auth_session
 
 # -----------------------------------------------------------------------------
 # Konfig
@@ -49,6 +53,7 @@ app.include_router(profile_router)
 app.include_router(sessions_list_router)
 app.include_router(strava_auth_router)         # OAuth (routeren har prefix internt)
 app.include_router(strava_import_router)       # Sprint 2 ingest
+app.include_router(local_auth_router)          # B3.2: Inkluder lokal auth router
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +66,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# B3.3: Middleware som setter user_id i request context
+@app.middleware("http")
+async def attach_user_id(request, call_next):
+    request.state.user_id = None
+    raw = request.cookies.get(AUTH_COOKIE_NAME)
+    payload = verify_auth_session(raw or "")
+    if payload:
+        # user_id idiomatisk = cg_uid
+        request.state.user_id = payload.get("uid")
+    return await call_next(request)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -541,8 +557,6 @@ def api_get_session(sid: str):
 # PATCH 1: Endre navnet for å unngå kollisjon med sessions.py
 # OBS: Denne funksjonen må IKKE kalle seg selv rekursivt
 # -----------------------------------------------------------------------------
-
-from fastapi.responses import JSONResponse  # øverst i fila hvis ikke allerede importert
 
 @app.post("/api/sessions/{sid}/analyze_apppy")
 def api_analyze_session_apppy(
