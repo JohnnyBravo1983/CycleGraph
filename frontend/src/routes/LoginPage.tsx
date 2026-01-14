@@ -23,7 +23,7 @@ export default function LoginPage() {
       // MVP: ingen ekte auth enda.
       // Etter ekte login: gjør API-kall her, og så:
       const to = await getPostAuthRoute();
-      navigate(to);
+      navigate("/dashboard", { replace: true });
     } catch (e) {
       setError((e as Error).message ?? "Ukjent feil ved login");
     } finally {

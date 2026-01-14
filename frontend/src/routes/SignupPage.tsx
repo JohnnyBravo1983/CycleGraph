@@ -21,7 +21,9 @@ export default function SignupPage() {
     password.trim().length >= 6 &&
     consent;
 
-  const onContinue = async () => {
+  const onContinue = () => {
+    if (!canContinue) return;
+
     setSubmitting(true);
     setError(null);
 
@@ -32,6 +34,7 @@ export default function SignupPage() {
     } catch (e) {
       setError((e as Error).message ?? "Ukjent feil ved registrering");
     } finally {
+      // Vi setter tilbake umiddelbart – siden vi ikke har ekte nettverkskall her.
       setSubmitting(false);
     }
   };

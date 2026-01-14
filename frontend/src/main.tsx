@@ -18,8 +18,6 @@ import TrendsPage from "./routes/TrendsPage";
 import GoalsPage from "./routes/GoalsPage";
 import ProfilePage from "./routes/ProfilePage";
 import OnboardingPage from "./routes/OnboardingPage";
-
-// Patch B: How it works page
 import { HowItWorksPage } from "./routes/HowItWorksPage";
 
 // Installer dev-rewrite for axios FØR appen starter (kun i dev)
@@ -28,26 +26,33 @@ if (import.meta.env.DEV) {
 }
 
 /**
- * Router (Fase 1 – skeleton):
- *  - "/"            -> LandingPage (ny inngang)
- *  - "/session/:id" -> SessionView (legacy element of truth)
- *  - "*"(catch-all) -> "/"
- *
- * Senere:
- *  - "/login", "/signup", "/dashboard", "/rides", osv. legges til
- *    i henhold til ROUTES_PLAN.md
+ * Routing rules:
+ * - DEV: "/" -> /login  (live flow)
+ * - PROD: "/" -> LandingPage (marketing + demo entry)
+ * - LandingPage is always reachable at "/landing" (also in DEV).
  */
 const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <LandingPage /> },
+      // ✅ DEV starter på live login
+      // ✅ PROD starter på landing
+      {
+        index: true,
+        element: import.meta.env.DEV ? (
+          <Navigate to="/login" replace />
+        ) : (
+          <LandingPage />
+        ),
+      },
+
+      // ✅ Landing alltid tilgjengelig (også i dev)
+      { path: "landing", element: <LandingPage /> },
 
       { path: "login", element: <LoginPage /> },
       { path: "signup", element: <SignupPage /> },
 
-      // NEW: onboarding (må ligge her som "onboarding" pga nested routes)
       { path: "onboarding", element: <OnboardingPage /> },
 
       { path: "calibration", element: <CalibrationPage /> },
@@ -58,7 +63,7 @@ const router = createBrowserRouter([
       { path: "goals", element: <GoalsPage /> },
       { path: "profile", element: <ProfilePage /> },
 
-      // Patch B: How it works
+      // How it works
       { path: "how-it-works", element: <HowItWorksPage /> },
 
       // Legacy truth-økt
