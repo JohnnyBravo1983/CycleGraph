@@ -198,8 +198,11 @@ export default function OnboardingPage() {
   };
 
   function connectStrava() {
-    const next = encodeURIComponent(window.location.href);
-    window.open(`${cgApi.baseUrl()}/login?next=${next}`, "_self");
+  const nextRaw = `${window.location.origin}/onboarding`;
+  const url = `${cgApi.baseUrl()}/api/auth/strava/login?next=${encodeURIComponent(nextRaw)}`;
+  window.open(url, "_self");
+
+
   }
 
   const tokenState = getTokenState(st);

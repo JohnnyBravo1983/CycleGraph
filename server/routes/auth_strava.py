@@ -10,8 +10,10 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import requests
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+
+from server.auth_guard import require_auth
 
 router = APIRouter()
 
@@ -32,24 +34,18 @@ def _users_dir() -> Path:
     return _repo_root() / "state" / "users"
 
 
-def _get_or_set_uid(req: Request, resp: Optional[Response] = None) -> str:
+# NOTE (Patch 3E):
+# cg_uid kan eksistere som legacy helper cookie, men skal aldri være autoritativ identitet.
+# Protected endpoints må bruke request.state.user_id / require_auth.
+def _get_or_set_uid_legacy(req: Request) -> str:
+    """
+    Legacy helper: beholdes kun for kompatibilitet / debugging.
+    Skal ikke brukes som autoritativ identitet for protected endpoints.
+    """
     uid = req.cookies.get("cg_uid")
     if uid and isinstance(uid, str) and len(uid) >= 10:
         return uid
-
-    # generate new anon uid (strip urlsafe chars that can be annoying in paths/logs)
     uid = "u_" + secrets.token_urlsafe(16).replace("-", "").replace("_", "")
-
-    # If a response object is provided, prime the cookie immediately.
-    if resp is not None:
-        resp.set_cookie(
-            key="cg_uid",
-            value=uid,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
-
     return uid
 
 
@@ -78,8 +74,6 @@ def _load_tokens(uid: str) -> Optional[Dict[str, Any]]:
 # Helpers
 # ----------------------------
 def _effective_redirect_uri(req: Request) -> str:
-    # Prefer explicit env var; else build from request base URL
-    # Example: http://localhost:5175/api/auth/strava/callback
     env = (os.getenv("STRAVA_REDIRECT_URI") or "").strip()
     if env:
         return env
@@ -105,8 +99,6 @@ def _exchange_code_for_tokens(code: str, redirect_uri: str) -> Dict[str, Any]:
         "client_secret": csec,
         "code": code,
         "grant_type": "authorization_code",
-        # Strava does not require redirect_uri for token exchange in all cases,
-        # but including it makes debugging clearer if you later enforce it.
         "redirect_uri": redirect_uri,
     }
 
@@ -117,7 +109,6 @@ def _exchange_code_for_tokens(code: str, redirect_uri: str) -> Dict[str, Any]:
             detail=f"Strava token exchange failed: HTTP {r.status_code}: {r.text[:400]}",
         )
     data = r.json()
-    # Expect: access_token, refresh_token, expires_at
     for k in ("access_token", "refresh_token", "expires_at"):
         if k not in data:
             raise HTTPException(status_code=502, detail=f"Strava response missing {k}")
@@ -125,33 +116,42 @@ def _exchange_code_for_tokens(code: str, redirect_uri: str) -> Dict[str, Any]:
 
 
 # ----------------------------
-# Routes
+# Routes (Patch 3E: protected => use request.state.user_id)
 # ----------------------------
 @router.get("/status")
-def status(
+def strava_status(
     req: Request,
-    response: Response,
-    cg_uid: str | None = Cookie(default=None),
+    user_id: str = Depends(require_auth),
 ):
     """
-    Status endpoint for local dev + onboarding.
+    Status endpoint for onboarding/dev.
 
-    RULE (Patch 4.3):
-    - If cookie is missing -> generate new uid -> set cookie -> done.
-    - Never "pick" another uid from disk.
+    Patch 3E:
+    - Identitet = request.state.user_id (via require_auth)
+    - cg_uid kan settes som legacy helper cookie, men er aldri autoritativ.
     """
-    # 1) Use cookie uid if present, else create & PRIME cookie via response
-    uid = cg_uid or _get_or_set_uid(req, response)
+    uid = user_id
 
-    # 2) Load tokens for this uid only (no disk-scanning fallback)
     tokens = _load_tokens(uid)
 
     ok = bool(tokens and tokens.get("access_token"))
     exp = int(tokens.get("expires_at", 0)) if tokens else 0
     now = int(time.time())
 
-    # 🔒 Always set cookie explicitly (PowerShell + onboarding)
-    response.set_cookie(
+    resp = JSONResponse(
+        {
+            "ok": ok,
+            "uid": uid,
+            "has_tokens": ok,
+            "expires_at": exp,
+            "expires_in_sec": (exp - now) if exp else None,
+            "token_path": str(_token_path_for_uid(uid)),
+            "redirect_uri_effective": _effective_redirect_uri(req),
+        }
+    )
+
+    # legacy helper cookie (ikke autoritativ identitet)
+    resp.set_cookie(
         key="cg_uid",
         value=uid,
         httponly=True,
@@ -159,25 +159,25 @@ def status(
         path="/",
     )
 
-    return {
-        "ok": ok,
-        "uid": uid,
-        "has_tokens": ok,
-        "expires_at": exp,
-        "expires_in_sec": (exp - now) if exp else None,
-        "token_path": str(_token_path_for_uid(uid)),
-        "redirect_uri_effective": _effective_redirect_uri(req),
-    }
+    return resp
 
 
 @router.get("/login")
-def login(req: Request):
-    uid = _get_or_set_uid(req)
-    redirect_uri = _effective_redirect_uri(req)
+def login(
+    req: Request,
+    user_id: str = Depends(require_auth),
+):
+    """
+    Starter Strava OAuth for INNLOGGET bruker.
 
+    Patch 3E:
+    - bruker_id = request.state.user_id (via require_auth)
+    - cg_uid brukes ikke som identitet (kun evt legacy helper cookie)
+    """
+    uid = user_id
+    redirect_uri = _effective_redirect_uri(req)
     cid, _csec = _require_env()
 
-    # state binds callback to this browser session/user
     state = "st_" + secrets.token_urlsafe(16)
 
     params = {
@@ -185,8 +185,6 @@ def login(req: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "approval_prompt": "auto",
-        # Choose minimum needed scopes for ingest:
-        # read + activity:read_all is typical for fetching activities/streams
         "scope": "read,activity:read_all",
         "state": state,
     }
@@ -194,9 +192,7 @@ def login(req: Request):
     url = f"{STRAVA_AUTH_URL}?{urlencode(params)}"
     resp = RedirectResponse(url=url, status_code=302)
 
-    # cookie-based anon user id (multi-user baseline)
-    # store uid + state in cookies for later verification
-    resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
+    # bind callback til denne browser-sessionen
     resp.set_cookie("cg_oauth_state", state, httponly=True, samesite="lax", path="/")
 
     # stash return URL for callback redirect (from /login?next=...)
@@ -204,17 +200,28 @@ def login(req: Request):
     if next_url and isinstance(next_url, str) and next_url.startswith(("http://", "https://")):
         resp.set_cookie("cg_next", next_url, httponly=True, samesite="lax", path="/")
 
+    # legacy helper cookie (ikke autoritativ identitet)
+    resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
+
     return resp
 
 
 @router.get("/callback")
 def callback(
     req: Request,
+    user_id: str = Depends(require_auth),
     code: Optional[str] = None,
     state: Optional[str] = None,
     error: Optional[str] = None,
 ):
-    uid = _get_or_set_uid(req)
+    """
+    Strava redirect callback.
+
+    Patch 3E:
+    - lagrer tokens under request.state.user_id
+    - ignorerer cg_uid for identitet
+    """
+    uid = user_id
 
     if error:
         raise HTTPException(status_code=400, detail=f"Strava OAuth error: {error}")
@@ -229,7 +236,6 @@ def callback(
     redirect_uri = _effective_redirect_uri(req)
     data = _exchange_code_for_tokens(code=code, redirect_uri=redirect_uri)
 
-    # Persist only what we need + some metadata for debugging
     tokens = {
         "access_token": data.get("access_token"),
         "refresh_token": data.get("refresh_token"),
@@ -241,16 +247,15 @@ def callback(
     }
     p = _save_tokens(uid, tokens)
 
-    # If frontend provided a return URL via /login?next=..., send user back there.
     next_url = req.cookies.get("cg_next")
     if next_url and isinstance(next_url, str) and next_url.startswith(("http://", "https://")):
         resp = RedirectResponse(url=next_url, status_code=302)
-        resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
         resp.set_cookie("cg_oauth_state", "", httponly=True, samesite="lax", max_age=0, path="/")
         resp.set_cookie("cg_next", "", httponly=True, samesite="lax", max_age=0, path="/")
+        # legacy helper cookie (ikke autoritativ identitet)
+        resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
         return resp
 
-    # fallback: keep JSON response (useful for debugging / manual testing)
     resp = JSONResponse(
         {
             "ok": True,
@@ -258,33 +263,48 @@ def callback(
             "saved_to": str(p),
             "expires_at": tokens["expires_at"],
             "scope": tokens.get("scope"),
-            "next": "Now you can call server-side import using this user's tokens.",
+            "next": "Strava tokens saved for this authenticated user.",
         }
     )
+
+    # legacy helper cookie (ikke autoritativ identitet)
     resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
+
     # clear state cookie (one-time)
     resp.set_cookie("cg_oauth_state", "", httponly=True, samesite="lax", max_age=0, path="/")
+    resp.set_cookie("cg_next", "", httponly=True, samesite="lax", max_age=0, path="/")
     return resp
 
 
 # --- ALIASES for legacy Strava redirect paths ---
-# Some Strava apps are configured with /api/auth/strava/callback.
-# We keep /login + /callback as the canonical routes, but add these
-# aliases to avoid 404 and reduce UX confusion.
-
+# --- ALIASES for legacy Strava redirect paths ---
 @router.get("/api/auth/strava/login")
 def login_alias(req: Request):
-    # forward to canonical /login (preserve querystring if any)
-    qs = dict(req.query_params)
-    url = "/login"
-    if qs:
-        url = f"{url}?{urlencode(qs)}"
+    """
+    Legacy alias: frontend (eller gammel kode) kan sende brukeren hit.
+    Vi videresender til den "riktige" /login-endepunktet, men sørger for at
+    next ikke er dobbelt-encodet.
+    """
+    next_q = req.query_params.get("next") or ""
+
+    # Unquote 1-2 ganger for å håndtere typisk "http%253A%252F..." (dobbel encoding)
+    try:
+        next_q = unquote(next_q)
+        # Hvis det fortsatt ser encodet ut (inneholder %2F etc), unquote en gang til
+        if "%2F" in next_q or "%3A" in next_q:
+            next_q = unquote(next_q)
+    except Exception:
+        pass
+
+    # Forward til /login (samme host) med next som query param.
+    # Viktig: bruker urlencode for korrekt encoding av hele URL-en.
+    qs = urlencode({"next": next_q}) if next_q else ""
+    url = f"/login?{qs}" if qs else "/login"
     return RedirectResponse(url=url, status_code=302)
 
 
 @router.get("/api/auth/strava/callback")
 def callback_alias(request: Request):
-    # forward querystring to canonical /callback
     qs = dict(request.query_params)
     url = "/callback"
     if qs:

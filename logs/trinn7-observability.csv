@@ -7838,3 +7838,4 @@ precision_watt,total_watt,weather_applied,crank_eff_pct,calibration_mae,calibrat
 125.63108344493426,119.97768468991221,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e5d6a552-20260114,ok
 74.19251083662753,70.85384784897929,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e5d6a552-20260114,ok
 60.73570378818076,58.00259711771262,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e5d6a552-20260114,ok
+168.7061110413297,161.11433604446987,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-741691e8-20260115,ok

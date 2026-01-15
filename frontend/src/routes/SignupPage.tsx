@@ -1,8 +1,11 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+// frontend/src/routes/SignupPage.tsx
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { cgApi } from "../lib/cgApi";
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [fullName, setFullName] = useState("");
   const [bikeName, setBikeName] = useState("");
@@ -18,96 +21,169 @@ export default function SignupPage() {
     fullName.trim().length >= 2 &&
     bikeName.trim().length >= 2 &&
     email.trim().includes("@") &&
-    password.trim().length >= 6 &&
+    password.trim().length >= 8 &&
     consent;
 
-  const onContinue = () => {
-    if (!canContinue) return;
+  const reasons = useMemo(
+    () => ({
+      submitting,
+      fullNameLen: fullName.trim().length,
+      bikeNameLen: bikeName.trim().length,
+      emailHasAt: email.trim().includes("@"),
+      passwordLen: password.trim().length,
+      consent,
+    }),
+    [submitting, fullName, bikeName, email, password, consent]
+  );
 
-    setSubmitting(true);
+  async function ensureLoggedInAfterSignup() {
+    // If backend signup sets cookie -> this will be 200 right away.
+    // If not, we try login once.
+    try {
+      await cgApi.profileGet();
+      return;
+    } catch (e) {
+      const msg = String((e as any)?.message ?? "");
+      if (!msg.includes("401")) throw e;
+    }
+
+    // Try explicit login fallback (some backends don't auto-login on signup)
+    await cgApi.authLogin(email.trim(), password);
+    await cgApi.profileGet(); // must succeed now
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setError(null);
 
+    if (!canContinue) {
+      setError("Sjekk feltene (minst 8 tegn passord) og samtykke før du fortsetter.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      // MVP: Ingen ekte signup enda.
-      // Førstegangsbruker skal ALLTID gjennom onboarding.
-      navigate("/onboarding");
-    } catch (e) {
-      setError((e as Error).message ?? "Ukjent feil ved registrering");
+      // 1) Create account in backend (must exist for real auth)
+      await cgApi.authSignup(email.trim(), password);
+
+      // 2) Ensure session is established (cookie set + sent)
+      await ensureLoggedInAfterSignup();
+
+      // 3) Continue to onboarding. Keep "next" if present.
+      const params = new URLSearchParams(location.search);
+      const next = params.get("next");
+      navigate(next || "/onboarding", { replace: true });
+    } catch (err) {
+      const msg = String((err as any)?.message ?? err);
+      setError(msg || "Ukjent feil ved registrering");
     } finally {
-      // Vi setter tilbake umiddelbart – siden vi ikke har ekte nettverkskall her.
       setSubmitting(false);
     }
-  };
+  }
 
   return (
-    <div className="max-w-sm mx-auto flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Registrer ny bruker</h1>
+    <div className="max-w-md mx-auto">
+      <h1 className="text-2xl font-semibold tracking-tight mb-2">Opprett konto</h1>
+      <p className="text-sm text-slate-600 mb-6">
+        Lag en konto for å lagre profil og analysere økter.
+      </p>
 
-      <input
-        type="text"
-        placeholder="Fullt navn"
-        className="border rounded px-3 py-2"
-        value={fullName}
-        onChange={(e) => setFullName(e.target.value)}
-      />
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
-      <input
-        type="text"
-        placeholder="Sykkelnavn"
-        className="border rounded px-3 py-2"
-        value={bikeName}
-        onChange={(e) => setBikeName(e.target.value)}
-      />
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Fullt navn
+          </label>
+          <input
+            className="w-full rounded-xl border px-3 py-2"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Johnny Strømøe"
+            autoComplete="name"
+          />
+        </div>
 
-      <input
-        type="email"
-        placeholder="E-post"
-        className="border rounded px-3 py-2"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Sykkelnavn
+          </label>
+          <input
+            className="w-full rounded-xl border px-3 py-2"
+            value={bikeName}
+            onChange={(e) => setBikeName(e.target.value)}
+            placeholder="Tarmac SL7"
+          />
+        </div>
 
-      <input
-        type="password"
-        placeholder="Passord (minst 6 tegn)"
-        className="border rounded px-3 py-2"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            E-post
+          </label>
+          <input
+            className="w-full rounded-xl border px-3 py-2"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="deg@epost.no"
+            autoComplete="email"
+          />
+        </div>
 
-      <div className="text-sm text-slate-600">
-        <input
-          type="checkbox"
-          id="consent"
-          className="mr-2"
-          checked={consent}
-          onChange={(e) => setConsent(e.target.checked)}
-        />
-        <label htmlFor="consent">
-          Jeg samtykker til bruk av mine Strava-aktiviteter og mottar 3 mnd gratis CycleGraph Basic.
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Passord (minst 8 tegn)
+          </label>
+          <input
+            className="w-full rounded-xl border px-3 py-2"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            autoComplete="new-password"
+          />
+        </div>
+
+        <label className="flex items-start gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={consent}
+            onChange={(e) => setConsent(e.target.checked)}
+          />
+          <span>
+            Jeg samtykker til at CycleGraph kan bruke mine Strava-aktiviteter for å analysere trening.
+          </span>
         </label>
-      </div>
 
-      {error ? <div className="text-sm text-red-600">{error}</div> : null}
+        <button
+          type="submit"
+          disabled={!canContinue}
+          className={`w-full rounded-xl px-4 py-2 text-sm font-semibold ${
+            canContinue
+              ? "bg-slate-900 text-white hover:bg-slate-800"
+              : "bg-slate-200 text-slate-500 cursor-not-allowed"
+          }`}
+        >
+          {submitting ? "Oppretter..." : "Bekreft og gå videre"}
+        </button>
 
-      <button
-        type="button"
-        disabled={!canContinue}
-        onClick={onContinue}
-        className={[
-          "py-2 rounded text-white text-center font-medium",
-          canContinue ? "bg-slate-900 hover:bg-slate-800" : "bg-slate-400 cursor-not-allowed",
-        ].join(" ")}
-      >
-        {submitting ? "Fortsetter..." : "Gå videre (Onboarding)"}
-      </button>
+        <div className="text-sm text-slate-600 flex items-center justify-between">
+          <span>Har du konto allerede?</span>
+          <Link className="text-slate-900 font-medium" to="/login">
+            Logg inn
+          </Link>
+        </div>
 
-      <div className="text-sm text-slate-600">
-        Har du allerede konto?{" "}
-        <Link to="/login" className="underline">
-          Logg inn
-        </Link>
-      </div>
+        {/* Dev helper */}
+        {import.meta.env.DEV && (
+          <pre className="mt-4 text-xs text-slate-500 whitespace-pre-wrap">
+            {JSON.stringify(reasons, null, 2)}
+          </pre>
+        )}
+      </form>
     </div>
   );
 }

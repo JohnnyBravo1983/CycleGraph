@@ -55,6 +55,12 @@ export type ProfileSaveBody =
   | Record<string, unknown>
   | { profile: Record<string, unknown> };
 
+// ✅ PATCH: auth body
+export type AuthBody = {
+  email: string;
+  password: string;
+};
+
 const BASE =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
   (import.meta.env.VITE_BACKEND_BASE as string | undefined) ??
@@ -217,6 +223,22 @@ async function profileSave(body: ProfileSaveBody): Promise<ProfileSaveResp> {
   return (json ?? {}) as ProfileSaveResp;
 }
 
+// ✅ PATCH: authSignup/authLogin (for SignupPage.tsx)
+async function authSignup(email: string, password: string): Promise<void> {
+  // bruker cgFetchJson for konsistent error-handling + credentials: include
+  await cgFetchJson<unknown>("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password } satisfies AuthBody),
+  });
+}
+
+async function authLogin(email: string, password: string): Promise<void> {
+  await cgFetchJson<unknown>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password } satisfies AuthBody),
+  });
+}
+
 export const cgApi = {
   baseUrl: () => baseUrl(),
 
@@ -236,6 +258,10 @@ export const cgApi = {
     const json = await cgFetchJson<unknown>("/api/sessions/list/all", { method: "GET" });
     return normalizeListAll(json);
   },
+
+  // ✅ AUTH (NYTT)
+  authSignup,
+  authLogin,
 
   // ✅ PATCH 1: eksporter profileGet
   profileGet,

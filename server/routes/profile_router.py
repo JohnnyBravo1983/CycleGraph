@@ -2,29 +2,21 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Request, Response, Cookie
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
+from server.auth_guard import require_auth
 from server.utils.versioning import get_profile_export, save_profile
-from server.routes.auth_strava import _get_or_set_uid  # felles uid-cookie-logikk
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
-
-
-def _uid(req: Request, resp: Response, cg_uid: str | None) -> str:
-    # Bruk eksisterende cookie hvis den finnes,
-    # ellers opprett og sett en NY cookie
-    if cg_uid:
-        return cg_uid
-    return _get_or_set_uid(req, resp)
 
 
 @router.get("/get")
 def get_profile(
     req: Request,
     response: Response,
-    cg_uid: str | None = Cookie(default=None),
+    user_id: str = Depends(require_auth),
 ) -> Dict[str, Any]:
-    uid = _uid(req, response, cg_uid)
+    uid = user_id
     print("[PROFILE_GET] uid =", uid)
     return get_profile_export(uid)
 
@@ -34,9 +26,9 @@ def save_profile_route(
     body: Dict[str, Any],
     req: Request,
     response: Response,
-    cg_uid: str | None = Cookie(default=None),
+    user_id: str = Depends(require_auth),
 ) -> Dict[str, Any]:
-    uid = _uid(req, response, cg_uid)
+    uid = user_id
 
     try:
         incoming = body or {}
@@ -56,7 +48,7 @@ def save_profile_route(
         # 2) Flat fields override ALT (eksplisitt vinner)
         for key in (
             "rider_weight_kg",
-            "weight_kg",          # kan komme fra enkelte UI-flyter
+            "weight_kg",  # kan komme fra enkelte UI-flyter
             "bike_weight_kg",
             "bike_type",
             "tire_width_mm",

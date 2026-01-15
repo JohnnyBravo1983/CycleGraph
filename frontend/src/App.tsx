@@ -9,10 +9,10 @@ export default function App() {
         <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
           <div className="text-lg font-semibold tracking-tight">CycleGraph</div>
 
-          {/* Patch C: minimal navigation */}
+          {/* Main navigation */}
           <nav className="flex items-center gap-2">
             <Link
-              to="/"
+              to="/dashboard"
               className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
               Dashboard
@@ -34,6 +34,22 @@ export default function App() {
               className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
               How it works
+            </Link>
+          </nav>
+
+          {/* Auth entry (so login/signup never "disappear") */}
+          <nav className="flex items-center gap-2">
+            <Link
+              to="/login"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Log in
+            </Link>
+            <Link
+              to="/signup"
+              className="px-3 py-2 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Sign up
             </Link>
           </nav>
         </div>

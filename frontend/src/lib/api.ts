@@ -13,11 +13,23 @@ const BASE = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
 /**
  * 🔧 Sprint 4: Stabil cookie-binding (cg_uid)
- * Alle backend-kall SKAL sende cookies:
+ * Alle backend-kall SKAL sende cookies.
  */
 const FETCH_WITH_COOKIES = {
   credentials: "include" as const,
 };
+
+/**
+ * 🔧 Global helper (best-practice):
+ * Sørger for at ALLE fetch-kall i denne fila alltid inkluderer cookies.
+ * (Dette er patchen du ba om, men gjort én gang og riktig.)
+ */
+async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    credentials: "include", // ✅ PATCH – SEND COOKIE (overstyrer evt. feil/utelatt credentials)
+  });
+}
 
 /** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
@@ -125,7 +137,8 @@ export async function fetchWithTimeout(
   }
 
   try {
-    const res = await fetch(input, { ...rest, signal: ac.signal });
+    // ✅ PATCH: bruk apiFetch slik at også timeout-fetch alltid sender cookies
+    const res = await apiFetch(input, { ...rest, signal: ac.signal });
     return res;
   } catch (err: unknown) {
     const isAbort =
@@ -347,7 +360,7 @@ export async function fetchSession(
     const bodyObj = profile ? { profile } : {};
 
     const res = await fetchWithTimeout(url.toString(), {
-      ...FETCH_WITH_COOKIES, // ✅ KRITISK: sender cg_uid cookie
+      ...FETCH_WITH_COOKIES, // ok å beholde, men apiFetch overstyrer uansett til include
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -441,9 +454,9 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
   const url = buildApiUrl(base, "/api/sessions/list/all");
   console.log("[API] fetchSessionsList →", url.toString());
 
-  const res = await fetch(url.toString(), {
+  // ✅ PATCH: dette fetch-kallet går via apiFetch → credentials: "include" alltid med
+  const res = await apiFetch(url.toString(), {
     method: "GET",
-    credentials: "include",
   });
 
   console.log("[API] fetchSessionsList status:", res.status, res.statusText);

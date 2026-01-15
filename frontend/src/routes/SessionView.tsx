@@ -1,4 +1,4 @@
-// frontend/src/pages/SessionView.tsx
+// frontend/src/routes/SessionView.tsx
 import React, { useEffect, useMemo, useRef } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 
@@ -13,12 +13,38 @@ import { isDemoMode } from "../demo/demoMode";
 import { demoRides } from "../demo/demoRides";
 
 // ─────────────────────────────────────────────────────────────
+// Helpers: safe object access (unknown → typed)
+// ─────────────────────────────────────────────────────────────
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+  return typeof v === "object" && v !== null;
+}
+
+function getNested(obj: unknown, path: string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!isRecord(cur)) return undefined;
+    cur = cur[key];
+  }
+  return cur;
+}
+
+// ✅ Render-safe formatter: aldri returner object/unknown til JSX
+function fmtNode(v: unknown, fallback = "—"): string {
+  if (v === null || v === undefined) return fallback;
+  if (typeof v === "string") return v.length ? v : fallback;
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : fallback;
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  return fallback;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Helpers (tåler number og string med komma/punktum)
 // ─────────────────────────────────────────────────────────────
 function num(x: unknown): number | null {
   if (typeof x === "number") return Number.isFinite(x) ? x : null;
   if (typeof x === "string") {
-    // tåler både "225.82" og "225,82"
     const s = x.trim().replace(",", ".");
     const n = Number(s);
     return Number.isFinite(n) ? n : null;
@@ -52,37 +78,103 @@ function fmtC(x: unknown): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Patch 3B helper: Metric card (used in DemoSessionView only)
+// Demo ride shape (kun det vi faktisk bruker i viewet)
+// ─────────────────────────────────────────────────────────────
+type DemoRide = {
+  id: string | number;
+  name?: string;
+  date?: string; // "YYYY-MM-DD"
+  rideType?: string;
+  distance?: number; // meters
+  duration?: number; // seconds
+  precisionWatt?: number;
+  stravaWatt?: number;
+  elevation?: number;
+  avgSpeed?: number; // km/h
+  riderWeight?: number;
+  weather?: {
+    temp?: number;
+    conditions?: string;
+    wind?: {
+      speed?: number;
+    };
+  };
+};
+
+// ─────────────────────────────────────────────────────────────
+// Metric card (DemoSessionView)
 // ─────────────────────────────────────────────────────────────
 const Metric = ({ label, value }: { label: string; value: string }) => (
   <div className="border border-slate-200 rounded-lg p-4">
-    <div className="text-[12px] uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="text-[12px] uppercase tracking-wide text-slate-500">
+      {label}
+    </div>
     <div className="mt-1 text-[18px] font-semibold text-slate-800">{value}</div>
   </div>
 );
 
 // ─────────────────────────────────────────────────────────────
-// PATCH 4C + 3B: Demo view (ingen backend-kall)
+// Demo view (ingen backend-kall)
 // ─────────────────────────────────────────────────────────────
 const DemoSessionView: React.FC = () => {
   const params = useParams<{ id: string }>();
   const id = params.id ?? "";
 
-  // Patch 3B.1: SSOT = demoRides
-  const ride = useMemo(() => {
-    return demoRides.find((r) => String((r as any).id) === String(id)) ?? null;
+  const ride = useMemo<DemoRide | null>(() => {
+    const list = demoRides as unknown as DemoRide[];
+    if (!id) return null;
+    const found = list.find((r) => String(r.id) === String(id));
+    return found ?? null;
   }, [id]);
+
+  const powerSeries = useMemo<number[]>(() => {
+    if (!ride) return [];
+    const minutes = Math.max(10, Math.round((ride.duration ?? 0) / 60));
+    const pw = typeof ride.precisionWatt === "number" ? ride.precisionWatt : 0;
+
+    const base = ride.rideType === "long-ride" ? pw : pw * 1.1;
+
+    return Array.from({ length: minutes }, (_, i) => {
+      const noise = Math.sin(i / 5) * 6;
+      return Math.max(80, base + noise);
+    });
+  }, [ride]);
+
+  const name = ride?.name ?? "Ride";
+  const date = ride?.date ?? "";
+  const rideType = (ride?.rideType ?? "ride").replace("-", " ");
+
+  const distanceM = ride?.distance ?? 0;
+  const durationS = ride?.duration ?? 0;
+  const precisionWatt = ride?.precisionWatt ?? 0;
+
+  const stravaWatt = ride?.stravaWatt;
+  const elevation = ride?.elevation;
+  const avgSpeed = ride?.avgSpeed;
+  const riderWeight = ride?.riderWeight;
+
+  const tempVal = ride?.weather?.temp;
+  const windSpeedVal = ride?.weather?.wind?.speed;
+  const conditionsVal = ride?.weather?.conditions;
 
   if (!id) {
     return (
       <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">Session</h1>
-        <div className="rounded-xl border bg-white p-4 text-slate-700">Missing session id in URL.</div>
+        <div className="rounded-xl border bg-white p-4 text-slate-700">
+          Missing session id in URL.
+        </div>
         <div className="flex gap-3">
-          <Link to="/rides" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+          <Link
+            to="/rides"
+            className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50"
+          >
             ← Back to Rides
           </Link>
-          <Link to="/dashboard" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+          <Link
+            to="/dashboard"
+            className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50"
+          >
             Dashboard
           </Link>
         </div>
@@ -95,13 +187,20 @@ const DemoSessionView: React.FC = () => {
       <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">Session</h1>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
-          Could not find demo ride with ID <span className="font-mono">{id}</span>.
+          Could not find demo ride with ID{" "}
+          <span className="font-mono">{id}</span>.
         </div>
         <div className="flex gap-3">
-          <Link to="/rides" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+          <Link
+            to="/rides"
+            className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50"
+          >
             ← Back to Rides
           </Link>
-          <Link to="/dashboard" className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50">
+          <Link
+            to="/dashboard"
+            className="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50"
+          >
             Dashboard
           </Link>
         </div>
@@ -109,57 +208,27 @@ const DemoSessionView: React.FC = () => {
     );
   }
 
-  // Patch 3B.3: deterministisk “mock” power curve basert på rideType + duration
-  const powerSeries = useMemo(() => {
-    const minutes = Math.max(10, Math.round(((ride as any).duration ?? 0) / 60));
-    const pw = Number((ride as any).precisionWatt ?? 0);
-
-    const base =
-      (ride as any).rideType === "long-ride"
-        ? pw
-        : pw * 1.1; // litt høyere base for kortere/hardere økter
-
-    return Array.from({ length: minutes }, (_, i) => {
-      const noise = Math.sin(i / 5) * 6;
-      return Math.max(80, base + noise);
-    });
-  }, [ride]);
-
-  // Safe access helpers (for demo data variability)
-  const name = String((ride as any).name ?? "Ride");
-  const date = String((ride as any).date ?? "");
-  const rideType = String((ride as any).rideType ?? "ride").replace("-", " ");
-
-  const distanceM = Number((ride as any).distance ?? 0);
-  const durationS = Number((ride as any).duration ?? 0);
-  const precisionWatt = Number((ride as any).precisionWatt ?? 0);
-
-  const stravaWatt = Number((ride as any).stravaWatt ?? NaN);
-  const elevation = Number((ride as any).elevation ?? NaN);
-  const avgSpeed = Number((ride as any).avgSpeed ?? NaN);
-  const riderWeight = Number((ride as any).riderWeight ?? NaN);
-
-  const weather = ((ride as any).weather ?? null) as any;
-  const tempVal = weather?.temp;
-  const windSpeedVal = weather?.wind?.speed;
-  const conditionsVal = weather?.conditions;
-
   return (
     <div className="flex flex-col gap-6">
-      {/* Patch 3B.2: Header redesign (EN) */}
+      {/* Header */}
       <section className="flex flex-col gap-2">
-        <Link to="/rides" className="text-sm text-slate-500 hover:text-slate-700 w-fit">
+        <Link
+          to="/rides"
+          className="text-sm text-slate-500 hover:text-slate-700 w-fit"
+        >
           ← Back to Rides
         </Link>
 
         <h1 className="text-[24px] font-bold text-slate-800">{name}</h1>
 
         <div className="text-[14px] text-slate-500">
-          {new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })}{" "}
+          {date
+            ? new Date(`${date}T12:00:00`).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })
+            : "—"}{" "}
           · {rideType}
         </div>
 
@@ -173,9 +242,11 @@ const DemoSessionView: React.FC = () => {
         </div>
       </section>
 
-      {/* Patch 3B.3: Power over time graph */}
+      {/* Power over time graph */}
       <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="mb-2 text-sm font-medium text-slate-700">Power over time</div>
+        <div className="mb-2 text-sm font-medium text-slate-700">
+          Power over time
+        </div>
 
         <svg viewBox="0 0 300 100" className="w-full h-[300px]">
           <polyline
@@ -184,7 +255,7 @@ const DemoSessionView: React.FC = () => {
             strokeWidth="2"
             points={powerSeries
               .map((p, i) => {
-                const x = (i / powerSeries.length) * 300;
+                const x = (i / Math.max(1, powerSeries.length - 1)) * 300;
                 const y = 100 - Math.min(100, (p / 300) * 100);
                 return `${x},${y}`;
               })
@@ -197,33 +268,53 @@ const DemoSessionView: React.FC = () => {
         </div>
       </section>
 
-      {/* Patch 3B.4: Metrics grid (4×2) */}
+      {/* Metrics grid */}
       <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="mb-4 text-sm font-medium text-slate-700">Power analysis</div>
+        <div className="mb-4 text-sm font-medium text-slate-700">
+          Power analysis
+        </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Metric label="Avg power" value={`${Math.round(precisionWatt)} W`} />
           <Metric
             label="Normalized power"
-            value={Number.isFinite(stravaWatt) ? `${Math.round(stravaWatt)} W` : "—"}
+            value={
+              typeof stravaWatt === "number" && Number.isFinite(stravaWatt)
+                ? `${Math.round(stravaWatt)} W`
+                : "—"
+            }
           />
           <Metric
             label="Elevation gain"
-            value={Number.isFinite(elevation) ? `${Math.round(elevation)} m` : "—"}
+            value={
+              typeof elevation === "number" && Number.isFinite(elevation)
+                ? `${Math.round(elevation)} m`
+                : "—"
+            }
           />
           <Metric
             label="Avg speed"
-            value={Number.isFinite(avgSpeed) ? `${avgSpeed.toFixed(1)} km/h` : "—"}
+            value={
+              typeof avgSpeed === "number" && Number.isFinite(avgSpeed)
+                ? `${avgSpeed.toFixed(1)} km/h`
+                : "—"
+            }
           />
 
           <Metric
             label="Rider weight"
-            value={Number.isFinite(riderWeight) ? `${riderWeight.toFixed(1)} kg` : "—"}
+            value={
+              typeof riderWeight === "number" && Number.isFinite(riderWeight)
+                ? `${riderWeight.toFixed(1)} kg`
+                : "—"
+            }
           />
           <Metric
             label="Temperature"
             value={
-              typeof tempVal === "number" && Number.isFinite(tempVal) ? `${tempVal} °C` : "— °C"
+              typeof tempVal === "number" && Number.isFinite(tempVal)
+                ? `${tempVal} °C`
+                : "— °C"
             }
           />
           <Metric
@@ -234,11 +325,14 @@ const DemoSessionView: React.FC = () => {
                 : "— m/s"
             }
           />
-          <Metric label="Conditions" value={typeof conditionsVal === "string" ? conditionsVal : "—"} />
+          <Metric
+            label="Conditions"
+            value={typeof conditionsVal === "string" ? conditionsVal : "—"}
+          />
         </div>
       </section>
 
-      {/* Keep navigation buttons */}
+      {/* Navigation */}
       <section className="flex gap-3">
         <Link
           to="/rides"
@@ -257,15 +351,36 @@ const DemoSessionView: React.FC = () => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// Real view (backend)
+// ─────────────────────────────────────────────────────────────
+type ProfileOverride = {
+  rider_weight_kg?: number;
+  bike_weight_kg?: number;
+  cda?: number;
+  crr?: number;
+  crank_efficiency?: number;
+  crank_eff_pct?: number;
+};
+
+type LoadSessionOptions = {
+  forceRecompute?: boolean;
+  profileOverride?: ProfileOverride;
+};
+
 const RealSessionView: React.FC = () => {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const location = useLocation();
 
-  const { currentSession, loadingSession, errorSession, loadSession, clearCurrentSession } =
-    useSessionStore();
+  const {
+    currentSession,
+    loadingSession,
+    errorSession,
+    loadSession,
+    clearCurrentSession,
+  } = useSessionStore();
 
-  // Last session via store, og rydd på unmount / ved id-bytt
   useEffect(() => {
     if (!id) return;
 
@@ -279,41 +394,41 @@ const RealSessionView: React.FC = () => {
   }, [id]);
 
   const title = useMemo(() => (id ? `Økt #${id}` : "Økt"), [id]);
-  const sourceLabel = id === "mock" ? "MOCK (lokale testdata)" : "LIVE fra backend";
+  const sourceLabel =
+    id === "mock" ? "MOCK (lokale testdata)" : "LIVE fra backend";
 
-  // ─────────────────────────────────────────────────────────────
-  // Patch: localStorage profile override (kun rider_weight_kg)
-  // ─────────────────────────────────────────────────────────────
-  function readLocalProfileOverride(): any | null {
+  function readLocalProfileOverride(): ProfileOverride | null {
     try {
       const raw = localStorage.getItem("cg.profile.v1");
       if (!raw) return null;
 
-      const p = JSON.parse(raw);
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) return null;
 
-      // Vi ønsker å sende rider_weight_kg til backend (ikke total weight_kg).
-      // Mange steder lagrer UI bare weight_kg → map til rider_weight_kg.
       const rider =
-        typeof p.rider_weight_kg === "number"
-          ? p.rider_weight_kg
-          : typeof p.weight_kg === "number"
-          ? p.weight_kg
+        typeof parsed.rider_weight_kg === "number"
+          ? parsed.rider_weight_kg
+          : typeof parsed.weight_kg === "number"
+          ? parsed.weight_kg
           : undefined;
 
-      const bike = typeof p.bike_weight_kg === "number" ? p.bike_weight_kg : undefined;
+      const bike =
+        typeof parsed.bike_weight_kg === "number"
+          ? parsed.bike_weight_kg
+          : undefined;
 
-      const out: any = {};
+      const out: ProfileOverride = {};
 
       if (typeof rider === "number") out.rider_weight_kg = rider;
       if (typeof bike === "number") out.bike_weight_kg = bike;
 
-      // ta med aero/rulle hvis de finnes
-      if (typeof p.cda === "number") out.cda = p.cda;
-      if (typeof p.crr === "number") out.crr = p.crr;
+      if (typeof parsed.cda === "number") out.cda = parsed.cda;
+      if (typeof parsed.crr === "number") out.crr = parsed.crr;
 
-      // crank-eff kan du sende om du vil, men ikke nødvendig for denne feilen
-      if (typeof p.crank_efficiency === "number") out.crank_efficiency = p.crank_efficiency;
-      if (typeof p.crank_eff_pct === "number") out.crank_eff_pct = p.crank_eff_pct;
+      if (typeof parsed.crank_efficiency === "number")
+        out.crank_efficiency = parsed.crank_efficiency;
+      if (typeof parsed.crank_eff_pct === "number")
+        out.crank_eff_pct = parsed.crank_eff_pct;
 
       return out;
     } catch {
@@ -321,13 +436,11 @@ const RealSessionView: React.FC = () => {
     }
   }
 
-  // ─────────────────────────────────────────────────────
-  // Patch: state + handler for Re-analyze
-  // ─────────────────────────────────────────────────────
   const [reAnalyzing, setReAnalyzing] = React.useState(false);
 
   async function reAnalyzeNow() {
     if (!id) return;
+
     const override = readLocalProfileOverride();
     if (!override) {
       console.warn("[SessionView] no local profile override found");
@@ -336,63 +449,59 @@ const RealSessionView: React.FC = () => {
 
     setReAnalyzing(true);
     try {
-      // Viktig: krever at loadSession støtter opts: { forceRecompute, profileOverride }
-      await loadSession(id, { forceRecompute: true, profileOverride: override } as any);
+      const loadWithOpts = loadSession as unknown as (
+        sid: string,
+        opts: LoadSessionOptions
+      ) => Promise<void>;
+      await loadWithOpts(id, { forceRecompute: true, profileOverride: override });
     } finally {
       setReAnalyzing(false);
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // ✅ Patch: Auto re-analyze ved profile_version mismatch (NOOP midlertidig)
-  // ─────────────────────────────────────────────────────────────
-  // NOTE: beholdt ref + effect for debugging/logging, men vi trigger IKKE loadSession().
-  // MIDDELTIDIG: disable auto re-analyze, den skaper request-storm + timeout
+  // Auto re-analyze ved profile_version mismatch (NOOP midlertidig)
   const autoKeyRef = useRef<string>("");
 
   useEffect(() => {
     (async () => {
-      const s = currentSession as any;
+      const s: unknown = currentSession;
       const sid = String(params.id ?? "");
       if (!sid || !s) return;
 
-      // 1) Hent UI profile_version (safe)
       const ui = await cgApi.profileGet().catch(() => null);
-      const uiPv = String((ui as any)?.profile_version ?? "");
+      const uiPv = String(
+        (ui as unknown as { profile_version?: unknown } | null)?.profile_version ??
+          ""
+      );
 
-      // 2) Finn "usedPv" fra analyze-respons (toppnivå først)
       const usedPv =
-        String(s?.profile_version ?? "") || String(s?.metrics?.profile_used?.profile_version ?? "");
+        String(getNested(s, ["profile_version"]) ?? "") ||
+        String(getNested(s, ["metrics", "profile_used", "profile_version"]) ?? "");
 
       if (!uiPv || !usedPv) return;
 
-      // 3) Guard: maks én log per (id + uiPv) i StrictMode
       const key = `${sid}::${uiPv}`;
       if (autoKeyRef.current === key) return;
 
       if (uiPv !== usedPv) {
         autoKeyRef.current = key;
-
-        console.log("[SessionView] Auto re-analyze DISABLED (profile_version mismatch)", {
-          id: sid,
-          uiPv,
-          usedPv,
-        });
-
-        // NOOP:
-        // await loadSession(sid, { forceRecompute: true } as any);
+        console.log(
+          "[SessionView] Auto re-analyze DISABLED (profile_version mismatch)",
+          { id: sid, uiPv, usedPv }
+        );
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSession, params.id]);
 
-  // ─────────────────────────────────────────────────────
-  // Tydelig rendering state – ingen silent fallback
-  // ─────────────────────────────────────────────────────
+  // Rendering states
   if (!id) {
     return (
       <div className="p-4">
-        <ErrorBanner message="Mangler økt-id i URL." onRetry={() => window.history.back()} />
+        <ErrorBanner
+          message="Mangler økt-id i URL."
+          onRetry={() => window.history.back()}
+        />
       </div>
     );
   }
@@ -400,7 +509,9 @@ const RealSessionView: React.FC = () => {
   if (loadingSession) {
     return (
       <div className="session-view max-w-4xl mx-auto px-4 py-6">
-        <div className="text-sm text-slate-500">Laster analyse for denne økten…</div>
+        <div className="text-sm text-slate-500">
+          Laster analyse for denne økten…
+        </div>
       </div>
     );
   }
@@ -419,7 +530,9 @@ const RealSessionView: React.FC = () => {
   if (!currentSession) {
     return (
       <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-4">
-        <div className="text-sm text-slate-500">Ingen øktdata tilgjengelig ennå.</div>
+        <div className="text-sm text-slate-500">
+          Ingen øktdata tilgjengelig ennå.
+        </div>
         <Link className="underline" to={ROUTES.RIDES}>
           ← Tilbake til økter
         </Link>
@@ -427,21 +540,32 @@ const RealSessionView: React.FC = () => {
     );
   }
 
-  // ─────────────────────────────────────────────────────
-  // Vi har data (Analyze-SSOT)
-  // ─────────────────────────────────────────────────────
+  // Analyze-SSOT
   const session: SessionReport = currentSession;
 
-  // Analyze-responsen har precision_watt_avg top-level
-  const precisionAvg = (session as any)?.precision_watt_avg ?? null;
+  const precisionAvg = getNested(session, ["precision_watt_avg"]);
+  const metrics = getNested(session, ["metrics"]);
 
-  // metrics (total_watt, drag_watt, osv.) kan ligge i session.metrics
-  const metrics: any = (session as any)?.metrics ?? null;
+  const profileUsed =
+    getNested(metrics, ["profile_used"]) ?? getNested(session, ["profile_used"]);
+  const weatherUsed = getNested(metrics, ["weather_used"]);
 
-  const profileUsed: any = metrics?.profile_used ?? (session as any)?.profile_used ?? null;
-  const weatherUsed: any = metrics?.weather_used ?? null;
+  // ✅ For render: gjør alt til string på forhånd
+  const hasProfile = isRecord(profileUsed);
 
-  const totalWeight: unknown = profileUsed ? profileUsed.total_weight_kg ?? profileUsed.weight_kg : undefined;
+  const profileVersionStr = hasProfile
+    ? fmtNode(profileUsed.profile_version, "ukjent")
+    : "ukjent";
+
+  const totalWeight = hasProfile
+    ? (profileUsed.total_weight_kg ?? profileUsed.weight_kg)
+    : undefined;
+
+  const cdaStr = hasProfile ? fmtNode(profileUsed.cda) : "—";
+  const crrStr = hasProfile ? fmtNode(profileUsed.crr) : "—";
+  const deviceStr = hasProfile ? fmtNode(profileUsed.device, "ukjent") : "ukjent";
+
+  const calibrated = getNested(metrics, ["calibrated"]) === true;
 
   return (
     <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -451,9 +575,13 @@ const RealSessionView: React.FC = () => {
           <h1 className="text-2xl font-semibold mb-1">{title}</h1>
           <p className="text-sm text-slate-500">Kilde: {sourceLabel}</p>
 
-          {location.state && (location.state as any).from === "sessions" && (
-            <p className="text-xs text-slate-400 mt-1">Navigert hit fra øktlisten.</p>
-          )}
+          {location.state &&
+            isRecord(location.state) &&
+            location.state.from === "sessions" && (
+              <p className="text-xs text-slate-400 mt-1">
+                Navigert hit fra øktlisten.
+              </p>
+            )}
         </div>
 
         <div className="text-right">
@@ -465,17 +593,19 @@ const RealSessionView: React.FC = () => {
               ← Tilbake til økter
             </Link>
 
-            {/* Patch: Re-analyze-knapp (med hard logging) */}
             <button
               onClick={() => {
                 const override = readLocalProfileOverride();
                 console.log("[SessionView] reAnalyzeNow override =", override);
-                console.log("[SessionView] reAnalyzeNow rider_weight_kg =", override?.rider_weight_kg);
-                reAnalyzeNow();
+                console.log(
+                  "[SessionView] reAnalyzeNow rider_weight_kg =",
+                  override?.rider_weight_kg
+                );
+                void reAnalyzeNow();
               }}
               disabled={reAnalyzing}
               className="ml-2 inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
-              title="Re-analyser økta med rider_weight_kg fra localStorage (cg.profile.v1)"
+              title="Re-analyser øta med rider_weight_kg fra localStorage (cg.profile.v1)"
             >
               {reAnalyzing ? "Re-analyserer…" : "Re-analyser med ny vekt"}
             </button>
@@ -485,59 +615,71 @@ const RealSessionView: React.FC = () => {
 
       {/* HOVEDINNHOLD */}
       <div className="space-y-6">
-        {/* METRICS-SEKSJON */}
+        {/* METRICS */}
         {metrics ? (
           <section className="border rounded-lg p-4 space-y-3">
             <h2 className="text-lg font-semibold">Analyse – Precision Watt</h2>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
               <div>
-                <dt className="text-slate-500">Precision watt (snitt, fra analyze)</dt>
+                <dt className="text-slate-500">
+                  Precision watt (snitt, fra analyze)
+                </dt>
                 <dd className="font-medium">{fmtW(precisionAvg)}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Total watt</dt>
-                <dd className="font-medium">{fmtW(metrics.total_watt)}</dd>
+                <dd className="font-medium">
+                  {fmtW(getNested(metrics, ["total_watt"]))}
+                </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Drag watt</dt>
-                <dd className="font-medium">{fmtW(metrics.drag_watt)}</dd>
+                <dd className="font-medium">
+                  {fmtW(getNested(metrics, ["drag_watt"]))}
+                </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Rolling watt</dt>
-                <dd className="font-medium">{fmtW(metrics.rolling_watt)}</dd>
+                <dd className="font-medium">
+                  {fmtW(getNested(metrics, ["rolling_watt"]))}
+                </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Gravity watt</dt>
-                <dd className="font-medium">{fmtW((metrics as any).gravity_watt)}</dd>
+                <dd className="font-medium">
+                  {fmtW(getNested(metrics, ["gravity_watt"]))}
+                </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Kalibrert mot wattmåler</dt>
                 <dd className="font-medium">
-                  {metrics.calibrated ? "Ja" : "Nei"}
-                  {num(metrics.calibration_mae) !== null
-                    ? ` (MAE ≈ ${num(metrics.calibration_mae)!.toFixed(1)} W)`
+                  {calibrated ? "Ja" : "Nei"}
+                  {num(getNested(metrics, ["calibration_mae"])) !== null
+                    ? ` (MAE ≈ ${num(getNested(metrics, ["calibration_mae"]))!.toFixed(1)} W)`
                     : ""}
                 </dd>
               </div>
             </dl>
           </section>
         ) : (
-          <p className="text-sm text-slate-500">Ingen analyse-data tilgjengelig for denne økten ennå.</p>
+          <p className="text-sm text-slate-500">
+            Ingen analyse-data tilgjengelig for denne økten ennå.
+          </p>
         )}
 
-        {/* PROFIL-INFO */}
-        {profileUsed && (
+        {/* PROFIL */}
+        {hasProfile && (
           <section className="border rounded-lg p-4 space-y-2 text-sm">
             <h2 className="text-lg font-semibold">Profil brukt i analysen</h2>
 
             <p className="text-slate-500">
-              Versjon: <span className="font-mono">{profileUsed.profile_version ?? "ukjent"}</span>
+              Versjon: <span className="font-mono">{profileVersionStr}</span>
             </p>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
@@ -548,23 +690,23 @@ const RealSessionView: React.FC = () => {
 
               <div>
                 <dt className="text-slate-500">CdA</dt>
-                <dd className="font-medium">{profileUsed.cda ?? "—"}</dd>
+                <dd className="font-medium">{cdaStr}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Crr</dt>
-                <dd className="font-medium">{profileUsed.crr ?? "—"}</dd>
+                <dd className="font-medium">{crrStr}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Enhet / device</dt>
-                <dd className="font-medium">{profileUsed.device ?? "ukjent"}</dd>
+                <dd className="font-medium">{deviceStr}</dd>
               </div>
             </dl>
           </section>
         )}
 
-        {/* VÆR-INFO */}
+        {/* VÆR */}
         {weatherUsed && (
           <section className="border rounded-lg p-4 space-y-2 text-sm">
             <h2 className="text-lg font-semibold">Vær brukt i analysen</h2>
@@ -572,21 +714,25 @@ const RealSessionView: React.FC = () => {
               <div>
                 <dt className="text-slate-500">Vind</dt>
                 <dd className="font-medium">
-                  {fmtMs(weatherUsed.wind_ms)}{" "}
-                  {num(weatherUsed.wind_dir_deg) !== null
-                    ? `fra ${num(weatherUsed.wind_dir_deg)!.toFixed(0)}°`
+                  {fmtMs(getNested(weatherUsed, ["wind_ms"]))}{" "}
+                  {num(getNested(weatherUsed, ["wind_dir_deg"])) !== null
+                    ? `fra ${num(getNested(weatherUsed, ["wind_dir_deg"]))!.toFixed(0)}°`
                     : ""}
                 </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Temperatur</dt>
-                <dd className="font-medium">{fmtC(weatherUsed.air_temp_c)}</dd>
+                <dd className="font-medium">
+                  {fmtC(getNested(weatherUsed, ["air_temp_c"]))}
+                </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Lufttrykk</dt>
-                <dd className="font-medium">{fmtHpa(weatherUsed.air_pressure_hpa)}</dd>
+                <dd className="font-medium">
+                  {fmtHpa(getNested(weatherUsed, ["air_pressure_hpa"]))}
+                </dd>
               </div>
             </dl>
           </section>

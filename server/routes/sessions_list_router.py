@@ -4,12 +4,13 @@ from __future__ import annotations
 import csv
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Cookie, Query, Request, Response
-from server.routes.auth_strava import _get_or_set_uid
+from fastapi import APIRouter, Depends, Query, Request, Response
+from server.auth_guard import require_auth
+
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -21,6 +22,11 @@ _TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
 
 # PATCH: end_time seek-from-end (siste t_abs)  (legacy / kan ryddes senere)
 _LAST_TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
+
+
+def _repo_root_from_here() -> Path:
+    # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
+    return Path(__file__).resolve().parents[2]
 
 
 def _pick_result_path(session_id: str) -> Optional[Path]:
@@ -58,7 +64,6 @@ def _extract_last_t_abs_seek(
 ) -> Optional[str]:
     """
     Finn siste "t_abs": "..." ved å lese bakover i chunks.
-    Dette funker selv om det er store blokker etter samples.
     (legacy / kan ryddes senere)
     """
     try:
@@ -75,7 +80,6 @@ def _extract_last_t_abs_seek(
                 chunk = f.read(step)
                 read_total += step
 
-                # Prepend ny chunk foran eksisterende tekst
                 txt = chunk.decode("utf-8", errors="ignore")
                 buf = txt + buf
 
@@ -187,20 +191,15 @@ def _parse_dt(s: str) -> Optional[datetime]:
 
 
 def _fmt_dt(dt: datetime) -> str:
-    # behold ISO med timezone
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 # -------------------------------
 # PATCH C4-REPLACE: “siste mile”
-# - result_<sid>.json: bruk samples hvis finnes
-# - ellers fallback til session_<sid>.json i logs/actual*/latest/
-# - BOM-safe
 # -------------------------------
 
 def _json_load_any(p: Path) -> Optional[dict]:
     try:
-        # BOM-safe
         return json.loads(p.read_text(encoding="utf-8-sig"))
     except Exception:
         try:
@@ -214,7 +213,6 @@ def _extract_end_and_km_from_samples(samples: list) -> Tuple[Optional[str], Opti
     if not samples:
         return None, None
 
-    # end_time = siste sample som har t_abs
     end_time: Optional[str] = None
     for s in reversed(samples):
         if not isinstance(s, dict):
@@ -224,7 +222,6 @@ def _extract_end_and_km_from_samples(samples: list) -> Tuple[Optional[str], Opti
             end_time = ta
             break
 
-    # distance_km: prøv sample["distance_m"] (mange har ikke distanse per sample)
     dist_m: Optional[float] = None
     for s in reversed(samples):
         if not isinstance(s, dict):
@@ -241,7 +238,6 @@ def _extract_end_and_km_from_samples(samples: list) -> Tuple[Optional[str], Opti
 def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optional[float]]:
     print("[LIST/ALL][C4 ENTER] sid=", sid)
 
-    # 1) først: resultfil (debug foretrekkes via _pick_result_path)
     rp = _pick_result_path(sid)
     if rp and rp.exists():
         print("[LIST/ALL][C4] using file:", str(rp))
@@ -251,7 +247,6 @@ def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optio
             if isinstance(samples, list) and len(samples) > 0:
                 end_time, km = _extract_end_and_km_from_samples(samples)
 
-                # top-level distance hvis den finnes
                 if km is None:
                     dk = doc.get("distance_km")
                     if isinstance(dk, (int, float)):
@@ -260,24 +255,17 @@ def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optio
                 print("[LIST/ALL][C4 RETURN]", end_time, km)
                 return end_time, km
 
-            # noen resultfiler har start_time men ikke samples -> fallthrough til session file
-
-    # 2) fallback: session_<sid>.json (actual10/latest + evt andre actual*/latest)
+    # fallback: session_<sid>.json (actual10/latest + evt andre actual*/latest)
     cand: List[Path] = []
-
-    # de faktiske stedene du har i loggene
     cand.append(root / "logs" / "actual10" / "latest" / f"session_{sid}.json")
 
-    # evt flere actual*/latest
     try:
         cand.extend(sorted(root.glob(f"logs/actual*/latest/session_{sid}.json")))
     except Exception:
         pass
 
-    # _debug fallback
     cand.append(root / "_debug" / f"session_{sid}.json")
 
-    # (vi ignorerer .gz her – du ba om “gjør kun dette”, uten ny gzip-dep)
     for sp in cand:
         if sp.exists() and sp.is_file():
             print("[LIST/ALL][C4] fallback session file:", str(sp))
@@ -298,10 +286,6 @@ def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optio
 
 
 def _extract_end_time_and_km(session_id: str) -> tuple[Optional[str], Optional[float]]:
-    """
-    ✅ (Legacy signature beholdt) - men nå er den en tynn wrapper rundt _compute_end_time_and_km(...)
-    for å la resten av fila stå uendret.
-    """
     root = _repo_root_from_here()
     return _compute_end_time_and_km(root, session_id)
 
@@ -313,18 +297,15 @@ def _extract_end_time_and_km(session_id: str) -> tuple[Optional[str], Optional[f
 def _pick_session_path(session_id: str, uid: Optional[str] = None) -> Optional[Path]:
     root = _repo_root_from_here()
 
-    # 1) per-user sessions mappe (framtidsrettet)
     if uid:
         cand = root / "state" / "users" / uid / "sessions" / f"session_{session_id}.json"
         if cand.exists():
             return cand
 
-    # 2) bevis fra logg: logs/actual10/latest/session_<sid>.json
     cand = root / "logs" / "actual10" / "latest" / f"session_{session_id}.json"
     if cand.exists():
         return cand
 
-    # 3) bredere: logs/actual*/latest/session_<sid>.json
     try:
         for p in root.glob(f"logs/actual*/latest/session_{session_id}.json"):
             if p.exists():
@@ -332,7 +313,6 @@ def _pick_session_path(session_id: str, uid: Optional[str] = None) -> Optional[P
     except Exception:
         pass
 
-    # 4) _debug fallback
     cand = root / "_debug" / f"session_{session_id}.json"
     if cand.exists():
         return cand
@@ -355,7 +335,14 @@ def _extract_end_time_and_km_from_session(
             txt = sp.read_text(encoding="utf-8", errors="replace")
         obj = json.loads(txt)
     except Exception as e:
-        print("[LIST/ALL][E] session json load failed sid=", session_id, "err=", repr(e), "file=", str(sp))
+        print(
+            "[LIST/ALL][E] session json load failed sid=",
+            session_id,
+            "err=",
+            repr(e),
+            "file=",
+            str(sp),
+        )
         return None, None
 
     samples = obj.get("samples")
@@ -370,11 +357,9 @@ def _extract_end_time_and_km_from_session(
         )
         return None, None
 
-    # end_time = siste t_abs
     last = samples[-1] if isinstance(samples[-1], dict) else None
     end_time = last.get("t_abs") if last else None
 
-    # distance_km: integrer v_ms over tid (t-differanser)
     dist_m = 0.0
     prev_t = None
     prev_v = None
@@ -389,7 +374,7 @@ def _extract_end_time_and_km_from_session(
 
         if prev_t is not None and prev_v is not None:
             dt = float(t) - float(prev_t)
-            if dt > 0 and dt < 60:  # sanity guard
+            if dt > 0 and dt < 60:
                 dist_m += 0.5 * (float(prev_v) + float(v)) * dt
 
         prev_t = t
@@ -400,13 +385,6 @@ def _extract_end_time_and_km_from_session(
 
 
 def _needs_start_time_fix(st: object) -> bool:
-    """
-    PATCH C3.1: Fix hvis:
-    - None/null
-    - ikke string
-    - tom string
-    - bare YYYY-MM-DD (len=10)
-    """
     if not isinstance(st, str):
         return True
     s = st.strip()
@@ -422,13 +400,6 @@ def _needs_start_time_fix(st: object) -> bool:
 # -----------------------------------
 
 _RE_RESULT_SID = re.compile(r"^result_(\d+)")
-
-
-def _repo_root_from_here() -> Path:
-    # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
-    # parents[0]=routes, parents[1]=server, parents[2]=frontend, parents[3]=CycleGraph (i mange oppsett)
-    # MEN: i ditt tilfelle peker parents[3] feil (Karriere). Vi bruker parents[2] som SSOT iht PATCH C2.
-    return Path(__file__).resolve().parents[2]
 
 
 def _read_json_utf8_sig(path: Path) -> Any:
@@ -482,10 +453,6 @@ def _extract_session_id(doc: Dict[str, Any]) -> Optional[str]:
 
 
 def _sid_from_filename(p: Path) -> Optional[str]:
-    """
-    Fallback: bruk filnavnet result_<digits>*.json som session_id.
-    Eksempel: result_16127771071_direct.json -> 16127771071
-    """
     m = _RE_RESULT_SID.match(p.stem)
     return m.group(1) if m else None
 
@@ -583,246 +550,19 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
     return row
 
 
-def _gather_result_files(root: Path) -> List[Path]:
-    files: List[Path] = []
-
-    dbg = root / "_debug"
-    if dbg.exists():
-        files.extend(sorted([p for p in dbg.glob("result_*.json") if "_direct" not in p.name]))
-
-    lr = root / "logs" / "results"
-    if lr.exists():
-        files.extend(sorted(lr.glob("result_*.json")))
-
-    out = root / "out"
-    if out.exists():
-        files.extend(sorted(out.glob("result_*.json")))
-
-    return files
-
-
-def _prefer_path(a: Path, b: Path) -> Path:
-    def tier(pth: Path) -> int:
-        s = str(pth).replace("\\", "/")
-        if "/logs/results/" in s:
-            return 0
-        if "/_debug/" in s:
-            return 1
-        if "/out/" in s:
-            return 2
-        return 9
-
-    try:
-        ma = a.stat().st_mtime
-        mb = b.stat().st_mtime
-        if ma != mb:
-            return a if ma > mb else b
-    except Exception:
-        pass
-
-    ta, tb = tier(a), tier(b)
-    if ta != tb:
-        return a if ta < tb else b
-
-    try:
-        sa = a.stat().st_size
-        sb = b.stat().st_size
-        if sa != sb:
-            return a if sa > sb else b
-    except Exception:
-        pass
-
-    return a
-
-
-# -----------------------------------
-# Routes
-# -----------------------------------
-
-
-@router.get("/list/all")
-async def list_all(
-    req: Request,
-    response: Response,
-    cg_uid: str | None = Cookie(default=None),
-    debug: int = Query(0),
-) -> Dict[str, Any]:
-    FP_DIAG = "LIST_ALL_DIAG_20260103"
-    uid_cookie = req.cookies.get("cg_uid")
-    root_diag = _repo_root_from_here()
-    print("[/list/all]", FP_DIAG, "uid=", uid_cookie, "root=", root_diag)
-
-    try:
-        users_dir = root_diag / "state" / "users"
-        print("[/list/all]", FP_DIAG, "users_dir=", users_dir, "exists=", users_dir.exists())
-        if uid_cookie:
-            udir = users_dir / str(uid_cookie)
-            print("[/list/all]", FP_DIAG, "uid_dir=", udir, "exists=", udir.exists())
-            idxp = udir / "sessions_index.json"
-            print(
-                "[/list/all]",
-                FP_DIAG,
-                "index_path=",
-                idxp,
-                "exists=",
-                idxp.exists(),
-                "size=",
-                (idxp.stat().st_size if idxp.exists() else None),
-            )
-    except Exception as e:
-        print("[/list/all]", FP_DIAG, "users_dir debug error:", repr(e))
-
-    FP = "LIST_ALL_FP_B3_20260103"
-    print("[/list/all]", FP, "HIT")
-
-    import sys
-
-    root = _repo_root_from_here()
-    files = _gather_result_files(root)
-
-    if debug:
-        print(f"[list_all] __file__={__file__}", file=sys.stderr)
-        print(f"[list_all] root={root} files={len(files)}", file=sys.stderr)
-
-    best_by_sid: Dict[str, Path] = {}
-    sid_from_doc = 0
-    sid_from_name = 0
-    sid_missing = 0
-
-    for p in files:
-        try:
-            raw = _read_json_utf8_sig(p)
-            doc = _normalize_doc(raw)
-
-            sid = _extract_session_id(doc)
-            if sid is not None:
-                sid_from_doc += 1
-            else:
-                sid = _sid_from_filename(p)
-                if sid is not None:
-                    sid_from_name += 1
-                else:
-                    sid_missing += 1
-                    continue
-
-            if sid not in best_by_sid:
-                best_by_sid[sid] = p
-            else:
-                best_by_sid[sid] = _prefer_path(best_by_sid[sid], p)
-        except Exception:
-            continue
-
-    if debug:
-        print(
-            f"[list_all] sid_from_doc={sid_from_doc} sid_from_name={sid_from_name} sid_missing={sid_missing} unique={len(best_by_sid)}",
-            file=sys.stderr,
-        )
-
-    uid_for_session = cg_uid or _get_or_set_uid(req, response)
-
-    rows: List[Dict[str, Any]] = []
-    for sid, p in best_by_sid.items():
-        try:
-            sid_str = str(sid)
-            if (not isinstance(sid_str, str)) or (not sid_str.isdigit()) or (len(sid_str) > 20):
-                print("[LIST/ALL] skip invalid sid:", sid_str)
-                continue
-
-            raw = _read_json_utf8_sig(p)
-            doc = _normalize_doc(raw)
-            row = _row_from_doc(doc, p, fallback_sid=sid_str)
-
-            print(
-                "[LIST/ALL][TRACE]",
-                "sid=",
-                sid_str,
-                "has_end=",
-                "end_time" in row,
-                "end_val=",
-                row.get("end_time"),
-                "km_val=",
-                row.get("distance_km"),
-            )
-
-            sid_item = str(row.get("session_id") or row.get("ride_id") or sid_str)
-
-            DEBUG_SID = "16597678157"
-            if sid_item == DEBUG_SID:
-                root3 = _repo_root_from_here()
-                p_dbg = root3 / "_debug" / f"result_{sid_item}.json"
-                p_logs = root3 / "logs" / "results" / f"result_{sid_item}.json"
-                print(
-                    "[/list/all]",
-                    FP,
-                    "sid=",
-                    sid_item,
-                    "st_before=",
-                    row.get("start_time"),
-                    "exists_dbg=",
-                    p_dbg.exists(),
-                    "exists_logs=",
-                    p_logs.exists(),
-                    "root=",
-                    str(root3),
-                )
-
-            # --- start_time fix (UTC ISO), kun når missing/DATE-only ---
-            try:
-                st = row.get("start_time")
-                if _needs_start_time_fix(st):
-                    rp = _pick_result_path(sid_item)
-                    if rp:
-                        t_abs = _extract_first_t_abs_fast(rp)
-                        if t_abs:
-                            row["start_time"] = t_abs
-                            print("[/list/all]", "START_TIME_BACKFILL", "sid=", sid_item, "t_abs=", t_abs)
-            except Exception as e:
-                print("[/list/all]", "START_TIME_BACKFILL_ERR", "sid=", sid_item, "err=", repr(e))
-
-            # --- PATCH C4: end_time + distance_km (result JSON fallback) ---
-            try:
-                need_end = row.get("end_time") is None
-                need_km = row.get("distance_km") is None
-                if need_end or need_km:
-                    end_abs, km = _compute_end_time_and_km(root, sid_item)
-                    if need_end and end_abs:
-                        row["end_time"] = end_abs
-                    if need_km and km is not None:
-                        row["distance_km"] = km
-            except Exception as e:
-                print("[/list/all]", "END_KM_BACKFILL_ERR", "sid=", sid_item, "err=", repr(e))
-
-            # --- PATCH E: SSOT fra session_<sid>.json (actual10/latest) ---
-            try:
-                if row.get("end_time") is None or row.get("distance_km") is None:
-                    end_t, km2 = _extract_end_time_and_km_from_session(sid_item, uid=uid_for_session)
-                    if row.get("end_time") is None:
-                        row["end_time"] = end_t
-                    if row.get("distance_km") is None:
-                        row["distance_km"] = km2
-            except Exception as e:
-                print("[/list/all]", "E_SESSION_BACKFILL_ERR", "sid=", sid_item, "err=", repr(e))
-
-            rows.append(row)
-        except Exception:
-            continue
-
-    rows = [r for r in rows if (_to_float(r.get("precision_watt_avg")) or 0.0) > 0.0]
-    rows.sort(key=lambda r: str(r.get("start_time") or ""), reverse=True)
-    rows = rows[:200]
-
-    if debug:
-        print(f"[list_all] rows={len(rows)}", file=sys.stderr)
-
-    root = _repo_root_from_here()
-    index_path = root / "state" / "users" / uid_for_session / "sessions_index.json"
-
-    if not index_path.exists():
-        return {"value": [], "Count": 0}
+def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dict | list | None, list[str]]:
+    """
+    ✅ Scope-minimum for /list/all:
+    - vi bruker sessions_index.json som SSOT for hvilke ride_ids som tilhører user_id
+    """
+    index_path = root / "state" / "users" / uid / "sessions_index.json"
 
     idx = None
     wanted: set[str] = set()
     idx_keys: list[str] = []
+
+    if not index_path.exists():
+        return index_path, wanted, None, idx_keys
 
     try:
         idx = _read_json_utf8_sig(index_path)
@@ -850,129 +590,147 @@ async def list_all(
     except Exception:
         wanted = set()
 
-    before = len(rows)
-    sample_before = [str(r.get("ride_id")) for r in rows[:12]]
+    return index_path, wanted, idx, idx_keys
 
-    rows = [r for r in rows if str(r.get("ride_id")) in wanted]
 
-    after = len(rows)
-    sample_after = [str(r.get("ride_id")) for r in rows[:12]]
+# -----------------------------------
+# Routes
+# -----------------------------------
+
+
+@router.get("/list/all")
+async def list_all(
+    req: Request,
+    response: Response,
+    user_id: str = Depends(require_auth),
+    debug: int = Query(0),
+) -> Dict[str, Any]:
+    """
+    🔒 Auth + scope-minimum:
+    - Ingen cg_uid-cookie identitet
+    - Returnerer kun sessions som ligger i state/users/<user_id>/sessions_index.json
+    """
+    uid = user_id
+    FP = "LIST_ALL_AUTH_SCOPED_20260114"
+    root = _repo_root_from_here()
+    print("[/list/all]", FP, "uid=", uid, "root=", root)
+
+    index_path, wanted, idx, idx_keys = _read_user_sessions_index(root, uid)
+
+    if not wanted:
+        # ingen index => ingen sessions for denne brukeren
+        out: Dict[str, Any] = {"value": [], "Count": 0}
+        if debug:
+            out["debug"] = {
+                "uid": uid,
+                "index_path": str(index_path).replace("\\", "/"),
+                "index_exists": index_path.exists(),
+                "wanted_count": 0,
+            }
+        return out
+
+    rows: List[Dict[str, Any]] = []
+
+    # ✅ Scope: iterer kun over ride_ids i index (ikke scan globalt)
+    for sid_item in sorted(wanted, reverse=True):
+        try:
+            sid_str = str(sid_item)
+            if (not sid_str.isdigit()) or (len(sid_str) > 20):
+                print("[LIST/ALL] skip invalid sid:", sid_str)
+                continue
+
+            rp = _pick_result_path(sid_str)
+            if not rp:
+                # ingen resultfil funnet – vi lar det være stille i MVP
+                continue
+
+            raw = _read_json_utf8_sig(rp)
+            doc = _normalize_doc(raw)
+            row = _row_from_doc(doc, rp, fallback_sid=sid_str)
+
+            # --- start_time fix (UTC ISO), kun når missing/DATE-only ---
+            try:
+                st = row.get("start_time")
+                if _needs_start_time_fix(st):
+                    t_abs = _extract_first_t_abs_fast(rp)
+                    if t_abs:
+                        row["start_time"] = t_abs
+                        print("[/list/all]", "START_TIME_BACKFILL", "sid=", sid_str, "t_abs=", t_abs)
+            except Exception as e:
+                print("[/list/all]", "START_TIME_BACKFILL_ERR", "sid=", sid_str, "err=", repr(e))
+
+            # --- PATCH C4: end_time + distance_km (result JSON fallback) ---
+            try:
+                need_end = row.get("end_time") is None
+                need_km = row.get("distance_km") is None
+                if need_end or need_km:
+                    end_abs, km = _compute_end_time_and_km(root, sid_str)
+                    if need_end and end_abs:
+                        row["end_time"] = end_abs
+                    if need_km and km is not None:
+                        row["distance_km"] = km
+            except Exception as e:
+                print("[/list/all]", "END_KM_BACKFILL_ERR", "sid=", sid_str, "err=", repr(e))
+
+            # --- PATCH E: SSOT fra session_<sid>.json (actual10/latest eller per-user sessions) ---
+            try:
+                if row.get("end_time") is None or row.get("distance_km") is None:
+                    end_t, km2 = _extract_end_time_and_km_from_session(sid_str, uid=uid)
+                    if row.get("end_time") is None:
+                        row["end_time"] = end_t
+                    if row.get("distance_km") is None:
+                        row["distance_km"] = km2
+            except Exception as e:
+                print("[/list/all]", "E_SESSION_BACKFILL_ERR", "sid=", sid_str, "err=", repr(e))
+
+            rows.append(row)
+        except Exception:
+            continue
+
+    # behold samme filtrering/sortering som før
+    rows = [r for r in rows if (_to_float(r.get("precision_watt_avg")) or 0.0) > 0.0]
+    rows.sort(key=lambda r: str(r.get("start_time") or ""), reverse=True)
+    rows = rows[:200]
 
     out: Dict[str, Any] = {"value": rows, "Count": len(rows)}
 
     if debug:
         out["debug"] = {
-            "uid": uid_for_session,
+            "uid": uid,
             "index_path": str(index_path).replace("\\", "/"),
+            "index_exists": index_path.exists(),
             "idx_type": type(idx).__name__ if idx is not None else None,
             "idx_keys": idx_keys,
             "wanted_count": len(wanted),
-            "wanted": sorted(list(wanted))[:20],
-            "rows_before": before,
-            "rows_after": after,
-            "ride_ids_before_sample": sample_before,
-            "ride_ids_after_sample": sample_after,
+            "wanted_sample": sorted(list(wanted))[:20],
+            "rows_returned": len(rows),
         }
 
     return out
 
 
+
+
 @router.get("/list/_debug_paths")
-async def _debug_paths() -> Dict[str, Any]:
-    root = _repo_root_from_here()
-    files = _gather_result_files(root)
+async def _debug_paths(
+    user_id: str = Depends(require_auth),
+) -> Dict[str, Any]:
+    """
+    🔒 Auth + scope-minimum:
+    - Ikke lek ut absolutt filstruktur (ingen cwd/root/router_file)
+    - Returnér kun relative paths for current user (state/users/<uid>/...)
+    """
+    uid = str(user_id)
 
-    logs = root / "logs"
-    p_results = logs / "results"
-    p_actual10 = logs / "actual10"
-    p_latest_dir = p_actual10 / "latest"
-
-    def _glob_sorted(base: Path, pattern: str, limit: int = 8) -> list[str]:
-        try:
-            if not base.exists():
-                return []
-            xs = sorted(base.glob(pattern), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
-            return [str(p).replace("\\", "/") for p in xs[:limit]]
-        except Exception:
-            return []
-
-    def _rglob_sorted(base: Path, pattern: str, limit: int = 8) -> list[str]:
-        try:
-            if not base.exists():
-                return []
-            xs = sorted(base.rglob(pattern), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
-            return [str(p).replace("\\", "/") for p in xs[:limit]]
-        except Exception:
-            return []
-
-    def _pick_newest(paths):
-        try:
-            paths = list(paths or [])
-            if not paths:
-                return None
-            paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            return paths[0]
-        except Exception:
-            return None
-
-    results_samples = _glob_sorted(p_results, "result_*.json", limit=8)
-    latest_result_samples = _glob_sorted(p_latest_dir, "result_*.json", limit=8)
-    actual10_session_samples = _rglob_sorted(p_actual10, "session_*.json", limit=8)
-
-    def _count_glob(base: Path, pattern: str, recursive: bool = False) -> int:
-        try:
-            if not base.exists():
-                return 0
-            return sum(1 for _ in (base.rglob(pattern) if recursive else base.glob(pattern)))
-        except Exception:
-            return 0
-
-    examples = []
-    try:
-        if p_results.exists():
-            xs = sorted(p_results.glob("result_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]
-            for p in xs:
-                name = p.name
-                rid = name.replace("result_", "").replace(".json", "")
-
-                p_logs = root / "logs" / "results" / f"result_{rid}.json"
-                logs_results = str(p_logs).replace("\\", "/") if p_logs.exists() else None
-
-                cand_plain = p_latest_dir / f"result_{rid}.json"
-                cand_glob = list(p_latest_dir.glob(f"result_{rid}*.json")) if p_latest_dir.exists() else []
-                p_latest = cand_plain if cand_plain.exists() else _pick_newest(cand_glob)
-
-                actual10_latest_result = str(p_latest).replace("\\", "/") if p_latest else None
-
-                ex = {
-                    "rid": rid,
-                    "logs_results": logs_results,
-                    "actual10_latest_result": actual10_latest_result,
-                    "actual10_any_session_count": 0,
-                }
-
-                try:
-                    ex["actual10_any_session_count"] = (
-                        sum(1 for _ in p_actual10.rglob(f"session_{rid}.json")) if p_actual10.exists() else 0
-                    )
-                except Exception:
-                    ex["actual10_any_session_count"] = 0
-
-                examples.append(ex)
-    except Exception:
-        examples = []
-
+    # Kun relative hints (ingen samples, ingen faktiske disk-paths)
     return {
-        "router_file": str(Path(__file__).resolve()),
-        "cwd": str(Path.cwd().resolve()),
-        "root_from_here": str(root.resolve()),
-        "files_from_here": len(files),
-        "sample_files_from_here": [str(p).replace("\\", "/") for p in files[:8]],
-        "logs_results_count": _count_glob(p_results, "result_*.json", recursive=False),
-        "logs_results_samples": results_samples,
-        "actual10_latest_result_count": _count_glob(p_latest_dir, "result_*.json", recursive=False),
-        "actual10_latest_result_samples": latest_result_samples,
-        "actual10_session_count": _count_glob(p_actual10, "session_*.json", recursive=True),
-        "actual10_session_samples": actual10_session_samples,
-        "ssot_examples": examples,
-    } 
+        "uid": uid,
+        "paths": {
+            "sessions_index": f"state/users/{uid}/sessions_index.json",
+            "auth": f"state/users/{uid}/auth.json",
+            "user_sessions_dir": f"state/users/{uid}/sessions/",
+            "results_dir": "logs/results/",
+            "debug_dir": "_debug/",
+        },
+        "note": "Relative paths only. No absolute filesystem paths are exposed.",
+    }

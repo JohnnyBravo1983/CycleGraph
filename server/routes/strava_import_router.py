@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from server.auth_guard import require_auth
 
 router = APIRouter(prefix="/api/strava", tags=["strava-import"])
 
@@ -237,8 +239,6 @@ def _fetch_activity_and_streams(
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     meta = _strava_get(f"/activities/{rid}", uid, tokens, token_path)
 
-    # Minimum: tid/distanse/hr/cad/watts/latlng
-    # Legger til altitude/velocity_smooth/grade_smooth/moving når tilgjengelig
     stream_keys = [
         "time",
         "distance",
@@ -312,7 +312,6 @@ def _build_samples_v1(meta: Dict[str, Any], streams: Dict[str, Any]) -> List[Dic
         grade = float(G[i]) if i < len(G) and G[i] is not None else 0.0
         hr = float(HR[i]) if i < len(HR) and HR[i] is not None else None
 
-        # heading: beregn fra latlng dersom mulig
         heading_deg = last_heading
         if lat_deg is not None and lon_deg is not None and (i + 1) < len(LL):
             nxt = LL[i + 1]
@@ -366,8 +365,6 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
         debug_session_path = str(p_debug)
         p_debug.parent.mkdir(parents=True, exist_ok=True)
 
-        # Copy from latest actual10 session file (p2)
-        # Ensure p2 exists first
         if p2.exists():
             p_debug.write_text(p2.read_text(encoding="utf-8"), encoding="utf-8")
             debug_session_written = True
@@ -384,19 +381,17 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 
 
 # ----------------------------
-# Patch: internal analyze call MUST forward cg_uid cookie
+# Patch 3D: internal analyze call MUST forward cg_auth (not cg_uid)
 # ----------------------------
-def _trigger_analyze_local(rid: str, uid: Optional[str]) -> Dict[str, Any]:
-    # intern call: unngår å import-koble oss til analyze_session-signaturen
+def _trigger_analyze_local(rid: str, cg_auth: Optional[str]) -> Dict[str, Any]:
     base = os.getenv("CG_API_BASE") or "http://localhost:5175"
     url = f"{base}/api/sessions/{rid}/analyze?force_recompute=1&debug=1"
 
     cookies: Dict[str, str] = {}
-    if uid:
-        cookies["cg_uid"] = str(uid)
+    if cg_auth:
+        cookies["cg_auth"] = str(cg_auth)
 
     try:
-        # ✅ viktig: send faktisk JSON body + forward cookie
         r = requests.post(url, json={}, cookies=cookies, timeout=60)
 
         out: Dict[str, Any] = {
@@ -405,7 +400,6 @@ def _trigger_analyze_local(rid: str, uid: Optional[str]) -> Dict[str, Any]:
             "forwarded_cookies": list(cookies.keys()),
         }
 
-        # ✅ alltid gi oss hint (json hvis mulig ellers tekst med større cap)
         try:
             out["json"] = r.json()
         except Exception:
@@ -417,17 +411,19 @@ def _trigger_analyze_local(rid: str, uid: Optional[str]) -> Dict[str, Any]:
 
 
 @router.post("/import/{rid}")
-def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
-    FP = "STRAVA_IMPORT_ROUTER_FP_3X_20251227"
+def import_strava_activity(
+    rid: str,
+    request: Request,
+    user_id: str = Depends(require_auth),
+) -> Dict[str, Any]:
+    FP = "STRAVA_IMPORT_ROUTER_AUTH_3D_20260114"
     print("[STRAVA_IMPORT]", FP, "rid=", rid)
+
+    uid = user_id
 
     # If earlier patches are not present for some reason, ensure fields exist in response
     debug_session_written: Any = "UNSET"
     debug_session_path: Any = "UNSET"
-
-    uid = request.cookies.get("cg_uid") or ""
-    if not uid:
-        raise HTTPException(status_code=401, detail="missing_cg_uid_cookie")
 
     tp = _tokens_path(uid)
     if not tp.exists():
@@ -461,12 +457,12 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
 
     paths = _write_session_v1(uid, rid, session_doc)
 
-    # Pull debug fields up to function scope so we can always include them in response
     debug_session_written = paths.get("debug_session_written", debug_session_written)
     debug_session_path = paths.get("debug_session_path", debug_session_path)
 
-    # ✅ Patch: forward cg_uid into internal analyze call (so it matches browser call)
-    analyze = _trigger_analyze_local(rid, uid)
+    # ✅ Patch 3D: forward cg_auth into internal analyze call
+    cg_auth = request.cookies.get("cg_auth")
+    analyze = _trigger_analyze_local(rid, cg_auth)
 
     return {
         "ok": True,
@@ -480,7 +476,6 @@ def import_strava_activity(rid: str, request: Request) -> Dict[str, Any]:
         },
         "samples_len": len(samples),
         "analyze": analyze,
-        # Patch 3X: proof of running code + debug mirror status
         "debug_session_written": debug_session_written,
         "debug_session_path": debug_session_path,
     }

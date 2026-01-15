@@ -1,9 +1,10 @@
 ﻿from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, Query
-from fastapi.responses import JSONResponse  # <-- PATCH 1F: Import JSONResponse
+from fastapi import APIRouter, HTTPException, Request, Query, Depends
+from fastapi.responses import JSONResponse
 from cli.profile_binding import load_user_profile, compute_profile_version, binding_from
-from server.utils.versioning import compute_version, load_profile, get_profile_export  # <-- PATCH 1: Added get_profile_export
+from server.utils.versioning import compute_version, load_profile, get_profile_export
+from server.auth_guard import require_auth
 from datetime import datetime, timezone
 
 import os
@@ -410,19 +411,14 @@ def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon
 # ==================== END PATCH S3D ====================
 
 # ==================== PATCH 1: Helper function for UI profile ====================
-from fastapi import HTTPException, Request
-
-def _load_ui_profile_for_request(req: Request) -> dict:
+def _load_ui_profile_for_user_id(user_id: str) -> dict:
     """
     Bruk samme SSOT som /api/profile/get (profile_router).
-    IKKE fall back til load_profile() (den krever uid og kan gi 500).
-    Mangler cookie -> 401 (kontrollert), ikke 500.
     """
-    uid = req.cookies.get("cg_uid")
-    if not uid or not isinstance(uid, str):
-        raise HTTPException(status_code=401, detail="Missing cg_uid cookie")
+    if not user_id or not isinstance(user_id, str):
+        raise HTTPException(status_code=401, detail="Missing user_id")
 
-    exp = get_profile_export(uid) or {}
+    exp = get_profile_export(user_id) or {}
     prof = exp.get("profile") or {}
     pv = exp.get("profile_version")
 
@@ -601,6 +597,28 @@ def _write_sessions_meta(uid: str, meta: Dict[str, Any]) -> None:
     tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
 # ==================== END PATCH: SESSIONS META SUPPORT ====================
+
+# ==================== PATCH: SESSION OWNERSHIP HELPER ====================
+def _assert_session_owned(base_dir: str, user_id: str, session_id: str) -> None:
+    """
+    Sjekk at session_id tilhører user_id ved å se i brukerens sessions_index.json.
+    Hvis ikke, kast HTTP 404.
+    """
+    from server.user_state import load_user_sessions_index, maybe_bootstrap_demo_sessions
+
+    maybe_bootstrap_demo_sessions(base_dir, user_id)
+    idx = load_user_sessions_index(base_dir, user_id) or {}
+    sessions_idx = idx.get("sessions") or []
+
+    for it in sessions_idx:
+        if not isinstance(it, dict):
+            continue
+        found_id = it.get("id") or it.get("session_id") or it.get("ride_id")
+        if str(found_id) == str(session_id):
+            return
+
+    raise HTTPException(status_code=404, detail="Session not found")
+# ==================== END PATCH ====================
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -923,32 +941,103 @@ def _ride_id_from_result_path(path: str) -> str:
         return m.group(1)
     return ""
 
-
 @router.get("/list")
-def list_sessions() -> List[Dict[str, Any]]:
+@router.get("/list")
+def list_sessions(
+    user_id: str = Depends(require_auth),
+) -> List[Dict[str, Any]]:
     """
-    Returner en liste over økter basert på result_*.json i logs/results,
-    med samme kilde som /api/sessions/{session_id} (_load_result_doc).
+    Returner en liste over økter for innlogget bruker, basert på sessions_index.json
+    og result_*.json i logs/results. Skal aldri lekke andre brukeres sessions.
     """
     rows: List[Dict[str, Any]] = []
 
-    pattern = os.path.join(RESULTS_DIR, "result_*.json")
-    for path in glob.glob(pattern):
-        try:
-            # 1) Hent ride_id ut fra filnavnet
-            ride_id = _ride_id_from_result_path(path)
-            if not ride_id:
-                continue
+    # (Demo) sørg for at demo-sessions kan finnes i index hvis demo-mode brukes
+    try:
+        from server.user_state import maybe_bootstrap_demo_sessions
+        maybe_bootstrap_demo_sessions(os.getcwd(), user_id)
+    except Exception:
+        pass
 
-            # 2) Bruk samme logikk som /sessions/{id} for å hente analysert resultat
-            result_doc = _load_result_doc(ride_id)
+    # 1) Finn user sin sessions_index.json (SSOT for hvilke rides som tilhører user)
+    index_path = os.path.join(
+        os.getcwd(), "state", "users", str(user_id), "sessions_index.json"
+    )
+
+    # NEW: sikre at index eksisterer (ny bruker = tom index)
+    if not os.path.exists(index_path):
+        try:
+            os.makedirs(os.path.dirname(index_path), exist_ok=True)
+            with open(index_path, "w", encoding="utf-8") as f:
+                json.dump({"sessions": []}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return rows
+
+
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_doc = json.load(f) or {}
+    except Exception:
+        return rows
+
+    # 2) Ulike formater kan finnes. Prøv å hente ride-IDs robust.
+    # Forventet: {"sessions":[{"id":"123"...}, ...]} eller {"rides":[...]} eller {"ids":[...]}
+    candidates: List[str] = []
+
+    def _add_id(v: Any) -> None:
+        if v is None:
+            return
+        if isinstance(v, (int, float)):
+            candidates.append(str(int(v)))
+        elif isinstance(v, str):
+            s = v.strip()
+            if s:
+                candidates.append(s)
+
+    sessions = index_doc.get("sessions")
+    rides = index_doc.get("rides")
+    ids = index_doc.get("ids")
+
+    if isinstance(sessions, list):
+        for item in sessions:
+            if isinstance(item, dict):
+                _add_id(item.get("id") or item.get("ride_id") or item.get("session_id"))
+            else:
+                _add_id(item)
+    elif isinstance(rides, list):
+        for item in rides:
+            if isinstance(item, dict):
+                _add_id(item.get("id") or item.get("ride_id") or item.get("session_id"))
+            else:
+                _add_id(item)
+    elif isinstance(ids, list):
+        for item in ids:
+            _add_id(item)
+    else:
+        # fallback: hvis index_doc selv er en liste
+        if isinstance(index_doc, list):
+            for item in index_doc:
+                _add_id(item)
+
+    # Dedup, men behold stabil rekkefølge
+    seen = set()
+    ride_ids: List[str] = []
+    for rid in candidates:
+        if rid not in seen:
+            seen.add(rid)
+            ride_ids.append(rid)
+
+    # 3) Bygg liste basert på user sine ride_ids
+    for ride_id in ride_ids:
+        try:
+            # Bruk samme logikk som /sessions/{id} for å hente analysert resultat
+            result_doc = _load_result_doc(str(ride_id))
             if not result_doc:
-                # ingen analysert fil for denne økten – hopp over
                 continue
 
             metrics = result_doc.get("metrics") or {}
 
-            # 3) Precision Watt snitt: hent fra precision_watt_avg eller metrics.precision_watt
             precision_watt_avg = None
             pw_avg = result_doc.get("precision_watt_avg")
             if isinstance(pw_avg, (int, float)):
@@ -958,11 +1047,9 @@ def list_sessions() -> List[Dict[str, Any]]:
                 if isinstance(pw, (int, float)):
                     precision_watt_avg = float(pw)
 
-            # 4) profile_version: top-level eller inne i profile_used
             profile_used = result_doc.get("profile_used") or metrics.get("profile_used") or {}
             profile_version = result_doc.get("profile_version") or profile_used.get("profile_version")
 
-            # 5) weather_source: prøv flere steder
             weather_used = metrics.get("weather_used") or {}
             weather_source = (
                 result_doc.get("weather_source")
@@ -971,11 +1058,9 @@ def list_sessions() -> List[Dict[str, Any]]:
                 or weather_used.get("source")
             )
 
-            # 6) start_time / distance_km – hvis/ når vi begynner å lagre dette
             start_time = result_doc.get("start_time")
             distance_km = result_doc.get("distance_km")
 
-            # 7) PATCH C-final: Hvis start_time mangler, prøv trend_sessions.csv
             if not start_time:
                 try:
                     st = _trend_sessions_lookup_start_time(str(ride_id))
@@ -996,10 +1081,10 @@ def list_sessions() -> List[Dict[str, Any]]:
                 }
             )
         except Exception:
-            # én korrupt fil skal ikke knekke hele lista
             continue
 
     return rows
+
 
 
 G = 9.80665
@@ -1476,39 +1561,16 @@ def _scrub_profile(profile_in: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/debug/rb")
 async def debug_rb(request: Request):
     """
-    Minimal passthrough → kaller rs_power_json direkte med body som kommer inn.
-    Forventer OBJECT: {"samples":[...], "profile":{...}, "estimat":{...}}
-    Returnerer {"source":"rust"/"error", "out":<str>, "probe": <bool>, "err":<str|None>}
+    🚫 Deprecated / disabled in prod.
+    Dette var et debug-endepunkt (passthrough til rust) og skal ikke være tilgjengelig.
     """
-    global rs_power_json, _adapter_import_error
-
-    # Hvis adapter ikke er lastet (eller reload har tuklet), prøv én gang til
-    if rs_power_json is None:
-        rs_power_json = _load_rs_power_json()
-
-    try:
-        data = await request.json()
-    except Exception as e:
-        return {"source": "error", "out": "", "probe": False, "err": f"json body: {e!r}"}
-
-    if rs_power_json is None:
-        return {
-            "source": "error",
-            "out": "",
-            "probe": False,
-            "err": f"Rust adapter not available: {_adapter_import_error}",
-        }
-
-    prof = _scrub_profile(data.get("profile") or {})
-    sam = data.get("samples") or []
-    est = data.get("estimat") or data.get("estimate") or {}
-
-    try:
-        out = rs_power_json(sam, prof, est)
-        return {"source": "rust", "out": out, "probe": False, "err": None}
-    except Exception as e:
-        return {"source": "error", "out": "", "probe": False, "err": repr(e)}
-
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": "deprecated_endpoint",
+            "message": "This endpoint is disabled. Use supported analyze endpoints.",
+        },
+    )
 # ==================== PATCH A5: CANONICAL WHEEL RESOLUTION ====================
 
 def _resolve_canonical_wheel(m: dict) -> tuple[float | None, str]:
@@ -1723,6 +1785,7 @@ def _extract_start_time_from_session_file(sess_path: Path) -> int | None:
 async def analyze_session(
     sid: str,
     request: Request,
+    user_id: str = Depends(require_auth),  # <-- NY: Bruker auth guard
     no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
     debug: int = Query(0),
@@ -1733,6 +1796,12 @@ async def analyze_session(
     print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}", file=sys.stderr)
     print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
     print(f"[SVR] HIT /sessions/{sid}/analyze force_recompute={force_recompute} debug={debug}", file=sys.stderr)
+
+    # ==================== PATCH 4: OWNER PROTECTION ====================
+    base_dir = os.getcwd()
+    # ✅ Owner-protection (SSOT) – samme som GET /{sid}
+    _assert_session_owned(base_dir, user_id, sid)
+    # ==================== END PATCH 4 ====================
 
     # ==================== PATCH D1: START_TIME FROM SAMPLES ====================
     # Vi trenger å lagre start_time fra samples for senere bruk i både Rust og fallback grener
@@ -1805,7 +1874,7 @@ async def analyze_session(
                     # ==================== PATCH: INVALIDATE PERSISTED RESULT IF PROFILE_VERSION HAS CHANGED ====================
                     try:
                         # current profile (UI truth) - bruk samme metode som i PATCH 1
-                        current_profile = _load_ui_profile_for_request(request)
+                        current_profile = _load_ui_profile_for_user_id(user_id)  # <-- NY: Bruk user_id
                         # Hent profilversjonen fra current_profile (den kan være i current_profile["profile_version"])
                         current_pv = current_profile.get("profile_version")
                     except Exception as e:
@@ -2192,7 +2261,7 @@ async def analyze_session(
     # ==================== PATCH: SESSIONS META WRITE (Sprint A) ====================
     # Skriv sessions_meta.json etter at samples er lastet og vi har uid
     try:
-        uid = request.cookies.get("cg_uid")
+        uid = user_id  # <-- NY: Bruk user_id fra auth guard
         if uid and isinstance(samples, list) and len(samples) > 0 and isinstance(samples[0], dict):
             FP = "META_WRITE_FP_A2_20260104"
             print(f"[META] {FP} enter uid={uid} sid={sid} samples_len={len(samples)}", file=sys.stderr)
@@ -2259,10 +2328,11 @@ async def analyze_session(
 
     # ==================== PATCH 1: USE UI PROFILE WHEN CLIENT DOESN'T SEND PROFILE ====================
     if not client_sent_profile:
-        print("[ANALYZE] cookies keys=", list(request.cookies.keys()))
-        print("[ANALYZE] cg_uid=", request.cookies.get("cg_uid"))
+        # <-- FJERNET: debug-print av cookies
+        # print("[ANALYZE] cookies keys=", list(request.cookies.keys()))
+        # print("[ANALYZE] cg_uid=", request.cookies.get("cg_uid"))
         
-        up = _load_ui_profile_for_request(request)  # <-- Bruk UI profil
+        up = _load_ui_profile_for_user_id(user_id)  # <-- NY: Bruk user_id i stedet for request
         profile = _ensure_profile_device(up)
         body["profile"] = profile
     # ==================== END PATCH 1 ====================
@@ -2322,7 +2392,7 @@ async def analyze_session(
         }
     else:
         # ==================== PATCH 1: USE UI PROFILE FOR VERSIONING ====================
-        prof_disk = _load_ui_profile_for_request(request)  # <-- Bruk UI profil
+        prof_disk = _load_ui_profile_for_user_id(user_id)  # <-- NY: Bruk user_id
         subset = {
             k: prof_disk.get(k)
             for k in (
@@ -3092,54 +3162,78 @@ async def analyze_session(
     return _RET(resp)
 
 # ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
+from fastapi.responses import JSONResponse
+from fastapi import Depends, Query, Request
+from server.auth_guard import require_auth
+
 @router.post("/{sid}/analyze_sessionspy")
 async def analyze_session_sessionspy(
     sid: str,
     request: Request,
+    user_id: str = Depends(require_auth),
     no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
     debug: int = Query(0),
 ):
     """
-    DEPRECATED endpoint (legacy / probe).
-
-    Denne ruten ble tidligere brukt for debugging av:
-      - dobbel router-registrering
-      - analyse-kollisjoner mellom app.py og sessions.py
-
-    Den skal ALDRI brukes i ordinær pipeline eller produksjonsflyt.
-
-    Korrekt og eneste støttede analyse-endepunkt er:
-      POST /api/sessions/{sid}/analyze
-    (implementert i sessions.py)
-
-    For å eliminere risiko for utilsiktet bruk, returnerer denne ruten
-    alltid HTTP 410 Gone og utfører ingen analyse.
+    🚫 Deprecated endpoint. Keep for compatibility but do not execute analysis.
+    🔒 Auth required (avoid public spam) and do not touch any user data.
     """
     return JSONResponse(
         status_code=410,
         content={
             "error": "deprecated_endpoint",
-            "message": (
-                "Dette endepunktet er avviklet og skal ikke brukes. "
-                "Bruk POST /api/sessions/{sid}/analyze."
-            ),
+            "message": "This endpoint is deprecated. Use POST /api/sessions/{sid}/analyze.",
             "recommended_endpoint": f"/api/sessions/{sid}/analyze",
         },
     )
+
 # ==================== END PATCH ====================
 
 
+from server.auth_guard import require_auth
 
 @router.get("/{session_id}")
-def get_session(session_id: str) -> Dict[str, Any]:
+def get_session(
+    session_id: str,
+    request: Request,
+    user_id: str = Depends(require_auth),
+) -> Dict[str, Any]:
     """
     Returner enkel sessions-respons, med Precision Watt hentet fra
     enten _debug/result_<id>.json (fasit) eller logs/results/result_<id>.json (fallback).
-    I tillegg returnerer vi litt debug-info om hvilke paths som ble sjekket.
+
+    Sikkerhet (Task 1.2):
+    - Krever auth (401 hvis ikke innlogget)
+    - Eiersjekk: session må tilhøre innlogget bruker, ellers 404
+    - SSOT for eierskap = per-user sessions_index.json (ikke doc)
+    - Ikke lek ut lokale filpaths i respons
     """
+    from server.user_state import load_user_sessions_index, maybe_bootstrap_demo_sessions
 
     base_dir = os.getcwd()
+
+    # (Demo) sørg for at demo-sessions kan finnes i index hvis demo-mode brukes
+    maybe_bootstrap_demo_sessions(base_dir, user_id)
+
+    # ---- EIERSJEKK via per-user index (SSOT) ----
+    idx = load_user_sessions_index(base_dir, user_id) or {}
+    sessions_idx = idx.get("sessions") or []
+
+    allowed = False
+    for it in sessions_idx:
+        if not isinstance(it, dict):
+            continue
+        found_id = it.get("id") or it.get("session_id") or it.get("ride_id")
+        if str(found_id) == str(session_id):
+            allowed = True
+            break
+
+    if not allowed:
+        # Ikke avslør om session finnes globalt
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # ---- Hent result-doc fra fil (lokalt), men ikke eksponer paths ----
     debug_path = os.path.join(base_dir, "_debug", f"result_{session_id}.json")
     results_path = os.path.join(base_dir, "logs", "results", f"result_{session_id}.json")
 
@@ -3147,14 +3241,12 @@ def get_session(session_id: str) -> Dict[str, Any]:
     results_exists = os.path.exists(results_path)
 
     doc: Optional[Dict[str, Any]] = None
-    source = None  # liten debug-tag så vi ser hva som brukes
-
+    source: Optional[str] = None
     debug_error: Optional[str] = None
 
-    # 1) Prøv _debug først (sanntidsanalyse fra scriptet)
+    # 1) Prøv _debug først
     if debug_exists:
         try:
-            # utf-8-sig stripper BOM automatisk (løser JSONDecodeError på BOM)
             with open(debug_path, "r", encoding="utf-8-sig") as f:
                 doc = json.load(f)
                 source = "_debug"
@@ -3162,57 +3254,54 @@ def get_session(session_id: str) -> Dict[str, Any]:
             debug_error = f"debug read error: {e_any!r}"
             doc = None
 
-    # 2) Hvis vi ikke fikk debug-doc, prøv logs/results som fallback
+    # 2) Fallback: logs/results
     if doc is None and results_exists:
         try:
             with open(results_path, "r", encoding="utf-8") as f:
                 doc = json.load(f)
                 source = "logs/results"
-        except Exception:
+        except Exception as e_any:
+            debug_error = f"results read error: {e_any!r}"
             doc = None
 
-    # 3) Hvis vi fant en doc et av stedene, trekk ut metrics + kjente felter
-    if doc is not None:
-        metrics = doc.get("metrics") or {}
+    # Hvis ingen fil finnes: skal være 404 (ikke 200), og uten path-lekkasje
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-        precision_watt = metrics.get("precision_watt")
-        precision_watt_ci = metrics.get("precision_watt_ci")
+    metrics = doc.get("metrics") or {}
+    precision_watt = metrics.get("precision_watt")
+    precision_watt_ci = metrics.get("precision_watt_ci")
 
-        # PATCH C: Legg til start_time fra trend_sessions.csv hvis mangler
-        if not doc.get("start_time"):
+    # Backfill start_time hvis mangler (bruk eksisterende helper hvis tilgjengelig)
+    if not doc.get("start_time"):
+        try:
             st = _trend_sessions_lookup_start_time(session_id)
             if st:
                 doc["start_time"] = st
+        except Exception:
+            pass
 
-        return {
-            "session_id": session_id,
-            "precision_watt": precision_watt,
-            "precision_watt_ci": precision_watt_ci,
-            "strava_activity_id": doc.get("strava_activity_id"),
-            "publish_state": doc.get("publish_state"),
-            "publish_time": doc.get("publish_time"),
-            "publish_hash": doc.get("publish_hash", ""),
-            "publish_error": doc.get("publish_error"),
-            "start_time": doc.get("start_time"),
-            "distance_km": doc.get("distance_km"),
-            # ekstra debug-felt
-            "analysis_source": source,
-            "raw_has_metrics": bool(metrics),
-            "base_dir": base_dir,
-            "debug_path": debug_path,
-            "debug_exists": debug_exists,
-            "results_path": results_path,
-            "results_exists": results_exists,
-            "debug_error": debug_error,
-        }
-    else:
-        # Ingen fil funnet
-        return {
-            "session_id": session_id,
-            "error": "session_not_found",
-            "debug_path": debug_path,
-            "debug_exists": debug_exists,
-            "results_path": results_path,
-            "results_exists": results_exists,
-            "debug_error": debug_error,
-        }
+    resp: Dict[str, Any] = {
+        "session_id": session_id,
+        "precision_watt": precision_watt,
+        "precision_watt_ci": precision_watt_ci,
+        "strava_activity_id": doc.get("strava_activity_id"),
+        "publish_state": doc.get("publish_state"),
+        "publish_time": doc.get("publish_time"),
+        "publish_hash": doc.get("publish_hash", ""),
+        "publish_error": doc.get("publish_error"),
+        "start_time": doc.get("start_time"),
+        "distance_km": doc.get("distance_km"),
+        "analysis_source": source,
+        "raw_has_metrics": bool(metrics),
+    }
+
+    # Minimal debug uten filpaths (kan fjernes helt hvis du vil være enda strengere)
+    resp["debug"] = {
+        "checked_debug": bool(debug_exists),
+        "checked_results": bool(results_exists),
+        "source": source,
+        "read_error": debug_error,
+    }
+
+    return resp

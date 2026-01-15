@@ -1,14 +1,14 @@
-# server/routes/auth_local.py
 from __future__ import annotations
 
 import os
+import secrets
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server.auth.local_auth import (
     COOKIE_NAME,
-    ensure_uid,
-    login_for_uid,
+    login_by_email,
     me_from_request,
     sign_session,
     signup_for_uid,
@@ -58,9 +58,14 @@ def _clear_auth_cookie(resp: Response) -> None:
 
 @router.post("/signup")
 def signup(req: Request, payload: SignupIn):
-    # Ensure cg_uid exists (prime cookie if missing)
-    resp = Response(media_type="application/json")
-    uid = ensure_uid(req, resp)
+    """
+    PATCH 2 (Task 1.x / 3E presisering):
+    - Generér uid (ikke fra cg_uid-cookie)
+    - signup_for_uid(uid, email, password)
+    - cg_auth (COOKIE_NAME) er autoritativ
+    - (valgfritt) sett cg_uid=uid som legacy helper cookie
+    """
+    uid = "u_" + secrets.token_urlsafe(16).replace("-", "").replace("_", "")
 
     try:
         u = signup_for_uid(uid, payload.email, payload.password)
@@ -68,27 +73,56 @@ def signup(req: Request, payload: SignupIn):
         raise HTTPException(status_code=400, detail=str(e))
 
     token = sign_session(uid, ttl_seconds=COOKIE_TTL)
+
+    # ✅ PATCH: bruk JSONResponse (unngå Content-Length/body crash)
+    resp = JSONResponse({"ok": True, "uid": u["uid"], "email": u["email"]})
     _set_auth_cookie(resp, token)
-    resp.body = bytes(f'{{"ok":true,"uid":"{u["uid"]}","email":"{u["email"]}"}}', "utf-8")
+
+    # legacy helper cookie (ikke autoritativ identitet)
+    resp.set_cookie(
+        key="cg_uid",
+        value=uid,
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+    )
+
     return resp
 
 
 @router.post("/login")
 def login(req: Request, payload: LoginIn):
-    resp = Response(media_type="application/json")
-    uid = ensure_uid(req, resp)
-
+    """
+    PATCH 2:
+    - Login via login_by_email(email, password) (email->uid index)
+    - Signér cg_auth (COOKIE_NAME)
+    - (valgfritt) sett cg_uid=uid som legacy helper cookie
+    """
     try:
-        u = login_for_uid(uid, payload.email, payload.password)
+        u = login_by_email(payload.email, payload.password)
     except ValueError as e:
-        # feil credentials -> 401, andre -> 400
         msg = str(e)
         code = 401 if "Invalid credentials" in msg else 400
         raise HTTPException(status_code=code, detail=msg)
 
+    uid = str(u["uid"])
     token = sign_session(uid, ttl_seconds=COOKIE_TTL)
+
+    # ✅ PATCH: bruk JSONResponse (unngå Content-Length/body crash)
+    resp = JSONResponse({"ok": True, "uid": uid, "email": u["email"]})
     _set_auth_cookie(resp, token)
-    resp.body = bytes(f'{{"ok":true,"uid":"{u["uid"]}","email":"{u["email"]}"}}', "utf-8")
+
+    # legacy helper cookie (ikke autoritativ identitet)
+    resp.set_cookie(
+        key="cg_uid",
+        value=uid,
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+    )
+
     return resp
 
 
@@ -101,15 +135,17 @@ def logout():
 
 @router.get("/me")
 def me(req: Request):
+    """
+    Patch 3E:
+    - /me bruker kun cg_auth (COOKIE_NAME) som source of truth.
+    - cg_uid kan eksistere, men ignoreres som identitet.
+    """
     raw = req.cookies.get(COOKIE_NAME)
     payload = verify_session(raw or "")
     if not payload:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # Return uid from session, and email from user store if present
     uid = payload["uid"]
     u = me_from_request(req)
-    # If cg_uid cookie missing or mismatch, still return uid from session (source of truth)
     email = (u or {}).get("email")
     return {"ok": True, "uid": uid, "email": email}
-

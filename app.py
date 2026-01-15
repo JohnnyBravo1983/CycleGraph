@@ -47,6 +47,11 @@ API_PORT = int(os.getenv("CG_API_PORT", "5179"))  # default 5179
 
 app = FastAPI(title="CycleGraph API", version="0.1.0")
 
+# ✅ PATCH: public global healthcheck (skal alltid være tilgjengelig)
+@app.get("/status", include_in_schema=False)
+def status():
+    return {"ok": True}
+
 # Inkluder routerne i app
 app.include_router(sessions.router)
 app.include_router(profile_router)
@@ -58,10 +63,11 @@ app.include_router(local_auth_router)          # B3.2: Inkluder lokal auth route
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        os.getenv("VITE_DEV_ORIGIN", "http://127.0.0.1:5173"),
-        "http://localhost:5173",
-        os.getenv("ALT_DEV_ORIGIN", "http://localhost:5173"),
-    ],
+    os.getenv("VITE_DEV_ORIGIN", "http://localhost:5173"),
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    os.getenv("ALT_DEV_ORIGIN", "http://localhost:5173"),
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,7 +108,7 @@ except Exception as e:
 
 REQUIRED_ENV_KEYS: List[str] = [
     "STRAVA_CLIENT_ID",
-    "STRAVA_CLIENT_SECRET", 
+    "STRAVA_CLIENT_SECRET",
     "STRAVA_REFRESH_TOKEN",
     "STRAVA_ACCESS_TOKEN",
     "STRAVA_TOKEN_EXPIRES_AT",
@@ -188,7 +194,7 @@ _HAS_COMPUTE_POWER_WITH_WIND: bool = False
 def _resolve_analyzer():
     """Finn beste tilgjengelige analyzer."""
     global _ANALYZER, _ANALYZER_MODE, _HAS_ANALYZE_WITH_PROFILE, _HAS_COMPUTE_POWER_WITH_WIND
-    
+
     if _ANALYZER is not None:
         return _ANALYZER
 
@@ -275,17 +281,17 @@ def _extract_streams(session: Dict[str, Any]):
         streams.get("pulses"),
         streams.get("hr"),
         (s.get("data") or {}).get("streams", {}).get("pulses")
-        if isinstance((s.get("data") or {}).get("streams", dict)) else None,
+        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
     velocity = _first_nonempty(
         streams.get("velocity_smooth"),
         (s.get("data") or {}).get("streams", {}).get("velocity_smooth")
-        if isinstance((s.get("data") or {}).get("streams", dict)) else None,
+        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
     altitude = _first_nonempty(
         streams.get("altitude"),
         (s.get("data") or {}).get("streams", {}).get("altitude")
-        if isinstance((s.get("data") or {}).get("streams", dict)) else None,
+        if isinstance((s.get("data") or {}).get("streams"), dict) else None,
     )
     device_watts = s.get("device_watts")
     if device_watts is None:
@@ -535,7 +541,7 @@ def health():
     if not CORE_IMPORT_OK:
         raise HTTPException(status_code=503, detail={
             "ok": False,
-            "reason": "core_import_failed", 
+            "reason": "core_import_failed",
             "error": CORE_IMPORT_ERROR,
         })
     dur = time.perf_counter() - _t0

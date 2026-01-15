@@ -95,8 +95,11 @@ export function StravaImportPanel() {
         {/* PATCH: send med ?next= slik at backend redirecter tilbake hit */}
         <button
           onClick={() => {
-            const next = encodeURIComponent(window.location.href);
-            window.open(`${cgApi.baseUrl()}/login?next=${next}`, "_self");
+          const nextRaw = `${window.location.origin}/onboarding`; // eller /dashboard avhengig av hvor du er
+          const url = `${cgApi.baseUrl()}/api/auth/strava/login?next=${encodeURIComponent(nextRaw)}`;
+          window.open(url, "_self");
+
+
           }}
           disabled={busy}
         >

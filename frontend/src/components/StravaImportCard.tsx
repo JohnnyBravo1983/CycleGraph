@@ -64,8 +64,12 @@ export function StravaImportCard() {
     // - Else: start OAuth, and come back to same page (next=...)
     if (tokenState === "valid") return;
 
-    const next = encodeURIComponent(window.location.href);
-    window.open(`${cgApi.baseUrl()}/login?next=${next}`, "_self");
+    const nextRaw = `${window.location.origin}/onboarding`;
+    const url = `${cgApi.baseUrl()}/api/auth/strava/login?next=${encodeURIComponent(nextRaw)}`;
+    window.open(url, "_self");
+
+
+
   }
 
   // Auto-check:

@@ -1,7 +1,7 @@
 // frontend/src/demo/demoRides.ts
 // Single source of truth for demo rides + progression summary.
 // Derived from your pipeline numbers (normalized + mapped).
-
+console.log("DEMO_RIDES_FILE_MARKER: demoRides.ts loaded v2");
 export interface DemoRide {
   id: string | number
   date: string // YYYY-MM-DD

@@ -21,8 +21,10 @@ def _repo_root() -> Path:
     # .../server/auth/local_auth.py -> repo root
     return Path(__file__).resolve().parents[2]
 
+
 def _users_dir() -> Path:
     return _repo_root() / "state" / "users"
+
 
 def _get_or_set_uid(req: Request, resp: Optional[Response] = None) -> str:
     uid = req.cookies.get("cg_uid")
@@ -41,12 +43,14 @@ def _get_or_set_uid(req: Request, resp: Optional[Response] = None) -> str:
         )
     return uid
 
+
 # -----------------------------------------------------------------------------
 # User storage (per-uid): state/users/<uid>/auth.json
 # -----------------------------------------------------------------------------
 
 def _auth_path(uid: str) -> Path:
     return _users_dir() / uid / "auth.json"
+
 
 def load_auth(uid: str) -> Optional[Dict[str, Any]]:
     p = _auth_path(uid)
@@ -57,10 +61,67 @@ def load_auth(uid: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
+
 def save_auth(uid: str, doc: Dict[str, Any]) -> None:
     p = _auth_path(uid)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# -----------------------------------------------------------------------------
+# Email index (global): state/users/_email_index.json
+# email (lowercased) -> uid
+# -----------------------------------------------------------------------------
+
+def _email_index_path() -> Path:
+    return _users_dir() / "_email_index.json"
+
+
+def _load_email_index() -> Dict[str, str]:
+    p = _email_index_path()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            # force str->str
+            out: Dict[str, str] = {}
+            for k, v in data.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    out[k] = v
+            return out
+        return {}
+    except Exception:
+        return {}
+
+
+def _save_email_index(idx: Dict[str, str]) -> None:
+    p = _email_index_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # best-effort atomic write
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(idx, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
+def get_uid_for_email(email: str) -> Optional[str]:
+    e = (email or "").strip().lower()
+    if not e:
+        return None
+    idx = _load_email_index()
+    uid = idx.get(e)
+    return uid if isinstance(uid, str) and uid else None
+
+
+def set_uid_for_email(email: str, uid: str) -> None:
+    e = (email or "").strip().lower()
+    if not e:
+        raise ValueError("Email is required.")
+    if not uid or not isinstance(uid, str):
+        raise ValueError("uid is required.")
+    idx = _load_email_index()
+    idx[e] = uid
+    _save_email_index(idx)
 
 
 # -----------------------------------------------------------------------------
@@ -70,8 +131,10 @@ def save_auth(uid: str, doc: Dict[str, Any]) -> None:
 
 _PBKDF2_ITERS = int(os.getenv("CG_PBKDF2_ITERS", "200000"))
 
+
 def _pad_b64(s: str) -> str:
     return s + "=" * ((4 - (len(s) % 4)) % 4)
+
 
 def hash_password(password: str) -> str:
     if not isinstance(password, str) or len(password) < 8:
@@ -83,6 +146,7 @@ def hash_password(password: str) -> str:
         base64.urlsafe_b64encode(salt).decode("ascii").rstrip("="),
         base64.urlsafe_b64encode(dk).decode("ascii").rstrip("="),
     )
+
 
 def verify_password(password: str, stored: str) -> bool:
     try:
@@ -106,12 +170,14 @@ def verify_password(password: str, stored: str) -> bool:
 
 COOKIE_NAME = os.getenv("CG_AUTH_COOKIE", "cg_auth")
 
+
 def _auth_secret() -> bytes:
     sec = os.getenv("CG_AUTH_SECRET", "").strip()
     if not sec:
         # dev fallback; sett i .env for stabilitet
         sec = "dev-insecure-secret-change-me"
     return sec.encode("utf-8")
+
 
 def sign_session(uid: str, ttl_seconds: int) -> str:
     exp = int(time.time()) + int(ttl_seconds)
@@ -121,6 +187,7 @@ def sign_session(uid: str, ttl_seconds: int) -> str:
     sig = hmac.new(_auth_secret(), payload_b64.encode("ascii"), hashlib.sha256).digest()
     sig_b64 = base64.urlsafe_b64encode(sig).decode("ascii").rstrip("=")
     return f"{payload_b64}.{sig_b64}"
+
 
 def verify_session(value: str) -> Optional[Dict[str, Any]]:
     try:
@@ -151,18 +218,34 @@ def verify_session(value: str) -> Optional[Dict[str, Any]]:
 def ensure_uid(req: Request, resp: Optional[Response] = None) -> str:
     return _get_or_set_uid(req, resp)
 
+
 def signup_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:
+    email_norm = (email or "").strip().lower()
+    if not email_norm or "@" not in email_norm:
+        raise ValueError("Invalid email.")
+
+    # Enforce unique email across all local users
+    existing_uid = get_uid_for_email(email_norm)
+    if existing_uid and existing_uid != uid:
+        raise ValueError("Email already registered.")
+
     existing = load_auth(uid)
     if existing and existing.get("password_hash"):
         raise ValueError("User already has local auth.")
+
     doc = {
         "uid": uid,
-        "email": (email or "").strip().lower(),
+        "email": email_norm,
         "password_hash": hash_password(password),
         "created_at": int(time.time()),
     }
     save_auth(uid, doc)
+
+    # ensure index points to this uid
+    set_uid_for_email(email_norm, uid)
+
     return {"uid": uid, "email": doc["email"]}
+
 
 def login_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:
     doc = load_auth(uid)
@@ -173,6 +256,14 @@ def login_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:
     if not verify_password(password, doc.get("password_hash") or ""):
         raise ValueError("Invalid credentials.")
     return {"uid": uid, "email": doc.get("email")}
+
+
+def login_by_email(email: str, password: str) -> Dict[str, Any]:
+    uid = get_uid_for_email(email)
+    if not uid:
+        raise ValueError("No local user for this email. Signup first.")
+    return login_for_uid(uid, email, password)
+
 
 def me_from_request(req: Request) -> Optional[Dict[str, Any]]:
     uid = req.cookies.get("cg_uid")

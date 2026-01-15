@@ -1,0 +1,636 @@
+CycleGraph Early Onboarding – 6 ukers sprintplan (FULLSTENDIG)
+Overordnet strategi
+Kritisk innsikt: Systemet har fungerende backend og analysepipeline. Hovedutfordringen er å bygge en kontrollert inngang som sikrer at fremmede brukere kan komme inn, identifiseres korrekt, og få sine data behandlet og lagret strukturert – med korrekt datafundament for senere leaderboards.
+Fire fundamentale problemer å løse:
+
+Autentisering eksisterer ikke – alle kommer inn ✅ LØST (Task 1.1-1.2)
+Brukeridentitet er uklar – onboarding fungerer for eier, men datakoblinger for nye brukere er uverifisert
+GDPR-grunnlag mangler – må etableres før fremmede brukere kommer inn
+Datafundament for aggregering – må være korrekt fra dag én
+
+
+Sprint 1 (Uke 1-2): Autentisering og brukeridentitet
+Mål: Ingen kommer inn uten gyldig login. Systemet vet hvem som er hvem. Datafundament for leaderboards er verifisert.
+Week 1: Backend auth foundation
+Task 1.1: Implementer reell autentiseringsmekanisme ✅ FULLFØRT
+
+Velg auth-strategi (JWT/session-based)
+Implementer backend auth middleware
+Koble til eksisterende user-tabell
+Sett opp password hashing (bcrypt/argon2)
+Implementer refresh token-mekanisme
+Avhengighet: Blokkerer alt annet arbeid
+Risiko: Høy – fundamentet for hele systemet
+Estimat: 16-24 timer
+Faktisk: CA 12T (estimat)
+
+Task 1.2: Sikre alle backend-endepunkter ✅ FULLFØRT
+
+Audit alle API-ruter (lag komplett liste)
+Legg til auth-guards på beskyttede endepunkter
+Verifiser at brukerdata kun returneres til riktig eier
+Implementer middleware for user context (req.user)
+Test med multiple brukerkontoer
+Avhengighet: Task 1.1
+Risiko: Middels – datasikkerhet
+Estimat: 8-12 timer
+Faktisk: ~ca8 timer (inkludert audit og fiksing av debug-endpoints)
+
+Task 1.3: Verifiser brukermodell og datastruktur [NESTE TASK]
+
+Audit filstruktur: users → profiles → strava_tokens → rides → analysis_results
+Sørg for konsistent user_id-kobling
+Verifiser at alle brukerdata er koblet til riktig uid
+Dokumenter datastrukturen (filbasert)
+Test med dummy data: opprett bruker, slett bruker, verifiser at alt forsvinner
+Avhengighet: Parallell med 1.1-1.2
+Risiko: Høy – hvis feil her, kollapser aggregering senere
+Estimat: 8-12 timer
+
+Task 1.4: Verifiser leaderboard-datafundament [KRITISK]
+
+Audit at alle relevante metrics lagres per ride:
+
+Basis: power, distance, elevation, duration, date, ride_type
+Avansert: normalized_power, TSS, intensity_factor, variability_index
+FTP-estimates og andre beregnede verdier
+
+
+Verifiser at datatyper er konsistente (ikke mix av string/int/float)
+Sjekk at nødvendige strukturer eksisterer for aggregering
+Test aggregeringsqueries:
+
+"Top 10 brukere etter total TSS siste 30 dager"
+"Top 10 FTP-estimates"
+"Top 10 longest rides"
+
+
+Dokumenter hvilke felter som er leaderboard-ready
+Identifiser manglende felter eller strukturer
+Avhengighet: Task 1.3
+Risiko: Høy – hvis feil må vi migrere data senere
+Estimat: 6-10 timer
+Output: Dokumentert liste over leaderboard-ready felter + eventuelle migrasjoner
+
+Week 2: Frontend auth implementation
+Task 1.5: Koble login-skjerm til auth backend [KRITISK]
+
+Implementer faktisk login-logikk (erstatt mock)
+Håndter auth tokens (lagring i httpOnly cookies eller localStorage)
+Implementer token refresh-logikk
+Implementer "remember me" hvis ønskelig
+Legg til feilhåndtering (feil passord, ukjent bruker, network errors)
+Håndter loading states
+Avhengighet: Task 1.1
+Risiko: Lav – straightforward implementasjon
+Estimat: 6-8 timer
+
+Task 1.6: Koble signup-skjerm til user creation [KRITISK]
+
+Implementer faktisk brukeropprettelse
+Valider input (email format, passordstyrke, required fields)
+Send til onboarding etter vellykket signup (ikke dashboard)
+Håndter duplikat-email med tydelig feilmelding
+Auto-login etter signup
+Avhengighet: Task 1.1
+Risiko: Lav
+Estimat: 6-8 timer
+
+Task 1.7: Implementer protected route-guards i frontend [KRITISK]
+
+Alle routes utenom /login og /signup krever autentisering
+Redirect til login hvis uautentisert
+Redirect til onboarding hvis ikke onboardet
+Håndter token expiry gracefully (refresh eller re-login)
+Bevar intended destination (redirect til /rides etter login hvis bruker prøvde å gå dit)
+Avhengighet: Task 1.5
+Risiko: Lav
+Estimat: 4-6 timer
+
+Task 1.8: Test auth-flyt med multiple testbrukere [KRITISK VALIDERING]
+
+Opprett 5 testkontoer med unike email/passord
+Verifiser at hver kun ser egne data (dashboard, rides, profile)
+Test logout/login-syklus
+Test concurrent sessions (samme bruker i to browsers)
+Test token expiry og refresh
+Test "wrong password" og andre error paths
+Dokumenter alle funnet bugs
+Avhengighet: Task 1.5, 1.6, 1.7
+Risiko: Lav – men kritisk validering
+Estimat: 4-6 timer
+
+Sprint 1 Total: 58-86 timer
+
+Sprint 2 (Uke 3): Onboarding og Strava-integrasjon
+Mål: Nye brukere kan fullføre onboarding og få sine rides analysert. Data lagres med korrekt user_id.
+Task 2.1: Verifiser onboarding-flyt for nye brukere [KRITISK]
+
+Test onboarding med fresh testbrukere (ikke eier)
+Verifiser at profile-data lagres korrekt med user_id (ikke hardkodet)
+Sjekk at Strava OAuth redirects til riktig bruker
+Audit kode for hardkodet owner-logikk (user_id=1, email="owner@...", etc.)
+Dokumenter alle steder hvor owner er hardkodet
+Generaliser hardkodet logikk til å bruke req.user.id
+Avhengighet: Task 1.8
+Risiko: Høy – onboarding "fungerer på eier" indikerer potensielt hardkodet logikk
+Estimat: 8-16 timer (kan være 8 hvis lite hardkodet, 16+ hvis mye refaktorering)
+
+Task 2.2: Generaliser Strava OAuth-flyt [KRITISK]
+
+Sikre at state-parameter i OAuth inneholder user_id (eller session identifier)
+Verifiser at callback kobler token til korrekt bruker (ikke eier)
+Test OAuth-flyt med multiple testbrukere med egne Strava-kontoer
+Håndter OAuth-feil:
+
+User denies access
+Network issues
+Expired/invalid authorization codes
+Strava API errors
+
+
+Implementer retry-logikk for transient errors
+Logg alle OAuth events (success, failure, user_id)
+Avhengighet: Task 2.1
+Risiko: Høy – feil her gir ghost data eller feil brukerkobling
+Estimat: 8-12 timer
+
+Task 2.3: Verifiser at rides importeres til riktig bruker [KRITISK]
+
+Trigger Strava sync for ny testbruker (ikke eier)
+Verifiser at rides lagres med korrekt user_id/athlete_id (sjekk filstruktur direkte)
+Sjekk at analysepipeline kjører for ny bruker
+Verifiser at analysis results kobles til riktig user_id
+Test at dashboard viser kun riktig brukers rides (ikke eiers eller andres)
+Test med multiple brukere som syncer samtidig
+Avhengighet: Task 2.2
+Risiko: Høy – kjernefunksjonalitet
+Estimat: 6-10 timer
+
+Task 2.4: Implementer onboarding → dashboard-overgang [VIKTIG]
+
+Tydelig UX-flyt fra fullført onboarding til dashboard
+Vis status mens første sync pågår ("Henter dine rides fra Strava...")
+Implementer progress indicator (hvis mulig)
+Håndter tom tilstand (ingen rides funnet på Strava)
+Gi brukeren mulighet til å manuelt trigger re-sync
+Avhengighet: Task 2.3
+Risiko: Lav
+Estimat: 4-6 timer
+
+Task 2.5: Test komplett signup → onboarding → første sync [KRITISK VALIDERING]
+
+Kjør full brukerreise 5 ganger med friske testkontoer og Strava-kontoer
+Dokumenter alle edge cases
+Logg tider (hvor lang tid tar signup? Onboarding? Første sync?)
+Test med varierende Strava-kontoer (0 rides, 10 rides, 1000+ rides)
+Verifiser at ingen data "lekker" mellom brukere
+Avhengighet: Task 2.4
+Risiko: Lav – men kritisk validering
+Estimat: 4-6 timer
+
+Sprint 2 Total: 30-50 timer
+
+Sprint 3 (Uke 4): GDPR og cookie consent
+Mål: Systemet overholder GDPR før fremmede brukere kommer inn.
+Task 3.1: Juridisk klargjøring [KRITISK, delvis utenfor tech scope]
+
+Identifiser hvilke data som lagres:
+
+PII: email, navn, fødselsdato(?), vekt, FTP
+Strava data: rides (GPS coordinates, power data, heart rate)
+Analytical data: beregnede metrics, FTP-estimates
+Metadata: login times, IP addresses(?), browser info(?)
+
+
+Avklar legal basis for hver datakategori (consent, legitimate interest, contract)
+Definer data retention policy (hvor lenge lagres data? Når slettes inaktive brukere?)
+Identifiser behov for cookie consent:
+
+Brukes analytics (Google Analytics, Plausible, etc.)?
+Brukes tracking cookies?
+Brukes third-party scripts?
+
+
+Dokumenter i skriftlig form (grunnlag for privacy policy)
+Avhengighet: Ingen
+Risiko: Middels – kan kreve ekstern juridisk rådgivning
+Estimat: 4-8 timer (hvis ingen advokat) eller 1-2 uker (hvis advokat involvert)
+Output: GDPR-dokument som styrer implementasjon
+
+Task 3.2: Implementer cookie consent-banner [KRITISK hvis ikke-essensielle cookies brukes]
+
+Avklar om banner er nødvendig basert på Task 3.1
+Hvis JA: Velg consent-løsning:
+
+Egen implementasjon (enklest hvis få cookies)
+Bibliotek som CookieBot, Osano (kostnad?)
+
+
+Implementer banner på alle sider før login
+Blokkér ikke-essensielle cookies til consent gis
+Lagre consent-status (filbasert eller localStorage)
+Implementer consent-management i profile (endre valg senere)
+Avhengighet: Task 3.1 (må vite hva som trenger consent)
+Risiko: Middels – kompleksitet avhenger av omfang
+Estimat: 6-12 timer (avhenger av løsning)
+
+Task 3.3: Lag privacy policy og terms of service [KRITISK]
+
+Skriv privacy policy som dekker:
+
+Hvilke data samles inn og hvorfor
+Hvordan data brukes
+Hvem data deles med (Strava, analytics-tjeneste?)
+Brukerrettigheter (innsyn, sletting, export)
+Kontaktinformasjon for data controller
+
+
+Skriv terms of service som dekker:
+
+Brukerbetingelser
+Ansvarsfraskrivelse
+Endringer i vilkår
+
+
+Få juridisk review (hvis mulig/nødvendig)
+Implementer checkboks i signup ("Jeg aksepterer ToS og Privacy Policy")
+Link til policy/terms fra footer på alle sider
+Avhengency: Task 3.1
+Risiko: Lav – men må være juridisk korrekt
+Estimat: 8-12 timer (skriving + implementasjon)
+
+Task 3.4: Implementer data deletion-endepunkt [KRITISK]
+
+Backend-endepunkt: DELETE /api/user/me (eller lignende)
+Implementer fullstendig sletting av brukerdata:
+
+state/users/<uid>/ (hele mappen)
+Rides i logs/results/ (hvis koblet til user)
+Sessions (hvis koblet til user)
+Auth data
+Profile data
+Strava tokens
+
+
+Test på testbrukere (verifiser at ALL data forsvinner)
+Håndter edge case: bruker har pågående sync
+Logg deletion events (hvem, når, eventuelt hvorfor)
+Dokumenter prosedyre for manual data deletion (hvis nødvendig)
+Avhengighet: Task 1.3 (må vite datastruktur)
+Risiko: Høy – GDPR-krav, må være feilfri
+Estimat: 6-10 timer
+
+Task 3.5: Implementer data export [KRITISK]
+
+Backend-endepunkt: GET /api/user/me/export
+Eksporter all brukerdata som JSON (eller CSV):
+
+Profile data
+All rides (inkludert GPS hvis lagret)
+All analysis results
+Strava connection status
+
+
+Strukturer data på menneskeleselig måte
+Test på testbrukere
+Vurder å sende som email attachment (hvis store datamengder)
+Avhengency: Task 1.3
+Risiko: Middels – GDPR-krav
+Estimat: 6-8 timer
+
+Task 3.6: Legg til GDPR-kontroller i profile-page [VIKTIG]
+
+"Last ned mine data"-knapp → trigger Task 3.5 endpoint
+"Slett min konto"-knapp → viser modal med bekreftelse → trigger Task 3.4 endpoint
+Link til privacy policy
+Hvis cookie consent: Link til endre consent-valg
+Følg demo-design hvis profile-page er dekket der
+Avhengency: Task 3.4, 3.5
+Risiko: Lav
+Estimat: 4-6 timer
+
+Sprint 3 Total: 34-56 timer
+
+Sprint 4 (Uke 5): Dashboard og rides – gjør demo levende
+Mål: Dashboard og rides ser ut og oppfører seg som demoen, med ekte data.
+Task 4.1: Audit demo vs live – dashboard [VIKTIG]
+
+Åpne demo og live side-by-side
+Screenshot og dokumenter alle avvik:
+
+Layout-forskjeller
+Manglende komponenter i live
+Forskjellig informasjonsarkitektur
+Avvikende farger/spacing/typography
+
+
+Prioriter avvik:
+
+CRITICAL: Mangler helt i live, nødvendig for brukbar UX
+NICE-TO-HAVE: Pene detaljer som kan vente
+
+
+Lag task-liste (kan være sub-tasks under 4.2)
+Avhengency: Ingen
+Risiko: Lav – kartlegging
+Estimat: 2-3 timer
+
+Task 4.2: Implementer demo-design i live dashboard [VIKTIG]
+
+Replikér layout fra demo (grid, flex, positioning)
+Replikér komponentstruktur fra demo (hvilke komponenter, i hvilken rekkefølge)
+Bruk samme informasjonsarkitektur som demo (hvilke data vises hvor)
+Implementer kun CRITICAL avvik fra Task 4.1
+Koble til eksisterende backend-data (rides, analysis results, profile)
+Verifiser at data vises korrekt for multiple testbrukere
+Avhengency: Task 4.1, Sprint 2 (data må være korrekt)
+Risiko: Middels – design-implementasjon kan være tidkrevende
+Estimat: 12-20 timer (avhenger av kompleksitet i demo)
+
+Task 4.3: Audit demo vs live – rides [VIKTIG]
+
+Samme prosess som Task 4.1, men for rides-siden
+Dokumenter avvik og prioriter
+Avhengency: Ingen
+Risiko: Lav
+Estimat: 2-3 timer
+
+Task 4.4: Implementer demo-design i live rides [VIKTIG]
+
+Samme prosess som Task 4.2, men for rides
+Replikér liste-visning, ride detail-visning, filters/sorting (hvis i demo)
+Koble til eksisterende backend-data
+Avhengency: Task 4.3
+Risiko: Middels
+Estimat: 10-16 timer
+
+Task 4.5: Håndter empty states [VIKTIG]
+
+Dashboard med ingen rides: vis relevant melding ("Koble til Strava for å se dine rides") og CTA
+Rides-side med ingen rides: samme
+Dashboard/rides mens første sync pågår: vis loading state
+Følg demo-design hvis dette er dekket der
+Avhengency: Task 4.2, 4.4
+Risiko: Lav
+Estimat: 3-4 timer
+
+Task 4.6: Test dashboard og rides med multiple testbrukere [KRITISK VALIDERING]
+
+Verifiser at hver bruker ser kun egne data (ingen "leakage")
+Test med varierende datamengder:
+
+0 rides (fresh user)
+1-5 rides (new cyclist)
+50+ rides (active cyclist)
+500+ rides (power user) – test performance
+
+
+Verifiser at alle metrics vises korrekt
+Test på ulike skjermstørrelser (desktop, tablet, mobil)
+Dokumenter bugs
+Avhengency: Task 4.2, 4.4
+Risiko: Lav – men kritisk validering
+Estimat: 4-6 timer
+
+Sprint 4 Total: 33-52 timer
+
+Sprint 5 (Uke 6): Profile-endring og polish
+Mål: Brukere kan endre profil uten å re-onboarde. System er stabilt nok for beta.
+Task 5.1: Implementer profile-redigering [VIKTIG]
+
+Tillat endring av:
+
+Navn
+FTP
+Weight
+Andre profildata (birthdate, gender, etc.)
+
+
+Lagre endringer uten å kreve ny onboarding
+Valider input (FTP > 0, weight > 0, etc.)
+Håndter backend-oppdatering (PATCH /api/profile/save)
+Gi bruker feedback (toast notification eller lignende)
+Følg demo-design hvis profile-edit er dekket der
+Avhengency: Sprint 1 (auth), Task 1.3 (datastruktur)
+Risiko: Middels – "endringer krever ny onboarding" tyder på tight coupling
+Estimat: 6-10 timer
+
+Task 5.2: Implementer Strava re-connection [VIKTIG]
+
+Tillat bruker å koble fra Strava (fjern token)
+Tillat bruker å koble til Strava på nytt (re-trigger OAuth)
+Håndter expired tokens gracefully (vis tydelig status: "Strava-tilkobling utløpt")
+Gi tydelig status på Strava-tilkobling i profile:
+
+✅ Tilkoblet (siste sync: timestamp)
+⚠️ Utløpt (koble til på nytt)
+❌ Ikke tilkoblet (koble til)
+
+
+Avhengency: Sprint 2 (Strava OAuth)
+Risiko: Middels
+Estimat: 4-6 timer
+
+Task 5.3: Implementer loading states og spinners [VIKTIG]
+
+Dashboard mens data lastes (skeleton screens eller spinner)
+Rides mens data lastes
+Onboarding mens Strava sync pågår (progress bar hvis mulig)
+Profile mens changes saves
+Login/signup mens autentisering pågår
+Følg demo-design for loading states
+Avhengency: Sprint 4
+Risiko: Lav
+Estimat: 4-6 timer
+
+Task 5.4: Implementer error handling og user feedback [VIKTIG]
+
+Feilmeldinger ved API-feil (network error, server error, validation error)
+Toast notifications for suksess/feil (eller annen feedback-mekanisme)
+Retry-logikk for transient errors (med user-facing retry button)
+Graceful degradation (hvis dashboard ikke laster, vis basic info)
+404-side for ukjente routes
+500-side for server errors
+Avhengency: Hele systemet
+Risiko: Lav – men kritisk for UX
+Estimat: 6-8 timer
+
+Task 5.5: End-to-end testing med eksterne testbrukere [KRITISK VALIDERING]
+
+Rekruttér 3-5 personer utenfor teamet (venner, familie, etc.)
+Gi dem minimal instruksjon ("Gå til [URL], sign up, og prøv å bruke appen")
+Observer og dokumenter problemer:
+
+Hvor stopper de opp?
+Hva er forvirrende?
+Hva fungerer ikke?
+
+
+Prioriter bugs:
+
+SHOWSTOPPER: Blokkerer bruk (må fikses før launch)
+CRITICAL: Alvorlig UX-problem (bør fikses før launch)
+MINOR: Små irritasjonsmomenter (kan vente)
+
+
+Fiks alle showstoppers
+Avhengency: Alle tidligere tasks
+Risiko: Lav – men kan avdekke uventede issues
+Estimat: 8-12 timer (inkludert fiksing av showstoppers)
+
+Task 5.6: Dokumentasjon for betabrukere [NICE-TO-HAVE]
+
+Kort "hvordan komme i gang"-guide (kan være in-app eller separat side)
+Known limitations ("Dette er beta, noen features mangler")
+Hvordan rapportere bugs (email, form, etc.)
+FAQ hvis nødvendige spørsmål dukker opp fra Task 5.5
+Avhengency: Task 5.5
+Risiko: Lav
+Estimat: 2-4 timer
+
+Task 5.7: Deployment og overvåkning [KRITISK]
+
+Deploy til production environment
+Sett opp error tracking (Sentry, Rollbar, eller lignende)
+Sett opp logging (strukturert logging av kritiske events):
+
+Auth events (signup, login, logout, failed login)
+Strava sync events (success, failure, data volume)
+GDPR events (data export, deletion)
+Errors (API errors, frontend crashes)
+
+
+Sett opp uptime monitoring (UptimeRobot, Pingdom, eller lignende)
+Sett opp alerts (email/Slack når errors spike)
+Avhengency: Task 5.5
+Risiko: Lav
+Estimat: 4-6 timer
+
+Sprint 5 Total: 34-52 timer
+
+Implisitte, men nødvendige tasks (løpende)
+Disse er ikke eksplisitte sprints, men må håndteres parallelt gjennom hele prosjektet:
+Infrastruktur og DevOps
+
+Database backup-strategi: Automatisk daglig backup av state/ directory (GDPR-kritisk: må kunne gjenopprette, men også slette)
+Staging environment: Separat miljø for testing før prod
+CI/CD pipeline: Automatisk testing og deployment
+Estimat: 8-12 timer (hvis ikke allerede på plass)
+
+File structure migrations
+
+Hvis datastruktur må endres (Task 1.3, 1.4), må migrations skrives og testes
+Migrasjon av eksisterende eier-data hvis nødvendig
+Estimat: 4-8 timer (hvis migrations nødvendig)
+
+Testing (automated)
+
+Unit tests for kritisk auth-logikk (password hashing, token generation)
+Integration tests for Strava OAuth flow
+End-to-end tests for brukerreiser (signup → onboarding → dashboard)
+Estimat: 12-20 timer (hvis comprehensive testing ønskes)
+Risiko: Kan kuttes hvis tidspress, men øker risiko for bugs
+
+Code review og refactoring
+
+Kontinuerlig code review (hvis team > 1 person)
+Refactoring av duplisert kode
+Estimat: Løpende, ~10-15% av total tid
+
+
+Avhengighetskart (kritisk path)
+CopySprint 1 (Auth + Data) → Sprint 2 (Onboarding) → Sprint 4 (UI) → Sprint 5 (Polish)
+         ↓
+    Task 1.4 (Leaderboard data) ────────────────────────────────→ (Fundament klar)
+         ↓
+    Sprint 3 (GDPR) ──────────────────────────────────────────→ Sprint 5 (Launch)
+Kritisk path: Sprint 1 → Sprint 2 → Sprint 5
+Parallel path: Sprint 3 kan starte tidlig (Task 3.1 kan starte dag 1), men må være ferdig før launch
+Data fundament: Task 1.4 må være ferdig tidlig for å unngå migrasjoner senere
+
+Timebudsjett (OPPDATERT med faktisk fra Sprint 1)
+SprintInnholdOriginal estimatJustert estimatSprint 1Auth + datamodell + leaderboard-fundament58-86 timer60-90 timer ✅Sprint 2Onboarding + Strava30-50 timer35-55 timerSprint 3GDPR (avhenger av juridisk arbeid)34-56 timer35-60 timerSprint 4Dashboard + rides UI33-52 timer35-55 timerSprint 5Profile edit + polish + testing34-52 timer35-55 timerImplisittDevOps, migrations, testing20-35 timer25-40 timerTOTAL209-331 timer225-355 timer
+Anbefalinger (justert etter Sprint 1)
+
+Best case: 225 timer (~5.5 uker fulltime)
+Realistisk: 290 timer (~7 uker fulltime)
+Worst case: 355 timer (~9 uker fulltime)
+
+Største usikkerheter:
+
+Task 2.1 (onboarding generalisering) – kan være 8 timer eller 24 timer
+Task 3.1 (juridisk arbeid) – kan kreve ekstern hjelp
+Task 4.2/4.4 (demo-implementering) – avhenger av kompleksitet
+Task 5.5 (ekstern testing) – kan avdekke showstoppers som krever ekstra tid
+
+Læring fra Sprint 1: Ting tar ~20% lenger enn "best case" estimat. Budsjetter derfor med realistisk/worst case.
+
+Status per nå
+✅ Fullført
+
+Task 1.1: Auth implementation (session-based, HttpOnly cookie)
+Task 1.2: API security (all endpoints protected, SSOT pattern)
+
+🔄 Neste opp
+
+Task 1.3: Verifiser datastruktur
+Task 1.4: Verifiser leaderboard-datafundament
+
+⏳ Gjenstående
+
+Sprint 1: Tasks 1.3-1.8 (~30-50 timer)
+Sprint 2-5: ~160-265 timer
+
+
+Out of scope (eksplisitt)
+
+❌ Leaderboards (funksjonalitet og UI) – kun datafundament
+❌ Trends (funksjonalitet)
+❌ Set Goals (funksjonalitet)
+❌ Redesign av eksisterende demokomponenter
+❌ Nye features utover early onboarding
+❌ Advanced analytics UI
+❌ Social features
+❌ Payment/subscription
+❌ Mobile app
+❌ Advanced admin panel
+
+
+Definition of Done: Early Onboarding
+Systemet er klart for early onboarding når:
+Autentisering
+✅ En fremmed bruker kan sign up med email/passord
+✅ Brukeren kan logge inn og blir husket
+✅ Kun autentiserte brukere har tilgang til protected routes
+✅ Testbrukere ser kun egne data (ingen data leakage)
+Onboarding
+⏳ Brukeren kan fullføre onboarding (profil + Strava OAuth)
+⏳ Onboarding fungerer for nye brukere (ikke bare eier)
+⏳ Brukerens Strava-konto kobles til riktig user_id
+Data
+⏳ Brukerens rides importeres og analyseres
+⏳ Alle rides lagres med korrekt user_id
+⏳ Dashboard viser brukerens egne rides (ikke andres)
+⏳ Rides-siden viser brukerens rides
+⏳ Leaderboard-datafundament er verifisert (aggregeringsqueries fungerer)
+Profile
+⏳ Brukeren kan endre profil (FTP, weight, etc.) uten re-onboarding
+⏳ Brukeren kan koble fra og til Strava på nytt
+GDPR
+⏳ Cookie consent er implementert (hvis relevant)
+⏳ Privacy policy og ToS er på plass og aksepteres ved signup
+⏳ Brukeren kan eksportere sine data
+⏳ Brukeren kan slette sin konto (inkludert all data)
+UX
+⏳ Dashboard matcher demo-design (kritiske avvik fikset)
+⏳ Rides matcher demo-design (kritiske avvik fikset)
+⏳ Loading states er implementert
+⏳ Error handling og user feedback fungerer
+Testing og deployment
+⏳ Systemet er testet med 5+ eksterne testbrukere
+⏳ Showstoppers fra ekstern testing er fikset
+⏳ Error tracking og logging er på plass
+⏳ Systemet er deployed til production
+
+Neste steg: Task 1.3 – Verifiser datastruktur 🚀
