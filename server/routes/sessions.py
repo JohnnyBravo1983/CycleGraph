@@ -905,19 +905,90 @@ def _extract_start_time_from_samples(samples: list) -> str | None:
 
 # ==================== ORIGINAL HELPER FUNCTIONS ====================
 
-def _load_result_doc(session_id: str) -> Optional[Dict[str, Any]]:
+def _load_result_doc(base_dir: str, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
     """
-    Prøv å laste analysert resultat for en gitt økt/ride_id.
-    1) _debug/result_<id>.json (fasit fra scriptet)
-    2) logs/results/result_<id>.json (fallback/skall)
+    Laster analysert resultat for en gitt session_id, men kun hvis session_id tilhører user_id
+    iht. SSOT: state/users/<uid>/sessions_index.json.
+
+    Kandidater (etter SSOT-check):
+      1) _debug/result_<id>.json (fasit fra scriptet)
+      2) logs/results/result_<id>.json (fallback/skall)
     """
+    # 0) SSOT ownership gate (KRITISK)
+    try:
+        from server.user_state import load_user_sessions_index, maybe_bootstrap_demo_sessions
+        maybe_bootstrap_demo_sessions(base_dir, user_id)
+        idx = load_user_sessions_index(base_dir, user_id) or {}
+        allowed = {
+            str(s.get("id"))
+            for s in (idx.get("sessions") or [])
+            if isinstance(s, dict) and s.get("id") is not None
+        }
+        if str(session_id) not in allowed:
+            return None
+    except Exception:
+        # Fail-closed: hvis vi ikke klarer å verifisere eierskap, skal vi ikke returnere data.
+        return None
+
     candidates: list[str] = []
+    candidates.append(os.path.join(base_dir, "_debug", f"result_{session_id}.json"))
+    candidates.append(os.path.join(base_dir, "logs", "results", f"result_{session_id}.json"))
 
-    # 1) Script/analysis sin _debug-mappe (fasit hvis den finnes)
-    candidates.append(os.path.join(DEBUG_DIR, f"result_{session_id}.json"))
-    # 2) Standard result-mappe som fallback
-    candidates.append(os.path.join(RESULTS_DIR, f"result_{session_id}.json"))
+        # --- SSOT ownership gate (fail-closed) ---
+    try:
+        # Hent SSOT (sessions_index.json) og bygg set med tillatte ride_ids
+        from server.user_state import load_user_sessions_index
 
+        idx = load_user_sessions_index(base_dir, str(user_id)) or {}
+        allowed: set[str] = set()
+
+        if isinstance(idx, dict):
+            sessions = idx.get("sessions")
+            rides = idx.get("rides")
+            ids = idx.get("ids")
+
+            def _add(v: Any) -> None:
+                if not v:
+                    return
+                s = str(v).strip()
+                # hard fail: kun digits er gyldig session_id
+                if s.isdigit():
+                    allowed.add(s)
+
+            if isinstance(sessions, list):
+                for item in sessions:
+                    if isinstance(item, dict):
+                        _add(item.get("id") or item.get("ride_id") or item.get("session_id"))
+                    else:
+                        _add(item)
+            if isinstance(rides, list):
+                for item in rides:
+                    if isinstance(item, dict):
+                        _add(item.get("id") or item.get("ride_id") or item.get("session_id"))
+                    else:
+                        _add(item)
+            if isinstance(ids, list):
+                for item in ids:
+                    _add(item)
+        elif isinstance(idx, list):
+            for item in idx:
+                if isinstance(item, dict):
+                    v = item.get("id") or item.get("ride_id") or item.get("session_id")
+                    if v and str(v).strip().isdigit():
+                        allowed.add(str(v).strip())
+                else:
+                    s = str(item).strip()
+                    if s.isdigit():
+                        allowed.add(s)
+
+        sid = str(session_id).strip()
+        if not sid.isdigit() or sid not in allowed:
+            return None
+    except Exception:
+        # fail-closed: hvis SSOT ikke kan lastes, ikke les resultfiler
+        return None
+
+    # --- Now safe to read result files ---
     for path in candidates:
         if not os.path.exists(path):
             continue
@@ -930,13 +1001,16 @@ def _load_result_doc(session_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+
 def _ride_id_from_result_path(path: str) -> str:
     """
     Fallback: hent ride_id fra filnavnet, f.eks.
       logs/results/result_16127771071.json -> "16127771071"
+
+    SECURITY: kun numeriske session_id er gyldige.
     """
     base = os.path.basename(path)
-    m = re.match(r"result_(.+)\.json$", base)
+    m = re.match(r"^result_(\d+)(?:__.+)?\.json$", base)
     if m:
         return m.group(1)
     return ""
@@ -963,17 +1037,10 @@ def list_sessions(
     index_path = os.path.join(
         os.getcwd(), "state", "users", str(user_id), "sessions_index.json"
     )
-
-    # NEW: sikre at index eksisterer (ny bruker = tom index)
+        # Hvis index ikke finnes: returner tom liste (IKKE opprett fil her).
+    # Viktig for cascading delete: vi skal ikke "resurrecte" slettede brukere ved en GET.
     if not os.path.exists(index_path):
-        try:
-            os.makedirs(os.path.dirname(index_path), exist_ok=True)
-            with open(index_path, "w", encoding="utf-8") as f:
-                json.dump({"sessions": []}, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
         return rows
-
 
     try:
         with open(index_path, "r", encoding="utf-8") as f:
@@ -1032,7 +1099,9 @@ def list_sessions(
     for ride_id in ride_ids:
         try:
             # Bruk samme logikk som /sessions/{id} for å hente analysert resultat
-            result_doc = _load_result_doc(str(ride_id))
+            base_dir = os.getcwd()
+            result_doc = _load_result_doc(base_dir, str(user_id), str(ride_id))
+
             if not result_doc:
                 continue
 

@@ -16,7 +16,8 @@ Task 1.1: Implementer reell autentiseringsmekanisme ✅ FULLFØRT
 
 Velg auth-strategi (JWT/session-based)
 Implementer backend auth middleware
-Koble til eksisterende user-tabell
+Startet 13 januar
+oble til eksisterende user-tabell 
 Sett opp password hashing (bcrypt/argon2)
 Implementer refresh token-mekanisme
 Avhengighet: Blokkerer alt annet arbeid
@@ -24,7 +25,7 @@ Risiko: Høy – fundamentet for hele systemet
 Estimat: 16-24 timer
 Faktisk: CA 12T (estimat)
 
-Task 1.2: Sikre alle backend-endepunkter ✅ FULLFØRT
+Task 1.2: Sikre alle backend-endepunkter ✅ FULLFØRT 14 Januar
 
 Audit alle API-ruter (lag komplett liste)
 Legg til auth-guards på beskyttede endepunkter
@@ -34,8 +35,8 @@ Test med multiple brukerkontoer
 Avhengighet: Task 1.1
 Risiko: Middels – datasikkerhet
 Estimat: 8-12 timer
-Faktisk: ~ca8 timer (inkludert audit og fiksing av debug-endpoints)
-
+Faktisk: ~ca12 timer (inkludert audit og fiksing av debug-endpoints)
+Fulført 15 januar
 Task 1.3: Verifiser brukermodell og datastruktur [NESTE TASK]
 
 Audit filstruktur: users → profiles → strava_tokens → rides → analysis_results
@@ -46,6 +47,8 @@ Test med dummy data: opprett bruker, slett bruker, verifiser at alt forsvinner
 Avhengighet: Parallell med 1.1-1.2
 Risiko: Høy – hvis feil her, kollapser aggregering senere
 Estimat: 8-12 timer
+Fulført 15 januar  på 4 timer 
+
 
 Task 1.4: Verifiser leaderboard-datafundament [KRITISK]
 

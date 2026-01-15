@@ -56,8 +56,17 @@ def maybe_bootstrap_demo_sessions(base_dir: str, uid: str) -> None:
     Hvis CG_DEMO_BOOTSTRAP=1 og user mangler sessions_index.json,
     kopier global state/sessions_index.json -> state/users/<uid>/sessions_index.json
     og stamp uid på alle items slik at eiersjekk fungerer.
+
+    Viktig (Task 1.3 / cascading delete):
+    - Denne funksjonen skal ALDRI "resurrecte" en slettet bruker ved å opprette state/users/<uid>/.
+    - Vi bootstrapper kun hvis user_dir allerede finnes (dvs. brukeren eksisterer i state).
     """
     if os.getenv("CG_DEMO_BOOTSTRAP", "").strip() != "1":
+        return
+
+    # FAIL-CLOSED: ikke opprett user-dir på read-endpoints
+    u_dir = user_dir(base_dir, uid)
+    if not os.path.isdir(u_dir):
         return
 
     u_path = user_sessions_index_path(base_dir, uid)
@@ -66,15 +75,13 @@ def maybe_bootstrap_demo_sessions(base_dir: str, uid: str) -> None:
 
     g_path = os.path.join(base_dir, "state", "sessions_index.json")
     if not os.path.exists(g_path):
-        # Ingen global index å bootstrappe fra
-        save_user_sessions_index(base_dir, uid, {"sessions": []})
+        # Ingen global index å bootstrappe fra (og vi skal ikke skrive en tom index her)
         return
 
     try:
         with open(g_path, "r", encoding="utf-8-sig") as f:
             g = json.load(f)
     except Exception:
-        save_user_sessions_index(base_dir, uid, {"sessions": []})
         return
 
     sessions: List[Dict[str, Any]] = []
@@ -87,4 +94,5 @@ def maybe_bootstrap_demo_sessions(base_dir: str, uid: str) -> None:
     for it in sessions:
         it["uid"] = uid
 
+    # OK å skrive nå, siden user_dir allerede eksisterer
     save_user_sessions_index(base_dir, uid, {"sessions": sessions})
