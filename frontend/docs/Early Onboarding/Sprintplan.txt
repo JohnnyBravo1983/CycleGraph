@@ -90,6 +90,8 @@ Håndter loading states
 Avhengighet: Task 1.1
 Risiko: Lav – straightforward implementasjon
 Estimat: 6-8 timer
+Fulført 16 Januar Brukte ca4 timer
+
 
 Task 1.6: Koble signup-skjerm til user creation [KRITISK]
 

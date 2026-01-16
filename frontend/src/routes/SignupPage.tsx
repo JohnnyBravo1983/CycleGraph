@@ -1,11 +1,10 @@
 // frontend/src/routes/SignupPage.tsx
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { cgApi } from "../lib/cgApi";
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [fullName, setFullName] = useState("");
   const [bikeName, setBikeName] = useState("");
@@ -36,20 +35,24 @@ export default function SignupPage() {
     [submitting, fullName, bikeName, email, password, consent]
   );
 
-  async function ensureLoggedInAfterSignup() {
-    // If backend signup sets cookie -> this will be 200 right away.
-    // If not, we try login once.
-    try {
-      await cgApi.profileGet();
-      return;
-    } catch (e) {
-      const msg = String((e as any)?.message ?? "");
-      if (!msg.includes("401")) throw e;
+  function mapSignupError(err: unknown): string {
+    const anyErr = err as any;
+
+    // ApiError from cgApi (has .status)
+    const status = typeof anyErr?.status === "number" ? (anyErr.status as number) : null;
+
+    if (status === 409) return "E-post er allerede i bruk. Prøv å logge inn.";
+    if (status === 400) return "Ugyldige felt. Sjekk e-post og passord (minst 8 tegn).";
+
+    const msg = String(anyErr?.message ?? err ?? "");
+    if (!msg) return "Ukjent feil ved registrering";
+
+    // Slightly nicer network message
+    if (msg.toLowerCase().includes("failed to fetch")) {
+      return "Kunne ikke kontakte server. Sjekk at backend kjører.";
     }
 
-    // Try explicit login fallback (some backends don't auto-login on signup)
-    await cgApi.authLogin(email.trim(), password);
-    await cgApi.profileGet(); // must succeed now
+    return msg;
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -63,19 +66,16 @@ export default function SignupPage() {
 
     setSubmitting(true);
     try {
-      // 1) Create account in backend (must exist for real auth)
+      // 1) Create account in backend
       await cgApi.authSignup(email.trim(), password);
 
-      // 2) Ensure session is established (cookie set + sent)
-      await ensureLoggedInAfterSignup();
+      // 2) Verify session is established (DoD: /api/auth/me -> 200)
+      await cgApi.authMe();
 
-      // 3) Continue to onboarding. Keep "next" if present.
-      const params = new URLSearchParams(location.search);
-      const next = params.get("next");
-      navigate(next || "/onboarding", { replace: true });
+      // 3) Redirect explicitly to onboarding (Task 1.6 scope)
+      navigate("/onboarding", { replace: true });
     } catch (err) {
-      const msg = String((err as any)?.message ?? err);
-      setError(msg || "Ukjent feil ved registrering");
+      setError(mapSignupError(err));
     } finally {
       setSubmitting(false);
     }
@@ -96,9 +96,7 @@ export default function SignupPage() {
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Fullt navn
-          </label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Fullt navn</label>
           <input
             className="w-full rounded-xl border px-3 py-2"
             value={fullName}
@@ -109,9 +107,7 @@ export default function SignupPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Sykkelnavn
-          </label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Sykkelnavn</label>
           <input
             className="w-full rounded-xl border px-3 py-2"
             value={bikeName}
@@ -121,9 +117,7 @@ export default function SignupPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            E-post
-          </label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">E-post</label>
           <input
             className="w-full rounded-xl border px-3 py-2"
             value={email}

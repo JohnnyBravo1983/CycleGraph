@@ -147,6 +147,19 @@ function normalizeListAll(json: unknown): SessionListItem[] {
   return [];
 }
 
+// ✅ PATCH 1 — cgApi: legg til ApiError (typed error for 409/400/etc)
+class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(status: number, message: string, detail?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   // ✅ PATCH: bruk apiUrl() for å unngå absolutt URL i dev (cookies)
   const url = apiUrl(path);
@@ -179,7 +192,8 @@ async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promi
       (text ? text : null) ||
       `HTTP ${res.status} ${res.statusText}`;
 
-    throw new Error(msg);
+    // ✅ throw typed error so UI can map 409/400/etc
+    throw new ApiError(res.status, msg, json);
   }
 
   // hvis server svarer tomt men OK
@@ -246,6 +260,11 @@ async function authLogin(email: string, password: string): Promise<void> {
   });
 }
 
+// ✅ PATCH 1: authMe() (DoD) — GET /api/auth/me
+async function authMe(): Promise<unknown> {
+  return cgFetchJson<unknown>("/api/auth/me", { method: "GET" });
+}
+
 export const cgApi = {
   baseUrl: () => baseUrl(),
 
@@ -266,9 +285,10 @@ export const cgApi = {
     return normalizeListAll(json);
   },
 
-  // ✅ AUTH (NYTT)
+  // ✅ AUTH
   authSignup,
   authLogin,
+  authMe,
 
   // ✅ PATCH 1: eksporter profileGet
   profileGet,
