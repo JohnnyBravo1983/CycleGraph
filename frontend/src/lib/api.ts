@@ -24,7 +24,10 @@ const FETCH_WITH_COOKIES = {
  * Sørger for at ALLE fetch-kall i denne fila alltid inkluderer cookies.
  * (Dette er patchen du ba om, men gjort én gang og riktig.)
  */
-async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+async function apiFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {}
+): Promise<Response> {
   return fetch(input, {
     ...init,
     credentials: "include", // ✅ PATCH – SEND COOKIE (overstyrer evt. feil/utelatt credentials)
@@ -53,7 +56,9 @@ function buildApiUrl(base: string, pathStartingWithApi: string): URL {
 
   // Sørg for trailing slash i base når vi bruker URL-konstruktør med relativ path
   const baseForUrl = b.endsWith("/") ? b : `${b}/`;
-  const rel = effectivePath.startsWith("/") ? effectivePath.slice(1) : effectivePath;
+  const rel = effectivePath.startsWith("/")
+    ? effectivePath.slice(1)
+    : effectivePath;
 
   return new URL(rel, baseForUrl);
 }
@@ -193,40 +198,40 @@ function adaptBackendSession(raw: unknown): any {
       typeof r.schema_version === "string"
         ? r.schema_version
         : typeof metrics.schema_version === "string"
-        ? metrics.schema_version
-        : typeof debug.schema_version === "string"
-        ? debug.schema_version
-        : "0.0.0",
+          ? metrics.schema_version
+          : typeof debug.schema_version === "string"
+            ? debug.schema_version
+            : "0.0.0",
 
     // 2) gjennomsnittspuls – prøv flere steder, default null
     avg_hr:
       typeof r.avg_hr === "number"
         ? r.avg_hr
         : typeof metrics.avg_hr === "number"
-        ? metrics.avg_hr
-        : typeof debug.avg_hr === "number"
-        ? debug.avg_hr
-        : null,
+          ? metrics.avg_hr
+          : typeof debug.avg_hr === "number"
+            ? debug.avg_hr
+            : null,
 
     // 3) calibrated må være boolean for Zod → default false hvis ikke satt
     calibrated:
       typeof r.calibrated === "boolean"
         ? r.calibrated
         : typeof metrics.calibrated === "boolean"
-        ? metrics.calibrated
-        : false,
+          ? metrics.calibrated
+          : false,
 
     // 4) status – prøv noen fallback-kilder
     status:
       typeof r.status === "string"
         ? r.status
         : typeof metrics.status === "string"
-        ? metrics.status
-        : typeof debug.status === "string"
-        ? debug.status
-        : typeof r.source === "string"
-        ? r.source
-        : "ok",
+          ? metrics.status
+          : typeof debug.status === "string"
+            ? debug.status
+            : typeof r.source === "string"
+              ? r.source
+              : "ok",
 
     // 5) watts – Sprint 3 strict: ingen metrics-fallback i UI-kontrakt
     watts: Array.isArray(r.watts) ? r.watts : null,
@@ -306,7 +311,9 @@ export async function fetchSession(
   if (id === "mock") {
     console.warn("[API] fetchSession → bruker mockSession (id === 'mock')");
 
-    const raw = shouldSimulateInvalid() ? invalidateSchemaForTest(mockSession) : mockSession;
+    const raw = shouldSimulateInvalid()
+      ? invalidateSchemaForTest(mockSession)
+      : mockSession;
 
     const parsed = safeParseSession(raw);
     if (!parsed.ok) {
@@ -335,7 +342,8 @@ export async function fetchSession(
     console.error("[API] fetchSession (LIVE) mangler VITE_BACKEND_URL for id=", id);
     return {
       ok: false,
-      error: "Mangler backend-konfigurasjon (VITE_BACKEND_URL). Kan ikke hente økten fra server.",
+      error:
+        "Mangler backend-konfigurasjon (VITE_BACKEND_URL). Kan ikke hente økten fra server.",
       source: "live",
     };
   }
@@ -449,13 +457,16 @@ export type SessionListItem = {
 
 // PATCH: Replace fetchSessionsList() komplett
 export async function fetchSessionsList(): Promise<SessionListItem[]> {
-  // NB: fallback for safety (slik patchen din foreslår)
-  const base = normalizeBase(BASE) ?? "http://localhost:5175";
-  const url = buildApiUrl(base, "/api/sessions/list/all");
-  console.log("[API] fetchSessionsList →", url.toString());
+  // ✅ PATCH 2 (KRITISK): dev = same-origin via Vite proxy, prod = absolutt base hvis mulig
+  const url =
+    import.meta.env.MODE !== "production"
+      ? "/api/sessions/list/all"
+      : buildApiUrl(normalizeBase(BASE) ?? "", "/api/sessions/list/all").toString();
+
+  console.log("[API] fetchSessionsList →", url);
 
   // ✅ PATCH: dette fetch-kallet går via apiFetch → credentials: "include" alltid med
-  const res = await apiFetch(url.toString(), {
+  const res = await apiFetch(url, {
     method: "GET",
   });
 
@@ -474,8 +485,8 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
   const rows: unknown[] = Array.isArray(json)
     ? json
     : Array.isArray((json as any)?.value)
-    ? ((json as any).value as unknown[])
-    : [];
+      ? ((json as any).value as unknown[])
+      : [];
 
   if (!Array.isArray(rows)) {
     console.warn(
@@ -510,14 +521,14 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
         typeof rec.distance_km === "number"
           ? rec.distance_km
           : rec.distance_km != null
-          ? Number(rec.distance_km)
-          : null,
+            ? Number(rec.distance_km)
+            : null,
       precision_watt_avg:
         typeof rec.precision_watt_avg === "number"
           ? rec.precision_watt_avg
           : rec.precision_watt_avg != null
-          ? Number(rec.precision_watt_avg)
-          : null,
+            ? Number(rec.precision_watt_avg)
+            : null,
       profile_label: rec.profile_label != null ? String(rec.profile_label) : null,
       weather_source: rec.weather_source != null ? String(rec.weather_source) : null,
     });

@@ -93,9 +93,18 @@ function buildApiUrl(base: string, pathStartingWithApi: string): URL {
   return new URL(rel, baseForUrl);
 }
 
-// ✅ liten helper så patchen kan bruke baseUrl() uten å være avhengig av cgApi-objektet
+// ✅ PATCH: dev/test bruker Vite proxy => same-origin (/api/...)
 function baseUrl(): string {
-  return normalizeBase(BASE) ?? "http://localhost:5175";
+  // Dev/test: bruk Vite proxy => same-origin (/api/...)
+  if (import.meta.env.MODE !== "production") return "";
+  return normalizeBase(BASE) ?? "";
+}
+
+// ✅ PATCH: trygg URL-builder som håndterer base="" (same-origin)
+function apiUrl(pathStartingWithApi: string): string {
+  const base = baseUrl();
+  if (!base) return pathStartingWithApi; // "/api/..." same-origin via Vite proxy
+  return buildApiUrl(base, pathStartingWithApi).toString();
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -139,10 +148,10 @@ function normalizeListAll(json: unknown): SessionListItem[] {
 }
 
 async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const base = normalizeBase(BASE) ?? "http://localhost:5175";
-  const url = buildApiUrl(base, path);
+  // ✅ PATCH: bruk apiUrl() for å unngå absolutt URL i dev (cookies)
+  const url = apiUrl(path);
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     ...init,
     credentials: "include", // ✅ KRITISK: alltid cookie
     headers: {
@@ -177,12 +186,11 @@ async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promi
   return (json ?? null) as T;
 }
 
-// ✅ PATCH 1: implementer profileGet() i samme stil (bruker buildApiUrl + include cookies)
+// ✅ PATCH 1: implementer profileGet() i samme stil (bruker apiUrl + include cookies)
 async function profileGet(): Promise<ProfileGetResp> {
-  const base = normalizeBase(BASE) ?? "http://localhost:5175";
-  const url = buildApiUrl(base, "/api/profile/get");
+  const url = apiUrl("/api/profile/get");
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method: "GET",
     credentials: "include",
     headers: {
@@ -200,11 +208,10 @@ async function profileGet(): Promise<ProfileGetResp> {
 
 // ✅ PATCH: profileSave() (SSOT -> backend)
 async function profileSave(body: ProfileSaveBody): Promise<ProfileSaveResp> {
-  const base = baseUrl();
-  const url = buildApiUrl(base, "/api/profile/save");
-  console.log("[cgApi] profileSave →", url.toString(), body);
+  const url = apiUrl("/api/profile/save");
+  console.log("[cgApi] profileSave →", url, body);
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method: "PUT",
     credentials: "include",
     headers: { "Content-Type": "application/json", Accept: "application/json" },

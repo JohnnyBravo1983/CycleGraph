@@ -146,20 +146,109 @@ Data Isolation Verification
 
 ✅ SSOT-pattern forhindrer cross-user data leakage
 
-markdown
-Kopier kode
+---
+
+## Task 1.4 – Leaderboard Data Foundation (Summary)
+
+Formål:  
+Verifisere at eksisterende lagrede data er egnet for fremtidige leaderboards
+og aggregeringer. Tasken er utført som read-only audit uten endringer i ingest,
+backend eller frontend.
+
+Status:
+- `sessions_index.json` fungerer som Single Source of Truth (SSOT) for
+  session-eierskap per bruker
+- Resultatdata (`result_<ride_id>.json`) er strukturelt og typemessig konsistente
+- `start_time` er stabilt tidsfelt (ISO-8601 UTC) og kan brukes til
+  tidsfiltrering og gruppering
+- `precision_watt_avg` er verifisert som aggregerbar metric
+  (Top-N, år-for-år, trend)
+
+Identifiserte begrensninger (ikke løst her):
+- Enkelte entries i `sessions_index.json` mangler tilhørende resultatfil
+  (placeholders / mistenkelig ride_id)
+- Store arrays (`watts`, `v_rel`, `wind_rel`) er ikke direkte leaderboard-egnet
+- `tss` ga 0 ved aggregering (enten ikke brukt eller ikke lagret i resultatene)
+
+Detaljert audit og full metric-inventar er dokumentert i:
+`docs/sprint1/task_1_4_leaderboard_data_foundation.md`
 
 ---
 
-### Kort vurdering
-Dette dokumentet er nå:
+## Notes for Future Sprints (Important)
 
-- 📘 **Lesbart for andre utviklere**
-- 🔍 **Revisjons- og GDPR-klart**
-- 🧩 **Konsistent med Task 1.1–1.3**
-- 🚀 Klart som grunnlag for **Task 1.4** og **Task 3**
+- `sessions_index.json` er kontrakt og eneste autoritative kilde for
+  session-eierskap
+- Fremtidig kode må tåle rides uten tilhørende `result_<ride_id>.json`
+- Arrays (`watts`, `v_rel`, `wind_rel`) må aggregeres eksplisitt før
+  leaderboard-bruk
+- Løsningen forutsetter single-process filbasert state frem til eventuell
+  database-migrasjon
+Task 1.5 – Frontend Login Integration (Auth)
 
-Si ifra hvis du vil at vi:
-- forkorter teksten ytterligere
-- tilpasser språket til ekstern revisjon
-- eller går rett videre til neste task
+Formål:
+Koble frontend login-skjerm til eksisterende session-baserte auth-endepunkter
+i backend. Erstatte mock-login med ekte autentisering og verifisere
+session-cookie-basert innlogging fra browser.
+
+Status:
+Login-skjerm kaller ekte backend (/api/auth/login)
+Session etableres via HttpOnly cookie (cg_auth)
+Innlogging verifiseres eksplisitt via /api/auth/me
+Bruker navigeres først etter bekreftet session
+Implementasjon (Frontend):
+Login utføres via:
+POST /api/auth/login
+credentials: "include" for cookie-basert auth
+Etter vellykket login:
+GET /api/auth/me brukes som autoritativ verifikasjon
+200 OK indikerer gyldig session
+Ingen tokens lagres i localStorage eller JS-state
+All auth-state styres server-side via cookie
+Feilhåndtering:
+Feil passord:
+Backend returnerer 401 Unauthorized
+
+Frontend viser feilmelding (“invalid credentials”)
+Ingen navigasjon eller session-opprettelse
+
+Nettverksfeil:
+Exceptions fanges
+Bruker får tydelig feiltilstand
+Dobbelt-submit forhindres via loading state
+UX / Brukerflyt:
+Login-knapp deaktiveres under pågående request
+Loading state vises under autentisering
+Navigasjon skjer først etter bekreftet session
+Refresh av siden bevarer innlogging (cookie-basert)
+
+Testing Evidence:
+Verifisert via:
+Browser (Network-tab + cookies)
+Backend-logger (Uvicorn)
+Manuell feil-/suksesstest
+Testede scenarier:
+Feil passord → 401 Unauthorized
+Riktig passord → 200 OK + session-cookie
+GET /api/auth/me → 200 OK etter login
+Refresh side → session persisterer
+Beskyttede endepunkter tilgjengelige etter login
+Avgrensning (Bevisst ikke inkludert):
+Signup-flow (Task 1.6)
+Route guards i frontend (Task 1.7)
+Token refresh (ikke relevant for session-auth)
+OAuth (Strava) login-flow
+Design/UX-polish utover nødvendig feedback
+
+Konklusjon:
+Task 1.5 bekrefter at frontend er korrekt integrert med backend sin
+session-baserte autentiseringsmodell. Løsningen er konsistent med
+Task 1.1–1.2, følger HttpOnly cookie-prinsippet og gir et sikkert og
+forutsigbart grunnlag for videre onboarding- og signup-arbeid.
+
+
+---
+Gi meg først powershell comands på alt du ikke vet som du trenger å vite for å løse tasken. Deretter setter du treffsikre patcher
+ hvem hva og vhor så går du gjennom meg etter hver patch eller task og validerer at den er gjennomført slik den skal.
+ Pass på å ikke starte på ptacher før du har tenkt grundig gjennom å er sikker på beste patch. 
+ Du har regien i denne arhbeidschatten

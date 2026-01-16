@@ -2,9 +2,14 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
+  const env = loadEnv(mode, __dirname, "");
   const useMock = env.VITE_USE_MOCK === "true";
-  const backend = env.VITE_BACKEND_URL || "http://localhost:8000";
+  const backend = (env.VITE_BACKEND_URL || "http://127.0.0.1:5175").replace(
+    "localhost",
+    "127.0.0.1"
+  );
+
+  console.log(`[vite] mode=${mode} useMock=${useMock} backend=${backend}`);
 
   return {
     plugins: [
@@ -28,9 +33,20 @@ export default defineConfig(({ mode }) => {
             const rows = Array.from({ length: 30 }).map((_, i) => {
               const ts = now - (30 - i) * 2 * 24 * 3600 * 1000;
               const hasPower = i % 7 !== 3;
-              const np = hasPower ? Math.round(220 + Math.sin(i / 2) * 20 + (i % 5) * 2) : null;
-              const pw = hasPower ? Math.round(210 + Math.cos(i / 3) * 18 + (i % 3) * 3) : null;
-              return { id: `mock-${i}`, timestamp: ts, np, pw, source: "Mock", calibrated: i % 4 !== 0 };
+              const np = hasPower
+                ? Math.round(220 + Math.sin(i / 2) * 20 + (i % 5) * 2)
+                : null;
+              const pw = hasPower
+                ? Math.round(210 + Math.cos(i / 3) * 18 + (i % 3) * 3)
+                : null;
+              return {
+                id: `mock-${i}`,
+                timestamp: ts,
+                np,
+                pw,
+                source: "Mock",
+                calibrated: i % 4 !== 0,
+              };
             });
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(rows));
@@ -42,7 +58,14 @@ export default defineConfig(({ mode }) => {
               const hasPower = i % 5 !== 2;
               const np = hasPower ? Math.round(200 + i * 3) : null;
               const pw = hasPower ? Math.round(195 + i * 2) : null;
-              return { id: `sum-${i}`, timestamp: ts, np, pw, source: "Mock", calibrated: i % 3 === 0 };
+              return {
+                id: `sum-${i}`,
+                timestamp: ts,
+                np,
+                pw,
+                source: "Mock",
+                calibrated: i % 3 === 0,
+              };
             });
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(rows));
@@ -57,16 +80,16 @@ export default defineConfig(({ mode }) => {
       : {
           proxy: {
             "/api": { target: backend, changeOrigin: true },
+            "/status": { target: backend, changeOrigin: true },
           },
         },
 
     // --- ytelsesboost for prod-build ---
     build: {
       sourcemap: false,
-      target: "esnext",        // <— mindre bundle/transpile
+      target: "esnext",
       cssCodeSplit: true,
       minify: "esbuild",
-      // (fjernet modulePreload — Vite håndterer dette selv)
     },
 
     // Dropp støy i prod (bedre Lighthouse)
@@ -76,6 +99,13 @@ export default defineConfig(({ mode }) => {
     define: {
       __USE_MOCK__: JSON.stringify(useMock),
       __BACKEND_URL__: JSON.stringify(backend),
+    },
+
+    // Vitest (lå inne i samme config – IKKE egen export default)
+    test: {
+      globals: true,
+      environment: "jsdom",
+      include: ["src/**/*.{test,spec}.{ts,tsx}"],
     },
   };
 });

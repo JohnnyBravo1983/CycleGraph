@@ -18,7 +18,7 @@ import { demoRides } from "../demo/demoRides";
 type UnknownRecord = Record<string, unknown>;
 
 function isRecord(v: unknown): v is UnknownRecord {
-  return typeof v === "object" && v !== null;
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 function getNested(obj: unknown, path: string[]): unknown {
@@ -409,8 +409,8 @@ const RealSessionView: React.FC = () => {
         typeof parsed.rider_weight_kg === "number"
           ? parsed.rider_weight_kg
           : typeof parsed.weight_kg === "number"
-          ? parsed.weight_kg
-          : undefined;
+            ? parsed.weight_kg
+            : undefined;
 
       const bike =
         typeof parsed.bike_weight_kg === "number"
@@ -638,21 +638,21 @@ const RealSessionView: React.FC = () => {
               <div>
                 <dt className="text-slate-500">Drag watt</dt>
                 <dd className="font-medium">
-                  {fmtW(getNested(metrics, ["drag_watt"]))}
+                  {String(fmtW(getNested(metrics, ["drag_watt"])))}
                 </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Rolling watt</dt>
                 <dd className="font-medium">
-                  {fmtW(getNested(metrics, ["rolling_watt"]))}
+                  {String(fmtW(getNested(metrics, ["rolling_watt"])))}
                 </dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Gravity watt</dt>
                 <dd className="font-medium">
-                  {fmtW(getNested(metrics, ["gravity_watt"]))}
+                  {String(fmtW(getNested(metrics, ["gravity_watt"])))}
                 </dd>
               </div>
 
@@ -674,12 +674,15 @@ const RealSessionView: React.FC = () => {
         )}
 
         {/* PROFIL */}
-        {hasProfile && (
+        {Boolean(hasProfile) && (
           <section className="border rounded-lg p-4 space-y-2 text-sm">
             <h2 className="text-lg font-semibold">Profil brukt i analysen</h2>
 
             <p className="text-slate-500">
-              Versjon: <span className="font-mono">{profileVersionStr}</span>
+              Versjon:{" "}
+              <span className="font-mono">
+                {String(profileVersionStr ?? "")}
+              </span>
             </p>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
@@ -690,24 +693,24 @@ const RealSessionView: React.FC = () => {
 
               <div>
                 <dt className="text-slate-500">CdA</dt>
-                <dd className="font-medium">{cdaStr}</dd>
+                <dd className="font-medium">{String(cdaStr ?? "")}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Crr</dt>
-                <dd className="font-medium">{crrStr}</dd>
+                <dd className="font-medium">{String(crrStr ?? "")}</dd>
               </div>
 
               <div>
                 <dt className="text-slate-500">Enhet / device</dt>
-                <dd className="font-medium">{deviceStr}</dd>
+                <dd className="font-medium">{String(deviceStr ?? "")}</dd>
               </div>
             </dl>
           </section>
         )}
 
         {/* VÆR */}
-        {weatherUsed && (
+        {Boolean(weatherUsed) && (
           <section className="border rounded-lg p-4 space-y-2 text-sm">
             <h2 className="text-lg font-semibold">Vær brukt i analysen</h2>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">

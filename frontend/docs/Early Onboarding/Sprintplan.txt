@@ -74,6 +74,9 @@ Avhengighet: Task 1.3
 Risiko: Høy – hvis feil må vi migrere data senere
 Estimat: 6-10 timer
 Output: Dokumentert liste over leaderboard-ready felter + eventuelle migrasjoner
+Fulført 16 Januar på 2 Timer
+
+
 
 Week 2: Frontend auth implementation
 Task 1.5: Koble login-skjerm til auth backend [KRITISK]
