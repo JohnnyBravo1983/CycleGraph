@@ -1,3 +1,4 @@
+// profileStore.ts
 import { create } from "zustand";
 import { cgApi } from "../lib/cgApi";
 
@@ -35,6 +36,11 @@ type ProfileSaveResp = {
   [k: string]: unknown;
 };
 
+// ✅ PATCH: commit options
+type CommitOptions = {
+  markOnboarded?: boolean;
+};
+
 type ProfileState = {
   draft: ProfileDraft;
   loading: boolean;
@@ -45,7 +51,7 @@ type ProfileState = {
   applyDefaults: () => void;
 
   // ✅ Viktig: dette skal faktisk lagre til backend
-  commit: () => Promise<boolean>;
+  commit: (opts?: CommitOptions) => Promise<boolean>;
 };
 
 function toNum(v: unknown): number | null {
@@ -81,24 +87,39 @@ function pickDraftFromProfileObj(profile: Record<string, unknown> | undefined): 
   };
 }
 
-function buildProfileSaveBody(draft: ProfileDraft): { profile: Record<string, unknown> } {
+function buildProfileSaveBody(profileToSave: Record<string, unknown>): { profile: Record<string, unknown> } {
   // backend router normaliserer, men vi sender riktig format uansett
   const profile: Record<string, unknown> = {};
 
-  if (typeof draft.rider_weight_kg === "number") profile.rider_weight_kg = draft.rider_weight_kg;
-  if (typeof draft.bike_weight_kg === "number") profile.bike_weight_kg = draft.bike_weight_kg;
+  const rider_weight_kg = profileToSave["rider_weight_kg"];
+  const bike_weight_kg = profileToSave["bike_weight_kg"];
+  const cda = profileToSave["cda"];
+  const crr = profileToSave["crr"];
+  const crank_efficiency = profileToSave["crank_efficiency"];
+  const crank_eff_pct = profileToSave["crank_eff_pct"];
+  const bike_type = profileToSave["bike_type"];
+  const tire_width_mm = profileToSave["tire_width_mm"];
+  const tire_quality = profileToSave["tire_quality"];
+  const device = profileToSave["device"];
+  const onboarded = profileToSave["onboarded"];
 
-  if (typeof draft.cda === "number") profile.cda = draft.cda;
-  if (typeof draft.crr === "number") profile.crr = draft.crr;
+  if (typeof rider_weight_kg === "number") profile.rider_weight_kg = rider_weight_kg;
+  if (typeof bike_weight_kg === "number") profile.bike_weight_kg = bike_weight_kg;
 
-  if (typeof draft.crank_efficiency === "number") profile.crank_efficiency = draft.crank_efficiency;
-  if (typeof draft.crank_eff_pct === "number") profile.crank_eff_pct = draft.crank_eff_pct;
+  if (typeof cda === "number") profile.cda = cda;
+  if (typeof crr === "number") profile.crr = crr;
 
-  if (typeof draft.bike_type === "string" && draft.bike_type) profile.bike_type = draft.bike_type;
-  if (typeof draft.tire_width_mm === "number") profile.tire_width_mm = draft.tire_width_mm;
-  if (typeof draft.tire_quality === "string" && draft.tire_quality) profile.tire_quality = draft.tire_quality;
+  if (typeof crank_efficiency === "number") profile.crank_efficiency = crank_efficiency;
+  if (typeof crank_eff_pct === "number") profile.crank_eff_pct = crank_eff_pct;
 
-  profile.device = typeof draft.device === "string" && draft.device ? draft.device : "strava";
+  if (typeof bike_type === "string" && bike_type) profile.bike_type = bike_type;
+  if (typeof tire_width_mm === "number") profile.tire_width_mm = tire_width_mm;
+  if (typeof tire_quality === "string" && tire_quality) profile.tire_quality = tire_quality;
+
+  // ✅ onboarded flag (bare hvis true)
+  if (onboarded === true) profile.onboarded = true;
+
+  profile.device = typeof device === "string" && device ? device : "strava";
 
   return { profile };
 }
@@ -156,7 +177,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     }
   },
 
-  commit: async () => {
+  commit: async (opts?: CommitOptions) => {
     const draft = get().draft;
 
     // 🔍 DEBUG (kan beholdes litt til)
@@ -164,7 +185,17 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
     set({ loading: true, error: null });
     try {
-      const body = buildProfileSaveBody(draft);
+      // ✅ PATCH: onboarded flag (kun når opts.markOnboarded === true)
+      const markOnboarded = opts?.markOnboarded === true;
+
+      // draft er ProfileDraft, vi sprer den inn som values (inkl nulls/undefined),
+      // men buildProfileSaveBody plukker kun gyldige felt + onboarded=true
+      const profileToSave: Record<string, unknown> = {
+        ...(draft ?? {}),
+        ...(markOnboarded ? { onboarded: true } : {}),
+      };
+
+      const body = buildProfileSaveBody(profileToSave);
       console.log("[profileStore.commit] profileSave body =", body);
 
       const saved = (await cgApi.profileSave(body)) as ProfileSaveResp;
@@ -185,3 +216,4 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     }
   },
 }));
+

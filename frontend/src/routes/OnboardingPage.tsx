@@ -51,7 +51,7 @@ function pickNewestSessionId(items: unknown[]): string | null {
   for (const it of items) {
     if (!isRecord(it)) continue;
 
-    const sidRaw = it.session_id ?? it.ride_id;
+    const sidRaw = (it as any).session_id ?? (it as any).ride_id;
     const sid = typeof sidRaw === "string" || typeof sidRaw === "number" ? String(sidRaw) : "";
     if (!sid) continue;
 
@@ -63,7 +63,7 @@ function pickNewestSessionId(items: unknown[]): string | null {
       }
     }
 
-    const idRaw = it.ride_id ?? it.session_id;
+    const idRaw = (it as any).ride_id ?? (it as any).session_id;
     const idStr =
       typeof idRaw === "string" || typeof idRaw === "number" ? String(idRaw).trim() : "";
     if (idStr) {
@@ -84,8 +84,7 @@ export default function OnboardingPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { draft, loading, error, init, setDraft, applyDefaults, commit } =
-    useProfileStore();
+  const { draft, loading, error, init, setDraft, applyDefaults, commit } = useProfileStore();
 
   const { loadSession } = useSessionStore();
 
@@ -126,7 +125,9 @@ export default function OnboardingPage() {
 
     try {
       console.log("[Onboarding] COMMIT payload", draft);
-      const ok = await commit();
+
+      // ✅ PATCH: IKKE skriv onboarded inn i profilen
+      const ok = await commit({ markOnboarded: true });
       if (!ok) return;
 
       // Bygg override (kun tall, no-any)
@@ -151,8 +152,16 @@ export default function OnboardingPage() {
 
         // sorter på start_time desc (mangler start_time -> sist)
         const sorted = [...items].sort((a, b) => {
-          const sa = isRecord(a) ? (typeof a.start_time === "string" ? a.start_time : "") : "";
-          const sb = isRecord(b) ? (typeof b.start_time === "string" ? b.start_time : "") : "";
+          const sa = isRecord(a)
+            ? typeof (a as any).start_time === "string"
+              ? (a as any).start_time
+              : ""
+            : "";
+          const sb = isRecord(b)
+            ? typeof (b as any).start_time === "string"
+              ? (b as any).start_time
+              : ""
+            : "";
           const ta = Date.parse(sa) || 0;
           const tb = Date.parse(sb) || 0;
           return tb - ta;
@@ -162,7 +171,7 @@ export default function OnboardingPage() {
         const pickAll = sorted
           .map((x) => {
             if (!isRecord(x)) return "";
-            const raw = x.session_id ?? x.ride_id;
+            const raw = (x as any).session_id ?? (x as any).ride_id;
             return typeof raw === "string" || typeof raw === "number" ? String(raw) : "";
           })
           .filter((s) => Boolean(s));
@@ -191,18 +200,18 @@ export default function OnboardingPage() {
         console.log("[Onboarding] bulk re-analyze error (ignored):", e);
       }
 
-      navigate("/dashboard", { replace: true });
+      // ✅ PATCH: hard reload for å re-mounte AuthGateProvider og få oppdatert onboarding-state
+      window.location.assign("/dashboard");
+      return;
     } finally {
       setFinishBusy(false);
     }
   };
 
   function connectStrava() {
-  const nextRaw = `${window.location.origin}/onboarding`;
-  const url = `${cgApi.baseUrl()}/api/auth/strava/login?next=${encodeURIComponent(nextRaw)}`;
-  window.open(url, "_self");
-
-
+    const nextRaw = `${window.location.origin}/onboarding`;
+    const url = `${cgApi.baseUrl()}/api/auth/strava/login?next=${encodeURIComponent(nextRaw)}`;
+    window.open(url, "_self");
   }
 
   const tokenState = getTokenState(st);

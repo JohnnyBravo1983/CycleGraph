@@ -8,6 +8,12 @@ import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom"
 import App from "./App";
 import { installAxiosDevRewrite } from "./lib/axiosDevRewrite";
 
+// ✅ Guards (Task 1.7)
+import { AuthGateProvider } from "./auth/AuthGateProvider";
+import { RequireAuth } from "./auth/RequireAuth";
+import { RequireOnboarding } from "./auth/RequireOnboarding";
+import ProtectedLayout from "./auth/ProtectedLayout";
+
 // Live + Demo entry pages
 import Home from "./routes/Home"; // ✅ LIVE entry (dev)
 import { LandingPage } from "./routes/LandingPage"; // ✅ DEMO/marketing entry (prod)
@@ -40,27 +46,39 @@ const router = createBrowserRouter([
       // ✅ DEV: live Home (signup/login), PROD: demo Landing
       { index: true, element: import.meta.env.DEV ? <Home /> : <LandingPage /> },
 
-      // Auth / onboarding
+      // ✅ PUBLIC
       { path: "login", element: <LoginPage /> },
       { path: "signup", element: <SignupPage /> },
-      { path: "onboarding", element: <OnboardingPage /> },
-
-      // App pages
-      { path: "calibration", element: <CalibrationPage /> },
-      { path: "dashboard", element: <DashboardPage /> },
-      { path: "rides", element: <RidesPage /> },
-      { path: "trends", element: <TrendsPage /> },
-      { path: "goals", element: <GoalsPage /> },
-      { path: "profile", element: <ProfilePage /> },
-
-      // Info
       { path: "how-it-works", element: <HowItWorksPage /> },
 
-      // Legacy truth-økt
-      { path: "session/:id", element: <SessionView /> },
+      // ✅ AUTH REQUIRED, allow NOT-onboarded
+      {
+        path: "onboarding",
+        element: (
+          <RequireAuth>
+            <RequireOnboarding allowUnonboarded>
+              <OnboardingPage />
+            </RequireOnboarding>
+          </RequireAuth>
+        ),
+      },
 
-      // ✅ Safety: header has /leaderboards link, but we don't have a route component here
-      { path: "leaderboards", element: <Navigate to="/dashboard" replace /> },
+      // ✅ PROTECTED GROUP (auth + onboarded)
+      {
+        element: <ProtectedLayout />,
+        children: [
+          { path: "calibration", element: <CalibrationPage /> },
+          { path: "dashboard", element: <DashboardPage /> },
+          { path: "rides", element: <RidesPage /> },
+          { path: "trends", element: <TrendsPage /> },
+          { path: "goals", element: <GoalsPage /> },
+          { path: "profile", element: <ProfilePage /> },
+          { path: "session/:id", element: <SessionView /> },
+
+          // leaderboards er protected også
+          { path: "leaderboards", element: <Navigate to="/dashboard" replace /> },
+        ],
+      },
 
       // Fallback
       { path: "*", element: <Navigate to="/" replace /> },
@@ -68,8 +86,12 @@ const router = createBrowserRouter([
   },
 ]);
 
+console.log("[main.tsx] router loaded");
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <AuthGateProvider>
+      <RouterProvider router={router} />
+    </AuthGateProvider>
   </React.StrictMode>
 );

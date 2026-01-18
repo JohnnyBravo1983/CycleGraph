@@ -103,7 +103,7 @@ Auto-login etter signup
 Avhengighet: Task 1.1
 Risiko: Lav
 Estimat: 6-8 timer
-
+Fulført 16 Januar på 1 time
 Task 1.7: Implementer protected route-guards i frontend [KRITISK]
 
 Alle routes utenom /login og /signup krever autentisering
@@ -114,6 +114,8 @@ Bevar intended destination (redirect til /rides etter login hvis bruker prøvde 
 Avhengighet: Task 1.5
 Risiko: Lav
 Estimat: 4-6 timer
+Fulført 18 Januar på ca 6 timer litt knot
+
 
 Task 1.8: Test auth-flyt med multiple testbrukere [KRITISK VALIDERING]
 

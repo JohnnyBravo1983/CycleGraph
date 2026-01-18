@@ -261,7 +261,10 @@ async function authLogin(email: string, password: string): Promise<void> {
 }
 
 // ✅ PATCH 1: authMe() (DoD) — GET /api/auth/me
+// ✅ MIDLERTIDIG LOGGING: bevis hva authMe faktisk kaller i nettleser
 async function authMe(): Promise<unknown> {
+  const url = apiUrl("/api/auth/me");
+  console.log("[cgApi] authMe url =", url);
   return cgFetchJson<unknown>("/api/auth/me", { method: "GET" });
 }
 
