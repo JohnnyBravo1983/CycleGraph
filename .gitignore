@@ -90,3 +90,8 @@ strava_test_*.csv
 
 # If you keep tokens in code for CLI experiments, ignore
 cli/tokens.py
+
+# Python
+__pycache__/
+*.pyc
+

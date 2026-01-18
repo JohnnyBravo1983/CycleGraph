@@ -114,7 +114,7 @@ Bevar intended destination (redirect til /rides etter login hvis bruker prøvde 
 Avhengighet: Task 1.5
 Risiko: Lav
 Estimat: 4-6 timer
-Fulført 18 Januar på ca 6 timer litt knot
+Fulført 18 Januar på ca 8 timer litt knot
 
 
 Task 1.8: Test auth-flyt med multiple testbrukere [KRITISK VALIDERING]
@@ -129,8 +129,11 @@ Dokumenter alle funnet bugs
 Avhengighet: Task 1.5, 1.6, 1.7
 Risiko: Lav – men kritisk validering
 Estimat: 4-6 timer
-
+Fulført 18 Januar 1 Time
 Sprint 1 Total: 58-86 timer
+Fulført på ca 40 Timer (Hadde glemt å skrive opp for task 1.1)
+
+
 
 Sprint 2 (Uke 3): Onboarding og Strava-integrasjon
 Mål: Nye brukere kan fullføre onboarding og få sine rides analysert. Data lagres med korrekt user_id.
