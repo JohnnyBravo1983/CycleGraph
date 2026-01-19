@@ -3391,7 +3391,7 @@
     "input_exists": {
       "debug_session": true,
       "debug_result": false,
-      "results": true,
+      "results": false,
       "inline_samples": false,
       "actual10_latest_session": true,
       "raw_streams": false,

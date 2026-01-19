@@ -7839,3 +7839,15 @@ precision_watt,total_watt,weather_applied,crank_eff_pct,calibration_mae,calibrat
 74.19251083662753,70.85384784897929,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e5d6a552-20260114,ok
 60.73570378818076,58.00259711771262,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e5d6a552-20260114,ok
 168.7061110413297,161.11433604446987,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-741691e8-20260115,ok
+165.84937224555532,158.38615049450533,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-766f4722-20260119,ok
+165.84937224555532,158.38615049450533,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-766f4722-20260119,ok
+174.89726319269712,167.02688634902574,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+116.44662400664235,111.20652592634345,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+189.0864917036326,180.5775995769691,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+149.69231152246346,142.9561575039526,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+140.98777078821084,134.64332110274134,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+174.89726319269712,167.02688634902574,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+116.44662400664235,111.20652592634345,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+189.0864917036326,180.5775995769691,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+149.69231152246346,142.9561575039526,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok
+140.98777078821084,134.64332110274134,True,95.5,,False,not_available,rust_1arg,object_v3,open-meteo/era5,v1-e40d9576-20260119,ok

@@ -1,4 +1,3 @@
-# server/routes/strava_import_router.py
 from __future__ import annotations
 
 import os
@@ -37,46 +36,41 @@ def _tokens_path(uid: str) -> Path:
 
 
 # ----------------------------
+# Debug input control
+# ----------------------------
+def _allow_debug_inputs() -> bool:
+    """Return True if debug inputs are allowed via environment variable."""
+    return os.getenv("CG_ALLOW_DEBUG_INPUTS", "").lower() in ("1", "true", "yes")
+
+
+# ----------------------------
 # Sprint 4: sessions_index.json helpers
 # ----------------------------
 def _sessions_index_path(uid: str) -> Path:
     return _user_dir(uid) / "sessions_index.json"
 
 
+# ✅ PATCH 2.3.1 (minimal og trygg): SSOT = {"sessions":[...]} + backward compat
 def _load_sessions_index(uid: str) -> list[str]:
     p = _sessions_index_path(uid)
     if not p.exists():
         return []
     try:
-        raw_txt = p.read_text(encoding="utf-8-sig") or ""
-        raw = json.loads(raw_txt)
+        obj = json.loads(p.read_text(encoding="utf-8"))
 
-        # støtt både {"rides":[...]} og ["..."]
-        if isinstance(raw, dict):
-            xs = raw.get("rides")
-        else:
-            xs = raw
-
-        if not isinstance(xs, list):
+        # ✅ Backward compat: accept dict keys used across codebase
+        if isinstance(obj, dict):
+            for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
+                v = obj.get(key)
+                if isinstance(v, list):
+                    return [str(x) for x in v]
             return []
 
-        out: list[str] = []
-        for v in xs:
-            if v is None:
-                continue
-            s = str(v).strip()
-            if s:
-                out.append(s)
+        # legacy: raw list
+        if isinstance(obj, list):
+            return [str(x) for x in obj]
 
-        # dedupe, bevar rekkefølge
-        seen = set()
-        uniq: list[str] = []
-        for r in out:
-            if r in seen:
-                continue
-            seen.add(r)
-            uniq.append(r)
-        return uniq
+        return []
     except Exception:
         return []
 
@@ -84,14 +78,23 @@ def _load_sessions_index(uid: str) -> list[str]:
 def _save_sessions_index(uid: str, rides: list[str]) -> None:
     p = _sessions_index_path(uid)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"rides": rides}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # ✅ Write SSOT in canonical format expected by ownership checks
+    payload = {"sessions": [str(x) for x in rides]}
+    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _add_ride_to_sessions_index(uid: str, rid: str) -> list[str]:
     rid = str(rid).strip()
+
+    # ✅ hard gate: match sessions_list_router rules
+    if (not rid.isdigit()) or (len(rid) > 20):
+        print("[STRAVA_IMPORT] skip invalid rid for index:", rid)
+        return _load_sessions_index(uid)
+
     rides = _load_sessions_index(uid)
-    if rid and rid not in rides:
-        rides.append(rid)
+    if rid not in rides:
+        rides.insert(0, rid)
         _save_sessions_index(uid, rides)
     return rides
 
@@ -278,7 +281,9 @@ def _build_samples_v1(meta: Dict[str, Any], streams: Dict[str, Any]) -> List[Dic
     start_epoch = None
     if isinstance(start_date, str) and start_date.endswith("Z"):
         try:
-            dtu = dt.datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+            dtu = dt.datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=dt.timezone.utc
+            )
             start_epoch = int(dtu.timestamp())
         except Exception:
             start_epoch = None
@@ -315,7 +320,12 @@ def _build_samples_v1(meta: Dict[str, Any], streams: Dict[str, Any]) -> List[Dic
         heading_deg = last_heading
         if lat_deg is not None and lon_deg is not None and (i + 1) < len(LL):
             nxt = LL[i + 1]
-            if isinstance(nxt, (list, tuple)) and len(nxt) == 2 and nxt[0] is not None and nxt[1] is not None:
+            if (
+                isinstance(nxt, (list, tuple))
+                and len(nxt) == 2
+                and nxt[0] is not None
+                and nxt[1] is not None
+            ):
                 try:
                     heading_deg = _bear_deg(lat_deg, lon_deg, float(nxt[0]), float(nxt[1]))
                     last_heading = heading_deg
@@ -360,16 +370,19 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
     # --- Patch 3C: write debug_session mirror for analyze input ---
     debug_session_written = False
     debug_session_path = None
-    try:
-        p_debug = root / "_debug" / f"session_{rid}.json"
-        debug_session_path = str(p_debug)
-        p_debug.parent.mkdir(parents=True, exist_ok=True)
+    
+    # ✅ PATCH: Kun skriv debug_session mirror hvis tillatt via miljøvariabel
+    if _allow_debug_inputs():
+        try:
+            p_debug = root / "_debug" / f"session_{rid}.json"
+            debug_session_path = str(p_debug)
+            p_debug.parent.mkdir(parents=True, exist_ok=True)
 
-        if p2.exists():
-            p_debug.write_text(p2.read_text(encoding="utf-8"), encoding="utf-8")
-            debug_session_written = True
-    except Exception:
-        debug_session_written = False
+            if p2.exists():
+                p_debug.write_text(p2.read_text(encoding="utf-8"), encoding="utf-8")
+                debug_session_written = True
+        except Exception:
+            debug_session_written = False
     # --- end Patch 3C ---
 
     return {
@@ -407,7 +420,12 @@ def _trigger_analyze_local(rid: str, cg_auth: Optional[str]) -> Dict[str, Any]:
 
         return out
     except Exception as e:
-        return {"status_code": 0, "error": repr(e), "url": url, "forwarded_cookies": list(cookies.keys())}
+        return {
+            "status_code": 0,
+            "error": repr(e),
+            "url": url,
+            "forwarded_cookies": list(cookies.keys()),
+        }
 
 
 @router.post("/import/{rid}")
@@ -429,8 +447,54 @@ def import_strava_activity(
     if not tp.exists():
         raise HTTPException(status_code=401, detail="missing_server_tokens_for_user")
 
-    # Sprint 4: sørg for at denne rid’en blir en del av "mine rides"
+    # Sprint 4: sørg for at denne rid’en blir en del av "mine rides" (SSOT: sessions)
     rides_now = _add_ride_to_sessions_index(uid, str(rid))
+
+    # --- PATCH 2.3.2: canonicalize sessions_index.json (SSOT) ---
+    try:
+        p = _sessions_index_path(uid)
+        raw_obj = {}
+        try:
+            raw_obj = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        except Exception:
+            raw_obj = {}
+
+        # accept dict keys / legacy list
+        if isinstance(raw_obj, dict):
+            cand = None
+            for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
+                v = raw_obj.get(key)
+                if isinstance(v, list):
+                    cand = v
+                    break
+            items = cand or []
+        elif isinstance(raw_obj, list):
+            items = raw_obj
+        else:
+            items = []
+
+        # filter: digits only (<=20) + ensure rid is included
+        cleaned: list[str] = []
+        for x in items:
+            s = str(x).strip()
+            if s.isdigit() and len(s) <= 20:
+                cleaned.append(s)
+        if str(rid).isdigit() and len(str(rid)) <= 20 and str(rid) not in cleaned:
+            cleaned.insert(0, str(rid))
+
+        # de-dupe, keep order
+        seen = set()
+        uniq: list[str] = []
+        for s in cleaned:
+            if s not in seen:
+                uniq.append(s)
+                seen.add(s)
+
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"sessions": uniq}, indent=2), encoding="utf-8")
+    except Exception as e:
+        print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
+    # --- END PATCH 2.3.2 ---
 
     tokens = _read_json_utf8_sig(tp)
 
@@ -450,7 +514,9 @@ def import_strava_activity(
         "weather_hint": {},  # beholdes som objekt (analyze kan fylle)
         "strava": {
             "activity_id": str(rid),
-            "mode": "indoor" if meta.get("trainer") or meta.get("sport_type") == "VirtualRide" else "outdoor",
+            "mode": "indoor"
+            if meta.get("trainer") or meta.get("sport_type") == "VirtualRide"
+            else "outdoor",
             "start_date": meta.get("start_date"),
         },
     }

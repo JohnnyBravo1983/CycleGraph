@@ -613,14 +613,155 @@ Strava OAuth-integrasjonen er korrekt implementert, brukerspesifikk og sikker.
 Tokens bindes entydig til autentisert bruker via signert state og lagres isolert per UID.
 Task 2.2 er fullført og godkjent med ekte Strava OAuth-flow.
 
+Task 2.3 – Dokumentasjon (copy-paste klar)
+Legg til i docs/sprint-documentation.md (etter Task 2.2):
+
+markdownCopy## Task 2.3 - Rides Import & Precision Watt SSOT
+
+### Implementation
+**Formål:** Verifisere at Strava rides importeres korrekt til riktig bruker, og etablere SSOT for watt-visning i UI.
+
+### Task 2.3a - Import Functionality
+
+**Technical:**
+- `POST /api/strava/import/{rid}` imports ride from Strava API
+- Session file written to `logs/actual10/latest/session_{rid}.json`
+- SSOT updated: `state/users/<uid>/sessions_index.json` (rider ownership)
+- Auth/ownership verified via `require_auth` + SSOT check
+
+**Verified Scenarios:**
+- ✅ Import works end-to-end (200 OK)
+- ✅ Session file created in correct location
+- ✅ SSOT updated with new ride ID
+- ✅ Auth enforced (401 without cookie, 200 with correct user)
+
+---
+
+### Task 2.3b - Fix Analysepipeline Vekt-bug & Precision Watt SSOT
+
+**Problem Identified:**
+
+**Issue 1: Input Source Bug**
+- `_debug/session_<RID>.json` was used as input source
+- Contained incorrect profile/weight data
+- Result: Catastrophically wrong watt calculations (158W instead of 230W)
+
+**Issue 2: SSOT Inconsistency**
+- Multiple `precision_watt*` variants in result files (wheel/crank/pedal + top-level)
+- UI used `precision_watt_avg` (top-level), but nested `metrics.*` had different values
+- Caused mismatch between dashboard list view and ride detail view
+
+**Root Cause:**
+_debug/ (legacy): 111kg weight → precision_watt_signed: 230W ✅
+logs/results/ (new): 83kg weight → precision_watt_signed: 158W ❌ (37% error)
+Copy
+Analysepipeline used hardcoded default weight (83kg) instead of user profile (111.9kg).
+
+---
+
+**Fix 1: Input Source**
+- Gate debug inputs behind `CG_ALLOW_DEBUG_INPUTS` env variable
+- Deleted legacy `_debug/session_*.json` and `logs/results/result_*.json`
+- Re-imported all test rides with correct profile data (111.9kg total weight)
+
+**Fix 2: Canonical Watt Metric (SSOT)**
+
+**Decision:** `metrics.precision_watt_pedal` is canonical UI metric
+
+**Why:**
+- Rider-facing (accounts for pedal efficiency)
+- Most sanity-tested metric (team invested significant effort previously)
+- Matches expected power values (~230-250W for test rides)
+
+**Implementation** (in `server/routes/sessions.py`):
+
+```python
+# 1) Determine UI watt (prioritized fallback):
+ui_avg = metrics.precision_watt_pedal
+      OR metrics.total_watt_pedal
+      OR wheel/eff fallback
+
+# 2) Enforce top-level SSOT for frontend:
+resp["precision_watt_avg"] = ui_avg
+
+# 3) Sync nested metrics (defensive – prevents legacy mismatch):
+m["precision_watt"] = ui_avg
+m["total_watt"] = ui_avg
+m["precision_watt_avg"] = ui_avg
+
+# 4) Preserve physics truth (not overwritten):
+model_watt_wheel
+Defensive Sync:
+
+Top-level and nested metrics always consistent
+Retroactively fixes legacy files with inconsistent data
+UI cannot get mismatch between list/view
+Physics truth (model_watt_wheel) preserved for debugging
+
+
+Testing Evidence
+Profile Weight Verification:
+
+Rider weight: ~103.9 kg
+Total weight (rider + bike): 111.9 kg
+All new analyses use correct weight from user profile ✅
+
+Test Rides (5 rides verified):
+
+16712572748
+16396031026
+15890366129
+16262232459
+15635293008
+
+Verification per ride:
+
+✅ metrics.precision_watt_pedal == resp.precision_watt_avg (SSOT enforced)
+✅ UI shows consistent watt in list + view (no mismatch)
+✅ Correct profile weight used (111.9 kg total, not 83 kg)
+✅ Sanity-tested watt values (~230-250W range)
+
+
+Effect
+UI:
+
+One SSOT for watt (precision_watt_pedal) across entire app
+Consistent display in dashboard list, ride detail view
+No mismatch between different UI components
+
+Physics/Debug:
+
+No regression: model_watt_wheel truth still available separately
+Debug data preserved for analysis and verification
+
+Legacy Data:
+
+Old files with inconsistent metrics defensively synced at response-time
+No manual migration needed
+
+
+Known Limitations
+
+SSOT enforcement happens at response-time (not stored in JSON files)
+Legacy _debug/ files deleted (clean slate approach)
+Requires CG_ALLOW_DEBUG_INPUTS=false in production (debug inputs disabled)
+
+Out of Scope (Later)
+
+Automatic re-analysis on profile change (Sprint 5)
+Historical data migration for old rides (Sprint 6-7 if needed)
+A/B testing of pedal vs. signed watt (post-launch)
+
+Conclusion
+Precision watt is now consistent, sanity-tested, and has clear SSOT (metrics.precision_watt_pedal). UI displays correct, rider-facing power values across all views. Vekt-bug fixed (correct profile weight used). No regression in debug/physics data.
+
+
+
 
 ---
 Gi meg først powershell comands på alt du ikke vet som du trenger å vite for å løse tasken. Deretter setter du treffsikre patcher
  hvem hva og vhor så går du gjennom meg etter hver patch eller task og validerer at den er gjennomført slik den skal.
- Pass på å ikke starte på ptacher før du har tenkt grundig gjennom å er sikker på beste patch. 
+åp Pass på å ikke starte på ptacher før du har tenkt grundig gjennom å er sikker på beste patch. 
  Du har regien i denne arhbeidschatten
 
-
-curl.exe -i `
-  -H "Cookie: cg_auth=eyJ1aWQiOiJ1X1pZcXhHSU9hdFJGdmY0aTVzOG9H `
-  http://127.0.0.1:5175/api/auth/me
+16396031026,15890366129,16262232459,15635293008

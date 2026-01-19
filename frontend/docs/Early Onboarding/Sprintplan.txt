@@ -1,3 +1,16 @@
+FaseUkerSluttdato (ca.)Hva er klart✅ Sprint 1-1Ferdig nåAuth, data, frontend login/signup
+Sprint 2+1Uke 2Onboarding fungerer
+Sprint 3+1Uke 3GDPR-compliant
+Sprint 4+1Uke 4Dashboard polert
+Sprint 5+1Uke 5Early onboarding live 🎉
+Sprint 6+2-3Uke 8Leaderboards live
+print 7+2-3Uke 11Trends live
+Sprint 8+2Uke 13Goals live
+Sprint 9+1-2Uke 15Public launch 1. april 🚀
+
+
+
+
 CycleGraph Early Onboarding – 6 ukers sprintplan (FULLSTENDIG)
 Overordnet strategi
 Kritisk innsikt: Systemet har fungerende backend og analysepipeline. Hovedutfordringen er å bygge en kontrollert inngang som sikrer at fremmede brukere kan komme inn, identifiseres korrekt, og få sine data behandlet og lagret strukturert – med korrekt datafundament for senere leaderboards.
@@ -148,6 +161,8 @@ Generaliser hardkodet logikk til å bruke req.user.id
 Avhengighet: Task 1.8
 Risiko: Høy – onboarding "fungerer på eier" indikerer potensielt hardkodet logikk
 Estimat: 8-16 timer (kan være 8 hvis lite hardkodet, 16+ hvis mye refaktorering)
+Gjennomført på 2 timer 18 januar
+
 
 Task 2.2: Generaliser Strava OAuth-flyt [KRITISK]
 
@@ -167,9 +182,9 @@ Logg alle OAuth events (success, failure, user_id)
 Avhengighet: Task 2.1
 Risiko: Høy – feil her gir ghost data eller feil brukerkobling
 Estimat: 8-12 timer
+Gjennomført 19 Januar ca 8Timer
 
 Task 2.3: Verifiser at rides importeres til riktig bruker [KRITISK]
-
 Trigger Strava sync for ny testbruker (ikke eier)
 Verifiser at rides lagres med korrekt user_id/athlete_id (sjekk filstruktur direkte)
 Sjekk at analysepipeline kjører for ny bruker
@@ -179,17 +194,228 @@ Test med multiple brukere som syncer samtidig
 Avhengighet: Task 2.2
 Risiko: Høy – kjernefunksjonalitet
 Estimat: 6-10 timer
+Gjennomført 19 Januar på ca 6 Timer
+
+Ekstra Sprint 2.3B
+Fikse visning av PRecision Watt som er feil
+Gjennomført 19 Januar 2 Timer
+
 
 Task 2.4: Implementer onboarding → dashboard-overgang [VIKTIG]
+Mål: Strukturert overgang fra onboarding til dashboard med valgfri rides-import basert på tidsperiode.
+Oppgaver
+1. Rides import tidsperiode-valg (UI) [KRITISK]
+Frontend: Onboarding-steg etter Strava OAuth
+Vis valg-skjerm etter vellykket Strava-tilkobling:
+Copy┌──────────────────────────────────────────┐
+│ ✅ Strava tilkoblet!                     │
+│                                          │
+│ Hvilke rides vil du importere?          │
+│                                          │
+│ ○ Alle rides (kan ta tid ved mange)     │
+│ ○ Siste 3 år (2022-2025) [Anbefalt]     │
+│ ○ Siste år (2024-2025)                  │
+│ ○ Siste 6 måneder                       │
+│                                          │
+│ Estimert antall rides: ~120              │
+│                                          │
+│ [⬇️ Importer rides]  [Hopp over]        │
+└──────────────────────────────────────────┘
+UX-detaljer:
 
-Tydelig UX-flyt fra fullført onboarding til dashboard
-Vis status mens første sync pågår ("Henter dine rides fra Strava...")
-Implementer progress indicator (hvis mulig)
-Håndter tom tilstand (ingen rides funnet på Strava)
-Gi brukeren mulighet til å manuelt trigger re-sync
-Avhengighet: Task 2.3
-Risiko: Lav
-Estimat: 4-6 timer
+"Siste 3 år" skal være pre-valgt (default)
+"Estimert antall rides" hentes fra Strava API (optional, men nice-to-have)
+"Hopp over" lar bruker gå til dashboard uten å importere (kan importere senere)
+
+Estimat: 2-3 timer (UI + form state)
+
+2. Backend: Tidsperiode-basert import [KRITISK]
+Endepunkt:
+pythonCopyPOST /api/strava/sync
+Content-Type: application/json
+
+{
+  "period": "all" | "3years" | "1year" | "6months"
+}
+Backend-logikk:
+pythonCopy@app.post("/api/strava/sync")
+async def sync_strava_activities(
+    period: str,
+    user_id: str = Depends(require_auth)
+):
+    # Beregn after-date basert på period
+    if period == "all":
+        after = None  # Alle rides fra Strava
+    elif period == "3years":
+        after = datetime.now(timezone.utc) - timedelta(days=3*365)
+    elif period == "1year":
+        after = datetime.now(timezone.utc) - timedelta(days=365)
+    elif period == "6months":
+        after = datetime.now(timezone.utc) - timedelta(days=180)
+    else:
+        raise HTTPException(400, "Invalid period")
+    
+    # Hent Strava activities
+    strava_client = get_strava_client(user_id)
+    activities = strava_client.get_activities(after=after, limit=1000)
+    
+    # Import hver activity
+    imported = []
+    for activity in activities:
+        ride_id = await import_ride(user_id, activity.id)
+        imported.append(ride_id)
+    
+    return {
+        "imported_count": len(imported),
+        "ride_ids": imported
+    }
+Viktig:
+
+Håndter Strava API rate limits (30 requests/minute, 100/15min, 1000/day)
+Hvis > 200 rides: vurder batch-import (importer i bakgrunnen, ikke blokkerende)
+Logg import events (user_id, period, count, timestamp)
+
+Estimat: 3-4 timer (backend logic + Strava API integration)
+
+3. Progress indicator [VIKTIG]
+Vis fremgang under import:
+Copy┌──────────────────────────────────────────┐
+│ Importerer rides fra Strava...          │
+│                                          │
+│ ████████████░░░░░░░░ 47 / 120           │
+│                                          │
+│ Dette kan ta noen minutter.             │
+│ Du kan lukke vinduet – importen         │
+│ fortsetter i bakgrunnen.                 │
+│                                          │
+│ [Avbryt]                                 │
+└──────────────────────────────────────────┘
+Teknisk implementasjon:
+
+Frontend poller /api/strava/sync/status hvert 2. sekund
+Backend returnerer { current: 47, total: 120, status: "importing" }
+Når ferdig: { status: "completed", imported_count: 120 }
+
+Alternativ (enklere):
+
+Spinner med "Importerer rides... dette kan ta noen minutter"
+Ingen progressbar (sparer ~2 timer implementasjon)
+
+Estimat: 2-4 timer (med progressbar) eller 1-2 timer (uten progressbar)
+
+4. Redirect til dashboard [VIKTIG]
+Etter vellykket import:
+
+Redirect til /dashboard
+Dashboard viser importerte rides (Task 4.2 vil polere UI)
+Vis toast notification: "✅ 120 rides importert!"
+
+Hvis ingen rides funnet:
+
+Redirect til /dashboard
+Dashboard viser tom tilstand:
+CopyIngen rides funnet på Strava.
+Koble til Strava igjen eller last opp manuelt.
+
+
+Hvis import feiler:
+
+Vis feilmelding: "❌ Kunne ikke importere rides. Prøv igjen senere."
+La bruker fortsette til dashboard (kan re-syncе senere)
+Logg error (Sentry/backend logs)
+
+Estimat: 1-2 timer (redirect logic + error handling)
+
+5. "Hopp over" funksjonalitet [NICE-TO-HAVE]
+Hvis bruker trykker "Hopp over":
+Redirect til /dashboard uten å importere rides
+Dashboard viser tom tilstand med CTA: "Importer rides fra Strava"
+Bruker kan trigger import senere via profile eller dashboard
+
+Estimat: 1 timer (optional flow)
+
+6. Re-sync funksjonalitet (later) [OUT OF SCOPE]
+Ikke implementer nå, men forbered:
+Lagre last_sync_timestamp i state/users/<uid>/strava_sync.json
+Dette muliggjør "Importer nyere rides" senere (Sprint 4 eller 5)
+
+Testing
+Test-scenarier:
+
+Happy path:
+Ny bruker velger "Siste 3 år"
+Import starter → progressbar → redirect til dashboard
+Verifiser: Rides vises i dashboard
+
+
+Alle rides (stor datamengde):
+Bruker med 500+ rides velger "Alle rides"
+Import tar 5-10 minutter
+Verifiser: Progressbar oppdateres, import fullføres
+
+
+Ingen rides:
+Ny Strava-bruker med 0 rides
+Import returnerer imported_count: 0
+Dashboard viser tom tilstand
+
+
+Hopp over:
+Bruker trykker "Hopp over"
+Redirect til dashboard uten import
+Dashboard viser tom tilstand med CTA
+
+
+Import error:
+Simuler Strava API error (f.eks. network timeout)
+Feilmelding vises
+Bruker kan fortsette til dashboard
+
+
+
+
+Avhengigheter
+
+Task 2.2: Strava OAuth fungerer (tokens lagres korrekt) ✅
+Task 2.3: Rides import fungerer (per ride) ✅
+Task 1.2: /api/strava/sync er protected (require_auth) ✅
+
+
+Suksess-kriterier
+✅ Bruker kan velge tidsperiode for rides-import
+✅ Backend importerer kun rides innenfor valgt periode
+✅ Progress indicator vises under import (eller spinner)
+✅ Redirect til dashboard etter vellykket import
+✅ Tom tilstand vises hvis ingen rides funnet
+✅ Error handling fungerer (feilmelding + fortsett til dashboard)
+✅ "Hopp over" lar bruker fortsette uten import
+
+Estimat
+Total: 8-12 timer
+Breakdown:
+UI (valg-skjerm): 2-3t
+Backend (tidsperiode-logikk): 3-4t
+Progress indicator: 2-4t (eller 1-2t uten progressbar)
+Redirect + error handling: 1-2t
+"Hopp over" funksjonalitet: 1t
+
+
+Risiko
+Middels:
+Strava API rate limits kan være problem ved mange brukere samtidig
+Store datamengder (1000+ rides) kan ta lang tid (10-30 min)
+
+Mitigering:
+Implementer batch-import (ikke blokkerende UI)
+Vis tydelig estimat ("Dette kan ta 10-15 minutter")
+Tillat bruker å lukke vinduet mens import pågår i bakgrunnen
+
+Known Limitations
+Maksimalt 1000 rides per sync (Strava API limit)
+Re-sync ("Importer nyere rides") implementeres senere (Sprint 4-5)
+Progressbar krever polling (kan være resource-intensive)
+
+
 
 Task 2.5: Test komplett signup → onboarding → første sync [KRITISK VALIDERING]
 

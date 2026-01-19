@@ -410,6 +410,74 @@ def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon
         return
 # ==================== END PATCH S3D ====================
 
+# ==================== PATCH 2.3-A: Robust allowed IDs helper functions ====================
+def _allowed_ids_set_from_index(idx: dict) -> set[str]:
+    """
+    Returner sett med tillatte session ID-er fra sessions_index.json.
+    Støtter både string- og dict-format.
+    """
+    allowed: set[str] = set()
+
+    def _add(v: Any) -> None:
+        if v is None:
+            return
+        if isinstance(v, (int, float)):
+            allowed.add(str(int(v)))
+            return
+        s = str(v).strip()
+        if s.isdigit():
+            allowed.add(s)
+
+    if not isinstance(idx, dict):
+        return allowed
+
+    for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
+        v = idx.get(key)
+        if not isinstance(v, list):
+            continue
+        for it in v:
+            if isinstance(it, dict):
+                _add(it.get("id") or it.get("session_id") or it.get("ride_id"))
+            else:
+                _add(it)
+
+    return allowed
+
+def _allowed_ids_list_from_index(idx: dict) -> list[str]:
+    """
+    Returner liste med tillatte session ID-er fra sessions_index.json, med rekkefølge.
+    Støtter både string- og dict-format. Fjerner duplikater.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+
+    def _add(v: Any) -> None:
+        if v is None:
+            return
+        if isinstance(v, (int, float)):
+            s = str(int(v))
+        else:
+            s = str(v).strip()
+        if s.isdigit() and s not in seen:
+            seen.add(s)
+            result.append(s)
+
+    if not isinstance(idx, dict):
+        return result
+
+    for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
+        v = idx.get(key)
+        if not isinstance(v, list):
+            continue
+        for it in v:
+            if isinstance(it, dict):
+                _add(it.get("id") or it.get("session_id") or it.get("ride_id"))
+            else:
+                _add(it)
+
+    return result
+# ==================== END PATCH 2.3-A ====================
+
 # ==================== PATCH 1: Helper function for UI profile ====================
 def _load_ui_profile_for_user_id(user_id: str) -> dict:
     """
@@ -484,6 +552,12 @@ def _paths_for_sid(sid: str) -> dict:
         "gpx":           os.path.join(root, "data", "gpx", f"{sid}.gpx"),
     }
 
+# ==================== PATCH: DEBUG INPUT HELPER ====================
+def _allow_debug_inputs() -> bool:
+    """Returnerer True hvis debug inputs er tillatt via miljøvariabel."""
+    return os.getenv("CG_ALLOW_DEBUG_INPUTS", "").lower() in ("1", "true", "yes")
+# ==================== END PATCH ====================
+
 def _input_availability(sid: str) -> dict:
     p = _paths_for_sid(sid)
     exists = {k: os.path.exists(v) for k, v in p.items()}
@@ -498,27 +572,26 @@ def _input_availability(sid: str) -> dict:
     # ==================== END PATCH 3B ====================
     
     # "input" betyr at vi kan bygge samples på nytt
-    # ==================== PATCH 3: Oppdater has_any_input ====================
-    has_any_input = (
-        exists["debug_session"]
-        or exists["inline_samples"]
-        or exists.get("actual10_latest_session", False)  # Bruk get for sikkerhet
-        or exists["raw_streams"]
-        or exists["gpx"]
-    )
-    # ==================== END PATCH 3 ====================
-    return {"paths": p, "exists": exists, "has_any_input": bool(has_any_input)}
+    # ==================== PATCH: Ekskluder debug_session hvis ikke tillatt ====================
+    # Bygg en liste over kandidater for input, uten debug_session hvis ikke tillatt
+    input_candidates_for_check = []
+    if _allow_debug_inputs():
+        input_candidates_for_check.append(exists.get("debug_session", False))
+    
+    # Legg til andre kandidater
+    other_candidates = [
+        exists["inline_samples"],
+        exists.get("actual10_latest_session", False),
+        exists["raw_streams"],
+        exists["gpx"]
+    ]
+    input_candidates_for_check.extend(other_candidates)
 
-def _http409_missing_input(sid: str, dbg: dict) -> None:
-    # Bruk 409 Conflict: "du ber meg recompute, men input finnes ikke lokalt"
-    raise HTTPException(
-        status_code=409,
-        detail={
-            "error": "missing_input_data",
-            "sid": sid,
-            "debug": dbg,
-        },
-    )
+    # has_any_input er sant hvis minst en av disse er True
+    has_any_input = any(input_candidates_for_check)
+    # ==================== END PATCH ====================
+    
+    return {"paths": p, "exists": exists, "has_any_input": bool(has_any_input)}
 
 # --- STREAMS PROBE HELPER ---------------------------------------------------
 
@@ -598,7 +671,7 @@ def _write_sessions_meta(uid: str, meta: Dict[str, Any]) -> None:
     tmp.replace(p)
 # ==================== END PATCH: SESSIONS META SUPPORT ====================
 
-# ==================== PATCH: SESSION OWNERSHIP HELPER ====================
+# ==================== PATCH 2.3-C: SESSION OWNERSHIP HELPER (UPDATED) ====================
 def _assert_session_owned(base_dir: str, user_id: str, session_id: str) -> None:
     """
     Sjekk at session_id tilhører user_id ved å se i brukerens sessions_index.json.
@@ -608,17 +681,12 @@ def _assert_session_owned(base_dir: str, user_id: str, session_id: str) -> None:
 
     maybe_bootstrap_demo_sessions(base_dir, user_id)
     idx = load_user_sessions_index(base_dir, user_id) or {}
-    sessions_idx = idx.get("sessions") or []
 
-    for it in sessions_idx:
-        if not isinstance(it, dict):
-            continue
-        found_id = it.get("id") or it.get("session_id") or it.get("ride_id")
-        if str(found_id) == str(session_id):
-            return
-
-    raise HTTPException(status_code=404, detail="Session not found")
-# ==================== END PATCH ====================
+    allowed = _allowed_ids_set_from_index(idx)
+    if str(session_id) not in allowed:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return
+# ==================== END PATCH 2.3-C ====================
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -692,10 +760,11 @@ def _pick_best_session_path(sid: str) -> Path | None:
         except Exception:
             return False
 
-    # 0) NEW: _debug (ofte fasit i dev)
-    p0 = debug_dir / fn
-    if _ok(p0):
-        return p0
+    # 0) NEW: _debug (ofte fasit i dev) - kun hvis tillatt
+    if _allow_debug_inputs():
+        p0 = debug_dir / fn
+        if _ok(p0):
+            return p0
 
     # 1) Foretrukket: latest
     p1 = logs / "actual10" / "latest" / fn
@@ -914,92 +983,68 @@ def _load_result_doc(base_dir: str, user_id: str, session_id: str) -> Optional[D
       1) _debug/result_<id>.json (fasit fra scriptet)
       2) logs/results/result_<id>.json (fallback/skall)
     """
-    # 0) SSOT ownership gate (KRITISK)
+    # --- SSOT ownership gate (KRITISK) ---
     try:
         from server.user_state import load_user_sessions_index, maybe_bootstrap_demo_sessions
+
         maybe_bootstrap_demo_sessions(base_dir, user_id)
         idx = load_user_sessions_index(base_dir, user_id) or {}
-        allowed = {
-            str(s.get("id"))
-            for s in (idx.get("sessions") or [])
-            if isinstance(s, dict) and s.get("id") is not None
-        }
-        if str(session_id) not in allowed:
-            return None
-    except Exception:
-        # Fail-closed: hvis vi ikke klarer å verifisere eierskap, skal vi ikke returnere data.
-        return None
 
-    candidates: list[str] = []
-    candidates.append(os.path.join(base_dir, "_debug", f"result_{session_id}.json"))
-    candidates.append(os.path.join(base_dir, "logs", "results", f"result_{session_id}.json"))
-
-        # --- SSOT ownership gate (fail-closed) ---
-    try:
-        # Hent SSOT (sessions_index.json) og bygg set med tillatte ride_ids
-        from server.user_state import load_user_sessions_index
-
-        idx = load_user_sessions_index(base_dir, str(user_id)) or {}
         allowed: set[str] = set()
 
-        if isinstance(idx, dict):
-            sessions = idx.get("sessions")
-            rides = idx.get("rides")
-            ids = idx.get("ids")
-
-            def _add(v: Any) -> None:
-                if not v:
-                    return
-                s = str(v).strip()
-                # hard fail: kun digits er gyldig session_id
-                if s.isdigit():
+        def _add_allowed(v: Any) -> None:
+            if v is None:
+                return
+            if isinstance(v, (int, float)):
+                allowed.add(str(int(v)))
+            elif isinstance(v, str):
+                s = v.strip()
+                if s:
                     allowed.add(s)
 
-            if isinstance(sessions, list):
-                for item in sessions:
-                    if isinstance(item, dict):
-                        _add(item.get("id") or item.get("ride_id") or item.get("session_id"))
-                    else:
-                        _add(item)
-            if isinstance(rides, list):
-                for item in rides:
-                    if isinstance(item, dict):
-                        _add(item.get("id") or item.get("ride_id") or item.get("session_id"))
-                    else:
-                        _add(item)
-            if isinstance(ids, list):
-                for item in ids:
-                    _add(item)
-        elif isinstance(idx, list):
-            for item in idx:
-                if isinstance(item, dict):
-                    v = item.get("id") or item.get("ride_id") or item.get("session_id")
-                    if v and str(v).strip().isdigit():
-                        allowed.add(str(v).strip())
+        # Støtt flere mulige keys
+        if isinstance(idx, dict):
+            for key in ("sessions", "rides", "ids", "ride_ids", "session_ids"):
+                arr = idx.get(key)
+                if isinstance(arr, list):
+                    for it in arr:
+                        if isinstance(it, dict):
+                            _add_allowed(it.get("id") or it.get("session_id") or it.get("ride_id"))
+                        else:
+                            _add_allowed(it)
+
+        # Fallback: hvis idx selv er en liste
+        if isinstance(idx, list):
+            for it in idx:
+                if isinstance(it, dict):
+                    _add_allowed(it.get("id") or it.get("session_id") or it.get("ride_id"))
                 else:
-                    s = str(item).strip()
-                    if s.isdigit():
-                        allowed.add(s)
+                    _add_allowed(it)
 
         sid = str(session_id).strip()
-        if not sid.isdigit() or sid not in allowed:
+        if (not sid.isdigit()) or (sid not in allowed):
             return None
+
     except Exception:
-        # fail-closed: hvis SSOT ikke kan lastes, ikke les resultfiler
+        # Fail-closed: hvis SSOT ikke kan lastes/verifiseres, returner ingenting
         return None
 
     # --- Now safe to read result files ---
+    candidates: list[str] = [
+        os.path.join(base_dir, "_debug", f"result_{session_id}.json"),
+        os.path.join(base_dir, "logs", "results", f"result_{session_id}.json"),
+    ]
+
     for path in candidates:
         if not os.path.exists(path):
             continue
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         except Exception:
             continue
 
     return None
-
 
 
 def _ride_id_from_result_path(path: str) -> str:
@@ -1015,7 +1060,6 @@ def _ride_id_from_result_path(path: str) -> str:
         return m.group(1)
     return ""
 
-@router.get("/list")
 @router.get("/list")
 def list_sessions(
     user_id: str = Depends(require_auth),
@@ -1048,52 +1092,10 @@ def list_sessions(
     except Exception:
         return rows
 
-    # 2) Ulike formater kan finnes. Prøv å hente ride-IDs robust.
-    # Forventet: {"sessions":[{"id":"123"...}, ...]} eller {"rides":[...]} eller {"ids":[...]}
-    candidates: List[str] = []
-
-    def _add_id(v: Any) -> None:
-        if v is None:
-            return
-        if isinstance(v, (int, float)):
-            candidates.append(str(int(v)))
-        elif isinstance(v, str):
-            s = v.strip()
-            if s:
-                candidates.append(s)
-
-    sessions = index_doc.get("sessions")
-    rides = index_doc.get("rides")
-    ids = index_doc.get("ids")
-
-    if isinstance(sessions, list):
-        for item in sessions:
-            if isinstance(item, dict):
-                _add_id(item.get("id") or item.get("ride_id") or item.get("session_id"))
-            else:
-                _add_id(item)
-    elif isinstance(rides, list):
-        for item in rides:
-            if isinstance(item, dict):
-                _add_id(item.get("id") or item.get("ride_id") or item.get("session_id"))
-            else:
-                _add_id(item)
-    elif isinstance(ids, list):
-        for item in ids:
-            _add_id(item)
-    else:
-        # fallback: hvis index_doc selv er en liste
-        if isinstance(index_doc, list):
-            for item in index_doc:
-                _add_id(item)
-
-    # Dedup, men behold stabil rekkefølge
-    seen = set()
-    ride_ids: List[str] = []
-    for rid in candidates:
-        if rid not in seen:
-            seen.add(rid)
-            ride_ids.append(rid)
+    # ==================== PATCH 2.3-B: Bruk helper for å hente ride IDs ====================
+    # 2) Hent tillatte IDer fra indeksen (med rekkefølge)
+    ride_ids = _allowed_ids_list_from_index(index_doc)
+    # ==================== END PATCH 2.3-B ====================
 
     # 3) Bygg liste basert på user sine ride_ids
     for ride_id in ride_ids:
@@ -1107,14 +1109,27 @@ def list_sessions(
 
             metrics = result_doc.get("metrics") or {}
 
-            precision_watt_avg = None
-            pw_avg = result_doc.get("precision_watt_avg")
-            if isinstance(pw_avg, (int, float)):
-                precision_watt_avg = float(pw_avg)
+            # ✅ SSOT for list rows: prefer pedal SSOT always
+            pw_pedal = metrics.get("precision_watt_pedal")
+            if isinstance(pw_pedal, (int, float)):
+                precision_watt_avg = float(pw_pedal)
             else:
-                pw = metrics.get("precision_watt")
-                if isinstance(pw, (int, float)):
-                    precision_watt_avg = float(pw)
+                pw_tp = metrics.get("total_watt_pedal")
+                if isinstance(pw_tp, (int, float)):
+                    precision_watt_avg = float(pw_tp)
+                else:
+                    pw_avg = result_doc.get("precision_watt_avg")
+                    if isinstance(pw_avg, (int, float)):
+                        precision_watt_avg = float(pw_avg)
+                    else:
+                        pw = metrics.get("precision_watt")
+                        if isinstance(pw, (int, float)):
+                            precision_watt_avg = float(pw)
+                        else:
+                            pw2 = result_doc.get("precision_watt")
+                            if isinstance(pw2, (int, float)):
+                                precision_watt_avg = float(pw2)
+
 
             profile_used = result_doc.get("profile_used") or metrics.get("profile_used") or {}
             profile_version = result_doc.get("profile_version") or profile_used.get("profile_version")
@@ -1761,18 +1776,17 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         # is what users see (rider-facing). Do NOT touch core_watts_avg (device-only).
         # ─────────────────────────────────────────────────────────────────────
 
-        # 1) Decide the UI-facing average (prefer existing top-level if present)
-        ui_avg = resp.get("precision_watt_avg")
-        if not isinstance(ui_avg, (int, float)):
-            # Fallbacks if top-level is missing:
-            # prefer explicit pedal totals if they exist, else reconstruct from wheel/eff
-            ui_avg = (
-                m.get("precision_watt_pedal")
-                if isinstance(m.get("precision_watt_pedal"), (int, float))
-                else m.get("total_watt_pedal")
-                if isinstance(m.get("total_watt_pedal"), (int, float))
-                else (wheel_f / eff) if (wheel_f is not None and eff) else wheel_f
-            )
+        # 1) Decide the UI-facing average (SSOT = precision_watt_pedal)
+        ui_avg = (
+           m.get("precision_watt_pedal")
+           if isinstance(m.get("precision_watt_pedal"), (int, float))
+           else m.get("total_watt_pedal")
+           if isinstance(m.get("total_watt_pedal"), (int, float))
+           else resp.get("precision_watt_avg")
+           if isinstance(resp.get("precision_watt_avg"), (int, float))
+           else (wheel_f / eff) if (wheel_f is not None and eff) else wheel_f
+  )
+
 
         if ui_avg is None:
             ui_avg = 0.0
@@ -1785,7 +1799,8 @@ def _final_ui_override(resp: Dict[str, Any]) -> Dict[str, Any]:
         # 3) Enforce nested UI fields to match top-level avg
         m["precision_watt"] = ui_avg
         m["total_watt"] = ui_avg
-
+        # keep nested avg aligned (defensive, avoids stale JSON on disk)
+        m["precision_watt_avg"] = ui_avg
         # 4) Keep wheel truth available (do not overwrite if already correct)
         if wheel_f is not None:
             m["model_watt_wheel"] = float(wheel_f)
@@ -2206,17 +2221,20 @@ async def analyze_session(
         "streams_probe": None,  # Nytt felt for streams probe
     }
     
-    # ==================== PATCH 3: Oppdater input_candidates med actual10_latest_session ====================
-    # Definer input kandidater i prioritert rekkefølge
-    input_candidates = [
-        avail["paths"]["debug_session"],
+    # ==================== PATCH: BYGG INPUT KANDIDATER DYNAMISK ====================
+    # Bygg liste over kandidater for input, uten debug_session hvis ikke tillatt
+    input_candidates = []
+    if _allow_debug_inputs():
+        input_candidates.append(avail["paths"]["debug_session"])
+    
+    input_candidates.extend([
         avail["paths"]["inline_samples"],
-        avail["paths"]["actual10_latest_session"],  # <-- Legg til actual10_latest_session
+        avail["paths"]["actual10_latest_session"],
         avail["paths"]["raw_streams"],
         avail["paths"]["raw_activity"],
         avail["paths"]["gpx"],
-    ]
-    # ==================== END PATCH 3 ====================
+    ])
+    # ==================== END PATCH ====================
     
     input_used = None
     # Sjekk om vi bruker request body samples
@@ -3287,20 +3305,13 @@ def get_session(
 
     # ---- EIERSJEKK via per-user index (SSOT) ----
     idx = load_user_sessions_index(base_dir, user_id) or {}
-    sessions_idx = idx.get("sessions") or []
-
-    allowed = False
-    for it in sessions_idx:
-        if not isinstance(it, dict):
-            continue
-        found_id = it.get("id") or it.get("session_id") or it.get("ride_id")
-        if str(found_id) == str(session_id):
-            allowed = True
-            break
-
-    if not allowed:
+    
+    # ==================== PATCH 2.3-B: Bruk helper for å sjekke eierskap ====================
+    allowed = _allowed_ids_set_from_index(idx)
+    if str(session_id) not in allowed:
         # Ikke avslør om session finnes globalt
         raise HTTPException(status_code=404, detail="Session not found")
+    # ==================== END PATCH 2.3-B ====================
 
     # ---- Hent result-doc fra fil (lokalt), men ikke eksponer paths ----
     debug_path = os.path.join(base_dir, "_debug", f"result_{session_id}.json")
