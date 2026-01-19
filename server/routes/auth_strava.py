@@ -1,24 +1,128 @@
 # server/routes/auth_strava.py
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import secrets
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, unquote, urlparse
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from server.auth_guard import require_auth
+from server.auth.local_auth import COOKIE_NAME, verify_session
 
 router = APIRouter()
 
+
+# ----------------------------
+# Local auth dependency (SSOT cookie -> uid)
+# ----------------------------
+def require_auth(req: Request) -> str:
+    raw = req.cookies.get(COOKIE_NAME)
+    payload = verify_session(raw or "")
+    if not payload:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return payload["uid"]
+
+
 STRAVA_AUTH_URL = "https://www.strava.com/oauth/authorize"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
+
+
+# ----------------------------
+# OAuth state: signed + TTL (PATCH 2.2.1)
+# ----------------------------
+def _oauth_secret() -> bytes:
+    """
+    Secret for signing OAuth state.
+    Prefer dedicated env var, fallback to STRAVA_CLIENT_SECRET.
+    """
+    sec = (os.getenv("CG_OAUTH_STATE_SECRET") or "").strip()
+    if not sec:
+        sec = (os.getenv("STRAVA_CLIENT_SECRET") or "").strip()
+    if not sec:
+        raise HTTPException(
+            status_code=500,
+            detail="Missing CG_OAUTH_STATE_SECRET (or STRAVA_CLIENT_SECRET) for signing OAuth state",
+        )
+    return sec.encode("utf-8")
+
+
+def _b64url_encode(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("ascii"))
+
+
+def _sign_state(payload_b64: str) -> str:
+    mac = hmac.new(_oauth_secret(), payload_b64.encode("ascii"), hashlib.sha256).digest()
+    return _b64url_encode(mac)
+
+
+def _make_state(uid: str, ttl_sec: int = 600) -> str:
+    """
+    Create signed state token binding to uid + expiry.
+    TTL default: 10 minutes (600s).
+    Format: v1.<payload_b64>.<sig_b64>
+    """
+    now = int(time.time())
+    payload = {
+        "uid": uid,
+        "iat": now,
+        "exp": now + int(ttl_sec),
+        "nonce": secrets.token_urlsafe(12),
+    }
+    payload_b = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    payload_b64 = _b64url_encode(payload_b)
+    sig_b64 = _sign_state(payload_b64)
+    return f"v1.{payload_b64}.{sig_b64}"
+
+
+def _verify_state(state: str) -> str:
+    """
+    Verify signed state + TTL. Returns uid if OK, else raises HTTPException.
+    Fail-closed.
+    """
+    if not state or not isinstance(state, str):
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+
+    parts = state.split(".")
+    if len(parts) != 3 or parts[0] != "v1":
+        raise HTTPException(status_code=400, detail="Invalid OAuth state format")
+
+    _ver, payload_b64, sig_b64 = parts
+
+    expected_sig = _sign_state(payload_b64)
+    if not hmac.compare_digest(expected_sig, sig_b64):
+        raise HTTPException(status_code=400, detail="OAuth state signature mismatch")
+
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="OAuth state decode failed")
+
+    uid = payload.get("uid")
+    exp = payload.get("exp")
+    if not uid or not isinstance(uid, str):
+        raise HTTPException(status_code=400, detail="OAuth state missing uid")
+    if not isinstance(exp, int):
+        raise HTTPException(status_code=400, detail="OAuth state missing exp")
+
+    now = int(time.time())
+    if exp < now:
+        raise HTTPException(status_code=400, detail="OAuth state expired")
+
+    return uid
 
 
 # ----------------------------
@@ -36,7 +140,7 @@ def _users_dir() -> Path:
 
 # NOTE (Patch 3E):
 # cg_uid kan eksistere som legacy helper cookie, men skal aldri være autoritativ identitet.
-# Protected endpoints må bruke request.state.user_id / require_auth.
+# Protected endpoints må bruke require_auth (session cookie SSOT).
 def _get_or_set_uid_legacy(req: Request) -> str:
     """
     Legacy helper: beholdes kun for kompatibilitet / debugging.
@@ -74,11 +178,30 @@ def _load_tokens(uid: str) -> Optional[Dict[str, Any]]:
 # Helpers
 # ----------------------------
 def _effective_redirect_uri(req: Request) -> str:
-    env = (os.getenv("STRAVA_REDIRECT_URI") or "").strip()
-    if env:
-        return env
-    base = str(req.base_url).rstrip("/")
-    return f"{base}/api/auth/strava/callback"
+    """
+    Dev-safe redirect_uri that avoids localhost vs 127.0.0.1 cookie loss.
+    Priority:
+      1) Explicit env override if set
+      2) Derive hostname from Origin header (frontend host)
+      3) Fallback to request hostname
+    """
+    explicit = os.getenv("STRAVA_REDIRECT_URI") or os.getenv("CG_STRAVA_REDIRECT_URI")
+    if explicit:
+        return explicit
+
+    origin = req.headers.get("origin") or ""
+    host = ""
+    if origin:
+        try:
+            host = urlparse(origin).hostname or ""
+        except Exception:
+            host = ""
+
+    if not host:
+        host = req.url.hostname or "localhost"
+
+    # In dev we always run backend on 5175; keep it explicit to be safe.
+    return f"http://{host}:5175/api/auth/strava/callback"
 
 
 def _require_env() -> tuple[str, str]:
@@ -116,24 +239,13 @@ def _exchange_code_for_tokens(code: str, redirect_uri: str) -> Dict[str, Any]:
 
 
 # ----------------------------
-# Routes (Patch 3E: protected => use request.state.user_id)
+# Routes (protected => use require_auth SSOT)
 # ----------------------------
 @router.get("/status")
-def strava_status(
-    req: Request,
-    user_id: str = Depends(require_auth),
-):
-    """
-    Status endpoint for onboarding/dev.
-
-    Patch 3E:
-    - Identitet = request.state.user_id (via require_auth)
-    - cg_uid kan settes som legacy helper cookie, men er aldri autoritativ.
-    """
-    uid = user_id
+def strava_status(req: Request, user_id: str = Depends(require_auth)):
+    uid = user_id  # SSOT
 
     tokens = _load_tokens(uid)
-
     ok = bool(tokens and tokens.get("access_token"))
     exp = int(tokens.get("expires_at", 0)) if tokens else 0
     now = int(time.time())
@@ -145,7 +257,6 @@ def strava_status(
             "has_tokens": ok,
             "expires_at": exp,
             "expires_in_sec": (exp - now) if exp else None,
-            "token_path": str(_token_path_for_uid(uid)),
             "redirect_uri_effective": _effective_redirect_uri(req),
         }
     )
@@ -158,7 +269,6 @@ def strava_status(
         samesite="lax",
         path="/",
     )
-
     return resp
 
 
@@ -170,15 +280,14 @@ def login(
     """
     Starter Strava OAuth for INNLOGGET bruker.
 
-    Patch 3E:
-    - bruker_id = request.state.user_id (via require_auth)
-    - cg_uid brukes ikke som identitet (kun evt legacy helper cookie)
+    Patch 2.2.1:
+    - signed state + TTL, fail-closed (state er SSOT)
     """
     uid = user_id
     redirect_uri = _effective_redirect_uri(req)
     cid, _csec = _require_env()
 
-    state = "st_" + secrets.token_urlsafe(16)
+    state = _make_state(uid)
 
     params = {
         "client_id": cid,
@@ -191,9 +300,6 @@ def login(
 
     url = f"{STRAVA_AUTH_URL}?{urlencode(params)}"
     resp = RedirectResponse(url=url, status_code=302)
-
-    # bind callback til denne browser-sessionen
-    resp.set_cookie("cg_oauth_state", state, httponly=True, samesite="lax", path="/")
 
     # stash return URL for callback redirect (from /login?next=...)
     next_url = req.query_params.get("next")
@@ -217,21 +323,25 @@ def callback(
     """
     Strava redirect callback.
 
-    Patch 3E:
-    - lagrer tokens under request.state.user_id
-    - ignorerer cg_uid for identitet
+    Patch 2.2.1:
+    - state må finnes
+    - verify signed state + TTL
+    - fail-closed hvis state-uid != user_id
     """
-    uid = user_id
-
     if error:
         raise HTTPException(status_code=400, detail=f"Strava OAuth error: {error}")
 
     if not code:
         raise HTTPException(status_code=400, detail="Missing ?code from Strava")
 
-    expected_state = req.cookies.get("cg_oauth_state")
-    if expected_state and state and state != expected_state:
-        raise HTTPException(status_code=400, detail="OAuth state mismatch")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+
+    uid_from_state = _verify_state(state)
+    if uid_from_state != user_id:
+        raise HTTPException(status_code=401, detail="OAuth state does not match authenticated user")
+
+    uid = user_id
 
     redirect_uri = _effective_redirect_uri(req)
     data = _exchange_code_for_tokens(code=code, redirect_uri=redirect_uri)
@@ -250,9 +360,7 @@ def callback(
     next_url = req.cookies.get("cg_next")
     if next_url and isinstance(next_url, str) and next_url.startswith(("http://", "https://")):
         resp = RedirectResponse(url=next_url, status_code=302)
-        resp.set_cookie("cg_oauth_state", "", httponly=True, samesite="lax", max_age=0, path="/")
         resp.set_cookie("cg_next", "", httponly=True, samesite="lax", max_age=0, path="/")
-        # legacy helper cookie (ikke autoritativ identitet)
         resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
         return resp
 
@@ -267,16 +375,14 @@ def callback(
         }
     )
 
-    # legacy helper cookie (ikke autoritativ identitet)
     resp.set_cookie("cg_uid", uid, httponly=True, samesite="lax", path="/")
 
-    # clear state cookie (one-time)
-    resp.set_cookie("cg_oauth_state", "", httponly=True, samesite="lax", max_age=0, path="/")
+    # clear legacy cookies (if any)
     resp.set_cookie("cg_next", "", httponly=True, samesite="lax", max_age=0, path="/")
+    resp.set_cookie("cg_oauth_state", "", httponly=True, samesite="lax", max_age=0, path="/")
     return resp
 
 
-# --- ALIASES for legacy Strava redirect paths ---
 # --- ALIASES for legacy Strava redirect paths ---
 @router.get("/api/auth/strava/login")
 def login_alias(req: Request):
@@ -287,17 +393,13 @@ def login_alias(req: Request):
     """
     next_q = req.query_params.get("next") or ""
 
-    # Unquote 1-2 ganger for å håndtere typisk "http%253A%252F..." (dobbel encoding)
     try:
         next_q = unquote(next_q)
-        # Hvis det fortsatt ser encodet ut (inneholder %2F etc), unquote en gang til
         if "%2F" in next_q or "%3A" in next_q:
             next_q = unquote(next_q)
     except Exception:
         pass
 
-    # Forward til /login (samme host) med next som query param.
-    # Viktig: bruker urlencode for korrekt encoding av hele URL-en.
     qs = urlencode({"next": next_q}) if next_q else ""
     url = f"/login?{qs}" if qs else "/login"
     return RedirectResponse(url=url, status_code=302)

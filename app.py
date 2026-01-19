@@ -18,22 +18,24 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Callable, List, Literal
-
 from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Response, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from cyclegraph.weather_client import get_weather_for_session, WeatherError
 
-# Legg til imports av routers
-from server.routes import sessions
+# ✅ Importer router-objektene direkte (unngå navnekollisjon)
+from server.routes.auth_local import router as local_auth_router
 from server.routes.profile_router import router as profile_router
+from server.routes.auth_strava import router as strava_auth_router
+
+# Andre routers du allerede bruker videre i filen
 from server.routes.sessions_list_router import router as sessions_list_router
-from server.routes.auth_strava import router as strava_auth_router  # <-- PATCH B
-from server.routes.strava_import_router import router as strava_import_router  # <-- PATCH P1 (Sprint 2 ingest)
-from server.routes.auth_local import router as local_auth_router  # <-- Task 1.1 local auth
+from server.routes.strava_import_router import router as strava_import_router
+from server.routes import sessions  # kun hvis du faktisk trenger denne importen
 
 # Import for local auth middleware
 from server.auth.local_auth import COOKIE_NAME as AUTH_COOKIE_NAME, verify_session as verify_auth_session
@@ -41,11 +43,23 @@ from server.auth.local_auth import COOKIE_NAME as AUTH_COOKIE_NAME, verify_sessi
 # -----------------------------------------------------------------------------
 # Konfig
 # -----------------------------------------------------------------------------
-
 API_HOST = os.getenv("CG_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("CG_API_PORT", "5179"))  # default 5179
 
 app = FastAPI(title="CycleGraph API", version="0.1.0")
+
+# ✅ Core routers
+app.include_router(local_auth_router)
+app.include_router(profile_router)
+
+# ✅ Task 2.2 Strava OAuth
+app.include_router(
+    strava_auth_router,
+    prefix="/api/auth/strava",
+    tags=["auth-strava"],
+)
+
+
 
 # ✅ PATCH: public global healthcheck (skal alltid være tilgjengelig)
 @app.get("/status", include_in_schema=False)
