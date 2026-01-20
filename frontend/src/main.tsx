@@ -22,6 +22,7 @@ import { LandingPage } from "./routes/LandingPage"; // ✅ DEMO/marketing entry 
 import LoginPage from "./routes/LoginPage";
 import SignupPage from "./routes/SignupPage";
 import OnboardingPage from "./routes/OnboardingPage";
+import ImportRidesPage from "./routes/ImportRidesPage";
 import CalibrationPage from "./routes/CalibrationPage";
 import DashboardPage from "./routes/DashboardPage";
 import RidesPage from "./routes/RidesPage";
@@ -58,6 +59,16 @@ const router = createBrowserRouter([
           <RequireAuth>
             <RequireOnboarding allowUnonboarded>
               <OnboardingPage />
+            </RequireOnboarding>
+          </RequireAuth>
+        ),
+      },
+      {
+        path: "onboarding/import",
+        element: (
+          <RequireAuth>
+            <RequireOnboarding allowUnonboarded>
+              <ImportRidesPage />
             </RequireOnboarding>
           </RequireAuth>
         ),

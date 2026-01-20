@@ -1,6 +1,8 @@
 ﻿param(
-  [int]$Port = 5175
+  [int]$Port = 5175,
+  [string]$BindHost = "localhost"
 )
+
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -78,4 +80,5 @@ try {
 }
 
 # Start uten reload (én prosess)
-& $py -m uvicorn app:app --host 127.0.0.1 --port $chosen
+& $py -m uvicorn app:app --host $BindHost --port $chosen
+

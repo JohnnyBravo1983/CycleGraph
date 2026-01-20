@@ -101,12 +101,13 @@ export default function OnboardingPage() {
   }, [init]);
 
   // Auto-check status ved mount + URL-change (OAuth redirect)
+    // Auto-check Strava status ved mount + URL-change (OAuth redirect)
   useEffect(() => {
     (async () => {
       setStBusy(true);
       setStErr(null);
       try {
-        const s = await cgApi.status();
+        const s = await cgApi.stravaStatus(); // ✅ SSOT for "connected"
         setSt(s);
       } catch (e: unknown) {
         setSt(null);
@@ -115,8 +116,11 @@ export default function OnboardingPage() {
         setStBusy(false);
       }
     })();
+    
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, [location.pathname, location.search]);
+
 
   // ✅ PATCH 1B: Etter “Fullfør” → re-analyze ALLE økter fra listAll() + refresh list før navigation
   const onFinish = async () => {
@@ -201,7 +205,7 @@ export default function OnboardingPage() {
       }
 
       // ✅ PATCH: hard reload for å re-mounte AuthGateProvider og få oppdatert onboarding-state
-      window.location.assign("/dashboard");
+      window.location.assign("/onboarding/import");
       return;
     } finally {
       setFinishBusy(false);

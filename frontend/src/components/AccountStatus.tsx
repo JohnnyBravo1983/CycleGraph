@@ -1,5 +1,6 @@
-import React from "react";
-import { fetchStatus, tokenState, type StatusResp } from "../lib/statusApi";
+// frontend/src/components/AccountStatus.tsx
+import React, { useEffect, useState } from "react";
+import { cgApi, type StatusResp } from "../lib/cgApi";
 
 function fmtDur(sec: number): string {
   const s = Math.abs(Math.trunc(sec));
@@ -11,15 +12,15 @@ function fmtDur(sec: number): string {
 type Origin = "mount" | "poll" | "click";
 
 export function AccountStatus() {
-  const [st, setSt] = React.useState<StatusResp | null>(null);
-  const [err, setErr] = React.useState<string | null>(null);
+  const [st, setSt] = useState<StatusResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const [busy, setBusy] = React.useState(false);
+  const [busy, setBusy] = useState(false);
   const busyRef = React.useRef(false);
 
-  const [tick, setTick] = React.useState(0);
-  const [lastOrigin, setLastOrigin] = React.useState<Origin>("mount");
-  const [lastAt, setLastAt] = React.useState<number | null>(null);
+  const [tick, setTick] = useState(0);
+  const [lastOrigin, setLastOrigin] = useState<Origin>("mount");
+  const [lastAt, setLastAt] = useState<number | null>(null);
 
   async function load(origin: Origin) {
     // Guard: ikke start ny hvis vi allerede er i flight
@@ -37,21 +38,32 @@ export function AccountStatus() {
 
     try {
       setErr(null);
-      const data = await fetchStatus();
-      console.log("[AccountStatus] fetchStatus OK", data);
+
+      // ✅ SSOT: use backend Strava status (via cgApi)
+      const data = await cgApi.stravaStatus();
+      console.log("[AccountStatus] stravaStatus OK", data);
+
       setSt(data);
       setTick((x) => x + 1);
     } catch (e: any) {
-      console.error("[AccountStatus] fetchStatus FAIL", e);
-      setErr(e?.message ?? String(e));
+      console.error("[AccountStatus] stravaStatus FAIL", e);
+      setErr(String(e?.message ?? e));
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
   }
 
-  React.useEffect(() => {
-    load("mount");
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        if (alive) await load("mount");
+      } catch {
+        // load() håndterer egne errors
+      }
+    })();
 
     // Viktig: poll roligere så det ikke “drukner” click-debug
     // (du kan sette tilbake til 5000 når alt funker)
@@ -62,10 +74,14 @@ export function AccountStatus() {
       if (!busyRef.current) load("poll");
     }, intervalMs);
 
-    return () => window.clearInterval(t);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
   }, []);
 
-  const state = tokenState(st);
+  // status derived
+  const hasTokens = st?.has_tokens === true;
 
   let expiresText: string | null = null;
   if (st && typeof st.expires_in_sec === "number") {
@@ -85,13 +101,24 @@ export function AccountStatus() {
         <div className="mt-1 space-y-1">
           <div>
             <span className="opacity-70">uid:</span>{" "}
-            <span className="font-mono">{st.uid}</span>
+            <span className="font-mono">{st.uid ?? "n/a"}</span>
           </div>
+
           <div>
-            <span className="opacity-70">token:</span>{" "}
-            <span className="font-medium">{state}</span>
+            <span className="opacity-70">has_tokens:</span>{" "}
+            <span className="font-semibold">
+              {st.has_tokens === true ? "true" : st.has_tokens === false ? "false" : "unknown"}
+            </span>
+          </div>
+
+          <div>
+            <span className="opacity-70">expires_in_sec:</span>{" "}
+            <span className="font-semibold">
+              {typeof st.expires_in_sec === "number" ? String(st.expires_in_sec) : "n/a"}
+            </span>
             {expiresText ? <span className="opacity-70"> ({expiresText})</span> : null}
           </div>
+
           <div className="opacity-60">
             tick: {tick}
             {lastAt ? (
@@ -102,6 +129,12 @@ export function AccountStatus() {
               </>
             ) : null}
           </div>
+
+          {hasTokens ? (
+            <div className="text-xs opacity-70">Strava er tilkoblet ✅</div>
+          ) : (
+            <div className="text-xs opacity-70">Strava er ikke tilkoblet</div>
+          )}
         </div>
       )}
 

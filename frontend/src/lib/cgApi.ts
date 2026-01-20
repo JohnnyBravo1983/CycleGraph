@@ -93,17 +93,24 @@ function buildApiUrl(base: string, pathStartingWithApi: string): URL {
   return new URL(rel, baseForUrl);
 }
 
-// ✅ PATCH: dev/test bruker Vite proxy => same-origin (/api/...)
+/**
+ * ✅ FIX (CRITICAL):
+ * Tidligere returnerte dev "" (forutsatte Vite proxy).
+ * Hos deg er proxy ikke i bruk => requests gikk til 5173 og authMe fikk 401 i loop.
+ *
+ * Nå: I dev/test bruk BACKEND BASE direkte (5175).
+ */
 function baseUrl(): string {
-  // Dev/test: bruk Vite proxy => same-origin (/api/...)
-  if (import.meta.env.MODE !== "production") return "";
-  return normalizeBase(BASE) ?? "";
+  // Dev/test: snakk direkte med backend for å unngå "same-origin uten proxy"-fellen
+  const b = normalizeBase(BASE) ?? "http://localhost:5175";
+  return b;
 }
 
 // ✅ PATCH: trygg URL-builder som håndterer base="" (same-origin)
 function apiUrl(pathStartingWithApi: string): string {
   const base = baseUrl();
-  if (!base) return pathStartingWithApi; // "/api/..." same-origin via Vite proxy
+  // base er alltid satt nå, men behold logikken defensivt
+  if (!base) return pathStartingWithApi;
   return buildApiUrl(base, pathStartingWithApi).toString();
 }
 
@@ -275,6 +282,11 @@ export const cgApi = {
     return cgFetchJson<StatusResp>("/status", { method: "GET" });
   },
 
+  // ✅ SSOT: Strava connected-status for current authed user
+  async stravaStatus(): Promise<StatusResp> {
+    return cgFetchJson<StatusResp>("/api/auth/strava/status", { method: "GET" });
+  },
+
   async importRide(rid: string): Promise<ImportResp> {
     return cgFetchJson<ImportResp>(`/api/strava/import/${encodeURIComponent(rid)}`, {
       method: "POST",
@@ -299,3 +311,4 @@ export const cgApi = {
   // ✅ PATCH: eksporter profileSave
   profileSave,
 };
+

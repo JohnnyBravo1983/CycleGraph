@@ -5,12 +5,15 @@ import { useAuthGate } from "./AuthGateProvider";
 
 type Props = {
   children: ReactNode;
-  allowUnonboarded?: boolean; // true ONLY for /onboarding route
+  allowUnonboarded?: boolean; // true for onboarding routes
 };
 
 export function RequireOnboarding({ children, allowUnonboarded }: Props) {
   const gate = useAuthGate();
-  console.log("[RequireOnboarding]", window.location.pathname, gate.status, gate.isOnboarded);
+  const path = window.location.pathname;
+
+  console.log("[RequireOnboarding]", path, gate.status, gate.isOnboarded);
+
   if (gate.status === "checking") {
     return <div className="p-4">Loading…</div>;
   }
@@ -19,7 +22,13 @@ export function RequireOnboarding({ children, allowUnonboarded }: Props) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!allowUnonboarded && !gate.isOnboarded) {
+  // ✅ Tillat uonboarded brukere på:
+  // - /onboarding
+  // - /onboarding/import
+  const isOnboardingFlow =
+    path === "/onboarding" || path.startsWith("/onboarding/");
+
+  if (!gate.isOnboarded && !allowUnonboarded && !isOnboardingFlow) {
     return <Navigate to="/onboarding" replace />;
   }
 
