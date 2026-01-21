@@ -1,27 +1,50 @@
 // frontend/src/routes/ImportRidesPage.tsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Period = "all" | "3years" | "1year" | "6months";
 
 type SyncOkResp = {
   ok: true;
+  uid?: string;
+  after?: number;
+  before?: number;
+  days?: number | null;
+
+  page?: number;
+  per_page?: number;
+  batch_limit?: number;
+
   imported_count?: number;
-  ride_ids?: string[];
+  imported?: string[];
+
+  errors_count?: number;
+  errors?: Array<Record<string, unknown>>;
+
+  next_page?: number | null;
+  done?: boolean;
+
+  // ✅ chunked sync: soft-429 “pause & continue”
+  rate_limited?: boolean;
+  retry_after_s?: number;
+
   [k: string]: unknown;
 };
 
 type SyncErrResp = {
   ok: false;
   error?: string;
+  detail?: string;
   [k: string]: unknown;
 };
 
 type SyncResp = SyncOkResp | SyncErrResp;
 
+type ImportStatus = "idle" | "importing" | "done" | "error" | "cancelled";
+
 function prettyPeriod(p: Period) {
   switch (p) {
     case "all":
-      return "All";
+      return "All (begrenset av server-cap)";
     case "3years":
       return "Last 3 years";
     case "1year":
@@ -33,107 +56,382 @@ function prettyPeriod(p: Period) {
 
 function mapErrorMessage(raw?: string) {
   if (!raw) return "Ukjent feil.";
-  // små, nyttige mapper (Sprint 2)
-  if (raw.includes("tokens"))
+  const s = raw.toLowerCase();
+
+  if (s.includes("missing_server_tokens_for_user") || s.includes("tokens")) {
     return "Strava-tilkobling mangler eller er utløpt. Koble til Strava på nytt.";
-  if (raw.includes("unauthorized"))
+  }
+  if (s.includes("not authenticated") || s.includes("unauthorized") || s.includes("http 401")) {
     return "Du er ikke logget inn (session utløpt). Logg inn på nytt.";
+  }
+  if (s.includes("http 422")) {
+    return "Ugyldige parametre til sync-endpointet (422).";
+  }
+  if (s.includes("rate_limited") || s.includes("429") || s.includes("strava_error_429")) {
+    return "Strava rate-limited (429). Importen vil prøve igjen automatisk.";
+  }
+
   return raw;
+}
+
+function daysForPeriod(p: Period): number {
+  // Backend cap: days <= 365 per request/window.
+  switch (p) {
+    case "6months":
+      return 183;
+    case "1year":
+      return 365;
+    case "3years":
+      return 365; // i denne versjonen henter vi i praksis 1 år per “run”
+    case "all":
+      return 365;
+  }
+}
+
+function defaultBatchLimit(p: Period): number {
+  // Backend cap: batch_limit <= 200
+  switch (p) {
+    case "6months":
+      return 100;
+    case "1year":
+      return 150;
+    case "3years":
+      return 150;
+    case "all":
+      return 150;
+  }
+}
+
+function defaultPerPage(_p: Period): number {
+  // Backend cap: per_page <= 200 (Strava per_page)
+  return 50;
+}
+
+function safeNum(x: unknown, fallback: number): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
 }
 
 export default function ImportRidesPage() {
   const goDashboard = () => window.location.replace("/dashboard");
 
   const [period, setPeriod] = useState<Period>("3years"); // ✅ default hard krav
-  const [status, setStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
+
+  const [status, setStatus] = useState<ImportStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [importedCount, setImportedCount] = useState<number | null>(null);
+
+  // Progress UI
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
+  const [importedTotal, setImportedTotal] = useState<number>(0);
+  const [lastBatchCount, setLastBatchCount] = useState<number>(0);
+  const [page, setPage] = useState<number>(1);
+  const [nextPage, setNextPage] = useState<number | null>(null);
+  const [done, setDone] = useState<boolean>(false);
+
+  // Optional debug info
+  const [lastImported, setLastImported] = useState<string[] | null>(null);
+  const [lastErrors, setLastErrors] = useState<Array<Record<string, unknown>> | null>(null);
 
   const disabled = status === "importing";
-  const canContinue = status === "done" || status === "error";
+  const canContinue = status === "done" || status === "error" || status === "cancelled";
+
+  const abortRef = useRef<AbortController | null>(null);
+  const runningRef = useRef(false);
+  const importedSetRef = useRef<Set<string>>(new Set());
 
   const title = useMemo(() => {
     if (status === "importing") return "Importerer rides…";
     if (status === "done") return "Import ferdig";
+    if (status === "cancelled") return "Import stoppet";
     if (status === "error") return "Import feilet";
     return "Import rides?";
   }, [status]);
 
-  async function onImport() {
+  function resetProgress() {
     setError(null);
-    setImportedCount(null);
+    setProgressMsg(null);
+    setImportedTotal(0);
+    setLastBatchCount(0);
+    setPage(1);
+    setNextPage(null);
+    setDone(false);
+    setLastImported(null);
+    setLastErrors(null);
+    importedSetRef.current = new Set();
+  }
+
+  async function sleep(ms: number) {
+    await new Promise((r) => setTimeout(r, ms));
+  }
+
+  async function callSyncOnce(opts: {
+    page: number;
+    days: number;
+    perPage: number;
+    batchLimit: number;
+    analyze: boolean;
+    signal: AbortSignal;
+  }): Promise<{ resp: Response; data: SyncResp | null }> {
+    const qs = new URLSearchParams();
+    qs.set("days", String(opts.days));
+    qs.set("page", String(opts.page));
+    qs.set("per_page", String(opts.perPage));
+    qs.set("batch_limit", String(opts.batchLimit));
+    qs.set("analyze", opts.analyze ? "1" : "0");
+
+    const resp = await fetch(`/api/strava/sync?${qs.toString()}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      signal: opts.signal,
+    });
+
+    let data: SyncResp | null = null;
+    try {
+      data = (await resp.json()) as SyncResp;
+    } catch {
+      data = null;
+    }
+    return { resp, data };
+  }
+
+  function extractRetryAfterMs(resp: Response): number | null {
+    // Hvis backend forwarder Retry-After (kan forekomme ved ikke-chunked eller fremtidig endring)
+    const ra = resp.headers.get("Retry-After");
+    if (!ra) return null;
+    const n = Number(ra);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.min(120, Math.max(1, n)) * 1000;
+  }
+
+  async function runImport() {
+    if (runningRef.current) return;
+    runningRef.current = true;
+
+    resetProgress();
     setStatus("importing");
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const days = daysForPeriod(period);
+    const perPage = defaultPerPage(period);
+    const batchLimit = defaultBatchLimit(period);
+
+    let currentPage = 1;
+
+    // ekstra safety hvis noe spinner evig uten fremdrift
+    let hardStops = 0;
+    const maxHardStops = 30;
+
     try {
-      const resp = await fetch("/api/strava/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ period }),
-      });
-
-      // backend skal returnere deterministisk JSON, men vi håndterer robust
-      let data: SyncResp | null = null;
-      try {
-        data = (await resp.json()) as SyncResp;
-      } catch {
-        data = null;
-      }
-
-      if (!resp.ok) {
-        const msg =
-          (data && "error" in data && typeof data.error === "string" && data.error) ||
-          `HTTP ${resp.status}`;
-        setError(mapErrorMessage(msg));
-        setStatus("error");
-        return;
-      }
-
-      if (!data || typeof data !== "object") {
-        setError("Ugyldig respons fra server.");
-        setStatus("error");
-        return;
-      }
-
-      if ("ok" in data && data.ok === false) {
-        setError(mapErrorMessage(data.error));
-        setStatus("error");
-        return;
-      }
-
-      const count = (data.imported_count ?? 0) as number;
-      setImportedCount(count);
-      setStatus("done");
-
-      // Sprint 2 "toast": lagre en enkel melding vi kan lese på dashboard senere (PATCH 2.4-C)
-      // Dette er ufarlig selv om dashboard ikke leser den enda.
-      try {
-        if (count > 0) {
-          sessionStorage.setItem("cg_toast", `✅ ${count} rides importert!`);
-        } else {
-          sessionStorage.setItem(
-            "cg_toast",
-            `Ingen rides funnet i perioden (${prettyPeriod(period)}).`
-          );
+      while (true) {
+        if (controller.signal.aborted) {
+          setStatus("cancelled");
+          setProgressMsg("Import stoppet av bruker.");
+          return;
         }
-      } catch {
-        // ignore
+
+        setPage(currentPage);
+        setProgressMsg(`Henter batch… (page ${currentPage})`);
+
+        let resp: Response | null = null;
+        let data: SyncResp | null = null;
+
+        try {
+          const out = await callSyncOnce({
+            page: currentPage,
+            days,
+            perPage,
+            batchLimit,
+            analyze: true,
+            signal: controller.signal,
+          });
+          resp = out.resp;
+          data = out.data;
+        } catch (e: any) {
+          if (controller.signal.aborted) {
+            setStatus("cancelled");
+            setProgressMsg("Import stoppet av bruker.");
+            return;
+          }
+          setProgressMsg("Nettverksfeil – prøver igjen om 5 sek…");
+          await sleep(5000);
+          continue;
+        }
+
+        // Hvis backend faktisk svarer med non-2xx (burde være sjeldent nå)
+        if (!resp.ok) {
+          const statusCode = resp.status;
+
+          let msg = `HTTP ${statusCode}`;
+          if (data && isRecord(data)) {
+            const d = (data as any).detail;
+            const e = (data as any).error;
+            if (typeof d === "string" && d) msg = d;
+            else if (typeof e === "string" && e) msg = e;
+          }
+
+          const mapped = mapErrorMessage(msg);
+
+          if (statusCode === 429 || mapped.toLowerCase().includes("rate-limited")) {
+            const raMs = extractRetryAfterMs(resp);
+            const waitMs = raMs ?? 15000;
+            setProgressMsg(`Rate limited (429) – venter ${Math.round(waitMs / 1000)}s og fortsetter…`);
+            await sleep(waitMs);
+            continue;
+          }
+
+          if (statusCode === 502) {
+            setProgressMsg("Backend/Strava hiccup (502) – venter 5 sek og fortsetter…");
+            await sleep(5000);
+            continue;
+          }
+
+          setError(mapped);
+          setStatus("error");
+          return;
+        }
+
+        // OK, men valider data
+        if (!data || typeof data !== "object") {
+          setProgressMsg("Ugyldig respons fra server – prøver igjen om 3 sek…");
+          await sleep(3000);
+          continue;
+        }
+
+        if ("ok" in data && data.ok === false) {
+          const msg =
+            (typeof data.error === "string" && data.error) ||
+            (typeof (data as any).detail === "string" && String((data as any).detail)) ||
+            "Ukjent feil.";
+          const mapped = mapErrorMessage(msg);
+
+          if (mapped.toLowerCase().includes("rate-limited") || mapped.includes("429")) {
+            setProgressMsg("Rate limited – venter 15 sek og fortsetter…");
+            await sleep(15000);
+            continue;
+          }
+
+          setError(mapped);
+          setStatus("error");
+          return;
+        }
+
+        const ok = data as SyncOkResp;
+
+        // ✅ PATCH: backend kan returnere rate_limited=true som 200 OK payload
+        if (ok.rate_limited === true) {
+          const retryS = safeNum(ok.retry_after_s, 15);
+          const waitS = Math.min(120, Math.max(5, retryS));
+          setProgressMsg(`Rate limited – venter ${waitS}s og fortsetter (samme page)…`);
+          // backend setter next_page=page, men vi holder oss eksplisitt på samme
+          await sleep(waitS * 1000);
+          continue;
+        }
+
+        // Oppdater UI-progresjon
+        const batchImported = Array.isArray(ok.imported) ? ok.imported.map(String) : [];
+        const batchCount = safeNum(ok.imported_count, batchImported.length);
+
+        let newlyAdded = 0;
+        for (const rid of batchImported) {
+          if (!importedSetRef.current.has(rid)) {
+            importedSetRef.current.add(rid);
+            newlyAdded += 1;
+          }
+        }
+
+        setLastBatchCount(batchCount);
+        setImportedTotal(importedSetRef.current.size);
+        setLastImported(batchImported);
+        setLastErrors(Array.isArray(ok.errors) ? (ok.errors as Array<Record<string, unknown>>) : []);
+
+        const nxtRaw = ok.next_page;
+        const nxt = nxtRaw == null ? null : safeNum(nxtRaw, 0);
+        const isDone = ok.done === true;
+
+        setNextPage(nxt ? nxt : null);
+        setDone(isDone);
+
+        const per = safeNum(ok.per_page, perPage);
+        const limit = safeNum(ok.batch_limit, batchLimit);
+
+        setProgressMsg(
+          isDone
+            ? `Ferdig. Importert totalt ${importedSetRef.current.size} rides.`
+            : `Importert ${importedSetRef.current.size} (siste batch ${batchCount}). Page ${currentPage}. ` +
+              `per_page ${per}. batch_limit ${limit}. Fortsetter…`
+        );
+
+        if (isDone) {
+          try {
+            const total = importedSetRef.current.size;
+            sessionStorage.setItem("cg_toast", `✅ Import ferdig: ${total} rides importert!`);
+          } catch {
+            // ignore
+          }
+          setStatus("done");
+          return;
+        }
+
+        // Ikke ferdig: gå til neste page (backend gir fasit)
+        if (nxt && Number.isFinite(nxt) && nxt >= currentPage) {
+          // normal: nxt = currentPage+1
+          currentPage = nxt;
+        } else {
+          // fallback hvis backend ikke gir next_page: øk lokalt
+          currentPage += 1;
+        }
+
+        // Safety: hvis vi spinner uten at total øker over tid, break med feilmelding
+        if (newlyAdded === 0) hardStops += 1;
+        else hardStops = 0;
+
+        if (hardStops >= maxHardStops) {
+          setError(
+            "Import stoppet: ingen fremdrift over flere batches. Dette kan bety at Strava ikke returnerer flere aktiviteter i perioden, eller at vi treffer en edge-case."
+          );
+          setStatus("error");
+          return;
+        }
+
+        // liten pause mellom batches for å dempe 429 ytterligere
+        await sleep(250);
       }
-    } catch (e: unknown) {
-      setError("Network error – kunne ikke kontakte serveren.");
-      setStatus("error");
+    } finally {
+      runningRef.current = false;
+      abortRef.current = null;
+    }
+  }
+
+  function onImportClick() {
+    void runImport();
+  }
+
+  function onCancel() {
+    if (abortRef.current) {
+      abortRef.current.abort();
     }
   }
 
   function onSkip() {
-    // Ingen import: hard redirect for å re-mounte AuthGateProvider (unngå stale isOnboarded)
     goDashboard();
   }
 
   function onContinue() {
-    // hard redirect for å re-mounte AuthGateProvider
     goDashboard();
   }
+
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   return (
     <div className="p-6 max-w-xl">
@@ -143,6 +441,15 @@ export default function ImportRidesPage() {
         Velg hvor langt tilbake vi skal hente rides fra Strava. Du kan også hoppe over og importere
         senere.
       </p>
+
+      {/* Note about backend caps */}
+      {(period === "3years" || period === "all") && (
+        <div className="mt-3 text-xs text-amber-700">
+          Merk: Backend henter i batches og har cap per kall (days ≤ 365, per_page ≤ 200, batch_limit
+          ≤ 200). “3 years / all” betyr derfor “så langt som server-cap tillater” i denne versjonen.
+          Vi kan utvide til flere vinduer senere.
+        </div>
+      )}
 
       <div className="mt-6 space-y-3">
         <label className="flex items-center gap-3 cursor-pointer">
@@ -195,47 +502,73 @@ export default function ImportRidesPage() {
         </label>
       </div>
 
-      {/* importing UX */}
       {status === "importing" && (
-        <div className="mt-6 flex items-center gap-3">
-          <div className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-          <div className="text-sm">
-            Dette kan ta noen minutter… Du kan fortsette til dashboard når importen er ferdig.
+        <div className="mt-6 space-y-2">
+          <div className="flex items-center gap-3">
+            <div className="h-5 w-5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+            <div className="text-sm">
+              Dette kan ta en stund… du trenger ikke gjøre noe. Importen fortsetter automatisk.
+            </div>
+          </div>
+
+          <div className="text-sm opacity-90">
+            <div>
+              <b>Importert:</b> {importedTotal}
+              {lastBatchCount > 0 ? (
+                <span className="opacity-80"> (siste batch {lastBatchCount})</span>
+              ) : null}
+            </div>
+            <div className="opacity-80">
+              <b>Page:</b> {page}
+              {nextPage ? <span> → next {nextPage}</span> : null}
+              {done ? <span> • done</span> : null}
+            </div>
+            {progressMsg ? <div className="opacity-80 mt-1">{progressMsg}</div> : null}
           </div>
         </div>
       )}
 
-      {/* success */}
       {status === "done" && (
         <div className="mt-6 text-sm">
-          <div className="font-medium">
-            {importedCount && importedCount > 0
-              ? `✅ Import ferdig: ${importedCount} rides importert`
-              : "✅ Import ferdig: Ingen rides funnet i valgt periode"}
-          </div>
+          <div className="font-medium">✅ Import ferdig: {importedTotal} rides importert</div>
           <div className="opacity-80 mt-1">Trykk “Fortsett til dashboard”.</div>
         </div>
       )}
 
-      {/* error */}
+      {status === "cancelled" && (
+        <div className="mt-6 text-sm">
+          <div className="font-medium">⏸️ Import stoppet</div>
+          <div className="opacity-80 mt-1">
+            Importert så langt: <b>{importedTotal}</b>. Du kan starte importen igjen senere.
+          </div>
+        </div>
+      )}
+
       {status === "error" && (
         <div className="mt-6 text-sm">
           <div className="font-medium">⚠️ Import feilet</div>
           <div className="mt-1 opacity-90">{error ?? "Ukjent feil."}</div>
-          <div className="mt-2 opacity-80">Du kan likevel fortsette til dashboard.</div>
+          <div className="mt-2 opacity-80">
+            Du kan likevel fortsette til dashboard. (Du kan også prøve import igjen senere.)
+          </div>
         </div>
       )}
 
-      {/* actions */}
-      <div className="mt-8 flex gap-3">
+      <div className="mt-8 flex gap-3 flex-wrap">
         <button
           className="px-4 py-2 rounded border"
           disabled={disabled}
-          onClick={onImport}
+          onClick={onImportClick}
           aria-disabled={disabled}
         >
           Importer rides
         </button>
+
+        {status === "importing" && (
+          <button className="px-4 py-2 rounded border" onClick={onCancel}>
+            Stopp import
+          </button>
+        )}
 
         <button className="px-4 py-2 rounded border" disabled={disabled} onClick={onSkip}>
           Hopp over
@@ -247,6 +580,20 @@ export default function ImportRidesPage() {
           </button>
         )}
       </div>
+
+      {(status === "importing" || status === "done") && (
+        <details className="mt-6 text-xs opacity-80">
+          <summary className="cursor-pointer">Debug</summary>
+          <div className="mt-2">
+            <div>importedTotal: {importedTotal}</div>
+            <div>page: {page}</div>
+            <div>nextPage: {String(nextPage)}</div>
+            <div>done: {String(done)}</div>
+            <div>lastImported: {lastImported ? lastImported.slice(0, 10).join(", ") : "null"}</div>
+            <div>lastErrorsCount: {lastErrors ? lastErrors.length : "null"}</div>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -184,6 +184,14 @@ def save_profile(uid: str, incoming: Dict[str, Any]) -> Dict[str, Any]:
 
 def get_profile_export(uid: str) -> Dict[str, Any]:
     prof = load_profile(uid)
-    subset = {k: prof.get(k) for k in CANON_KEYS}
-    v = compute_version(subset)  # deterministisk for GET
-    return {"profile": subset, **v}
+
+    # SSOT subset for hashing/versioning (ONLY canon keys)
+    canon_subset = {k: prof.get(k) for k in CANON_KEYS}
+    v = compute_version(canon_subset)  # deterministisk for GET
+
+    # Export profile fields to client (canon + onboarded)
+    out = dict(canon_subset)
+    if prof.get("onboarded") is True:
+        out["onboarded"] = True
+
+    return {"profile": out, **v}

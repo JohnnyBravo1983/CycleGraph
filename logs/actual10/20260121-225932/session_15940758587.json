@@ -1,0 +1,35 @@
+{
+  "profile": {},
+  "samples": [
+    {
+      "t": 0.0,
+      "t_abs": "2025-09-26T10:29:07Z",
+      "lat_deg": null,
+      "lon_deg": null,
+      "v_ms": 0.0,
+      "altitude_m": 0.0,
+      "grade": 0.0,
+      "heading_deg": 0.0,
+      "hr": null,
+      "moving": true
+    },
+    {
+      "t": 2.0,
+      "t_abs": "2025-09-26T10:29:09Z",
+      "lat_deg": null,
+      "lon_deg": null,
+      "v_ms": 0.0,
+      "altitude_m": 0.0,
+      "grade": 0.0,
+      "heading_deg": 0.0,
+      "hr": null,
+      "moving": true
+    }
+  ],
+  "weather_hint": {},
+  "strava": {
+    "activity_id": "15940758587",
+    "mode": "indoor",
+    "start_date": "2025-09-26T10:29:07Z"
+  }
+}

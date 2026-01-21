@@ -40,6 +40,11 @@ def save_profile_route(
         # ------------------------------------------------------------
         profile: Dict[str, Any] = {}
 
+        # 0) Onboarding flag (SSOT)
+        # Frontend sender { markOnboarded: true } når onboarding er fullført.
+        if incoming.get("markOnboarded") is True:
+            profile["onboarded"] = True
+
         # 1) Nested profile fra frontend (hvis finnes)
         nested = incoming.get("profile")
         if isinstance(nested, dict):
@@ -93,6 +98,7 @@ def save_profile_route(
                     "tire_width_mm",
                     "tire_quality",
                     "device",
+                    "onboarded",
                 )
             },
             "profile_version": saved.get("profile_version"),

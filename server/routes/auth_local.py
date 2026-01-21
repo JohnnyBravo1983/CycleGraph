@@ -128,8 +128,40 @@ def login(req: Request, payload: LoginIn):
 
 @router.post("/logout")
 def logout():
-    resp = Response(content='{"ok":true}', media_type="application/json")
+    # ✅ PATCH: bruk JSONResponse + clear cg_auth og legacy helper cookies
+    resp = JSONResponse({"ok": True})
+
     _clear_auth_cookie(resp)
+
+    # clear legacy helper cookies as well
+    resp.set_cookie(
+        key="cg_uid",
+        value="",
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+        max_age=0,
+    )
+    resp.set_cookie(
+        key="cg_next",
+        value="",
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+        max_age=0,
+    )
+    resp.set_cookie(
+        key="cg_oauth_state",
+        value="",
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+        max_age=0,
+    )
+
     return resp
 
 

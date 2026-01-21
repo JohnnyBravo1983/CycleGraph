@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
 from server.auth_guard import require_auth
 
@@ -156,6 +156,8 @@ def _refresh_tokens(refresh_token: str) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="strava_refresh_failed_bad_json")
 
 
+
+    pass
 def _maybe_refresh_and_save(uid: str, tokens: Dict[str, Any], token_path: Path) -> Dict[str, Any]:
     # refresh hvis utløpt eller snart utløpt (leeway)
     leeway = int(os.getenv("STRAVA_REFRESH_LEEWAY_SEC", "120"))
@@ -202,10 +204,9 @@ def _bear_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 # ----------------------------
-# strava api (med auto-refresh + retry)
+# strava api (med auto-refresh + retry + 429 handling)
 # ----------------------------
 def _strava_get(url_path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
-    # 1) refresh hvis utløpt
     tokens = _maybe_refresh_and_save(uid, tokens, token_path)
 
     access = tokens.get("access_token")
@@ -215,26 +216,51 @@ def _strava_get(url_path: str, uid: str, tokens: Dict[str, Any], token_path: Pat
     url = f"{STRAVA_AUTH_BASE}{url_path}"
     headers = {"Authorization": f"Bearer {access}"}
 
-    r = requests.get(url, headers=headers, timeout=20)
+    max_attempts = 3
+    attempt = 0
 
-    # 2) hvis Strava likevel svarer 401/403 -> refresh + retry 1 gang
-    if r.status_code in (401, 403):
-        tokens = _maybe_refresh_and_save(uid, tokens, token_path)
-        access2 = tokens.get("access_token")
-        if not access2:
-            raise HTTPException(status_code=401, detail="missing_access_token_after_refresh")
-        headers = {"Authorization": f"Bearer {access2}"}
+    while attempt < max_attempts:
+        attempt += 1
         r = requests.get(url, headers=headers, timeout=20)
 
-    if r.status_code in (401, 403):
-        raise HTTPException(status_code=401, detail=f"strava_auth_failed_{r.status_code}")
-    if not r.ok:
-        raise HTTPException(status_code=502, detail=f"strava_error_{r.status_code}")
+        # 429: rate limited
+        if r.status_code == 429:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                wait_s = int(retry_after) if retry_after else 15
+            except Exception:
+                wait_s = 15
 
-    try:
-        return r.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="strava_bad_json")
+            wait_s = max(10, min(wait_s, 60))
+            print(f"[STRAVA] 429 rate limit (attempt {attempt}/{max_attempts}). Sleeping {wait_s}s…")
+            time.sleep(wait_s)
+            continue  # retry
+
+        # refresh + retry once on auth failure
+        if r.status_code in (401, 403):
+            tokens = _maybe_refresh_and_save(uid, tokens, token_path)
+            access = tokens.get("access_token")
+            if not access:
+                raise HTTPException(status_code=401, detail="missing_access_token_after_refresh")
+            headers = {"Authorization": f"Bearer {access}"}
+            r = requests.get(url, headers=headers, timeout=20)
+
+        if r.status_code == 429:
+            raise HTTPException(status_code=429, detail="strava_rate_limited_429")
+
+        if r.status_code in (401, 403):
+            raise HTTPException(status_code=401, detail=f"strava_auth_failed_{r.status_code}")
+
+        if not r.ok:
+            raise HTTPException(status_code=502, detail=f"strava_error_{r.status_code}")
+
+        try:
+            return r.json()
+        except Exception:
+            raise HTTPException(status_code=502, detail="strava_bad_json")
+
+    # exhausted retries
+    raise HTTPException(status_code=429, detail="strava_rate_limited_retry_exhausted")
 
 
 def _fetch_activity_and_streams(
@@ -370,7 +396,7 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
     # --- Patch 3C: write debug_session mirror for analyze input ---
     debug_session_written = False
     debug_session_path = None
-    
+
     # ✅ PATCH: Kun skriv debug_session mirror hvis tillatt via miljøvariabel
     if _allow_debug_inputs():
         try:
@@ -428,18 +454,200 @@ def _trigger_analyze_local(rid: str, cg_auth: Optional[str]) -> Dict[str, Any]:
         }
 
 
-@router.post("/import/{rid}")
-def import_strava_activity(
-    rid: str,
+# ----------------------------
+# PATCH 2.4-B (A2): chunked/resumable sync endpoint
+# ----------------------------
+def _epoch_now() -> int:
+    return int(time.time())
+
+
+@router.post("/sync")
+def sync_strava_activities(
     request: Request,
     user_id: str = Depends(require_auth),
+    # tidsvindu
+    after: Optional[int] = Query(None, description="Epoch seconds (UTC). If omitted, uses now-days."),
+    before: Optional[int] = Query(None, description="Epoch seconds (UTC). If omitted, uses now."),
+    days: int = Query(30, ge=1, le=365, description="Used when after is omitted."),
+    # chunking/paging
+    page: int = Query(1, ge=1, le=200, description="Strava paging (1..). One page per call."),
+    per_page: int = Query(50, ge=1, le=200, description="Strava per_page."),
+    batch_limit: int = Query(50, ge=1, le=200, description="Max rides imported this call."),
+    max_activities: int = Query(150, ge=1, le=150, description="Early onboarding cap (MVP)."),
+    analyze: bool = Query(True, description="Run local analyze step for each ride."),
 ) -> Dict[str, Any]:
-    FP = "STRAVA_IMPORT_ROUTER_AUTH_3D_20260114"
-    print("[STRAVA_IMPORT]", FP, "rid=", rid)
-
     uid = user_id
+    tp = _tokens_path(uid)
+    if not tp.exists():
+        raise HTTPException(status_code=401, detail="missing_server_tokens_for_user")
 
-    # If earlier patches are not present for some reason, ensure fields exist in response
+    tokens = _read_json_utf8_sig(tp)
+    tokens = _maybe_refresh_and_save(uid, tokens, tp)
+
+    now_ts = _epoch_now()
+    before_ts = int(before) if before is not None else now_ts
+    after_ts = int(after) if after is not None else (before_ts - int(days) * 86400)
+
+    # Forward auth cookie into analyze call (same as /import/{rid})
+    cg_auth = request.cookies.get("cg_auth")
+
+    imported: List[str] = []
+    errors: List[Dict[str, Any]] = []
+
+    # One Strava page per call (resumable)
+    url_path = (
+        f"/athlete/activities?after={after_ts}&before={before_ts}"
+        f"&per_page={per_page}&page={page}"
+    )
+
+    # ✅ PATCH: wrap _strava_get and convert 429 into resumable 200 payload
+    try:
+        acts = _strava_get(url_path, uid, tokens, tp)
+    except HTTPException as he:
+        if he.status_code == 429:
+            # Vi vil IKKE stoppe frontend-runnen. Returner "rate-limited, prøv igjen"
+            ra = None
+            try:
+                if getattr(he, "headers", None):
+                    ra = he.headers.get("Retry-After")
+            except Exception:
+                ra = None
+
+            retry_after_s = 15
+            try:
+                if ra is not None:
+                    retry_after_s = int(ra)
+            except Exception:
+                retry_after_s = 15
+
+            retry_after_s = max(5, min(retry_after_s, 120))
+
+            return {
+                "ok": True,
+                "uid": uid,
+                "after": after_ts,
+                "before": before_ts,
+                "days": days if after is None else None,
+                "page": page,
+                "per_page": per_page,
+                "batch_limit": batch_limit,
+                "max_activities": max_activities,
+                "imported_count": len(imported),
+                "imported": imported,
+                "errors_count": len(errors),
+                "errors": errors[:50],
+                "next_page": page,  # samme page igjen
+                "done": False,
+                "rate_limited": True,
+                "retry_after_s": retry_after_s,
+            }
+        raise
+
+    if not isinstance(acts, list):
+        raise HTTPException(status_code=502, detail="strava_bad_payload")
+
+    # If empty page -> done for this window
+    if len(acts) == 0:
+        return {
+            "ok": True,
+            "uid": uid,
+            "after": after_ts,
+            "before": before_ts,
+            "days": days if after is None else None,
+            "page": page,
+            "per_page": per_page,
+            "batch_limit": batch_limit,
+            "max_activities": max_activities,
+            "imported_count": 0,
+            "imported": [],
+            "errors_count": 0,
+            "errors": [],
+            "next_page": None,
+            "done": True,
+        }
+
+    # Enkelt "early onboarding cap": stopp etter max_activities basert på page/per_page
+    # (Importer aldri mer enn max_activities totalt)
+    remaining_total = max(0, int(max_activities) - ((int(page) - 1) * int(per_page)))
+    if remaining_total <= 0:
+        return {
+            "ok": True,
+            "uid": uid,
+            "after": after_ts,
+            "before": before_ts,
+            "days": days if after is None else None,
+            "page": page,
+            "per_page": per_page,
+            "batch_limit": batch_limit,
+            "max_activities": max_activities,
+            "imported_count": 0,
+            "imported": [],
+            "errors_count": len(errors),
+            "errors": errors[:50],
+            "next_page": None,
+            "done": True,
+            "capped": True,
+        }
+
+    # Import up to batch_limit from this page, men aldri over remaining_total
+    page_cap = min(int(batch_limit), remaining_total)
+
+    for a in acts:
+        if len(imported) >= page_cap:
+            break
+
+        rid = a.get("id") if isinstance(a, dict) else None
+        if rid is None:
+            errors.append({"rid": None, "detail": "missing_activity_id"})
+            continue
+
+        rid_s = str(rid)
+
+        try:
+            _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=analyze)
+            imported.append(rid_s)
+
+            # ✅ throttle (reduserer 429 dramatisk)
+            time.sleep(0.3)
+
+        except HTTPException as he:
+            errors.append({"rid": rid_s, "status_code": he.status_code, "detail": he.detail})
+        except Exception as e:
+            errors.append({"rid": rid_s, "status_code": 0, "detail": repr(e)})
+
+    # "done" hvis:
+    # - Strava ga < per_page (slutten), eller
+    # - vi er innenfor onboarding-cap og neste page ville være utenfor cap
+    done_strava = len(acts) < per_page
+    done_cap = ((int(page) * int(per_page)) >= int(max_activities))
+    done = bool(done_strava or done_cap)
+
+    next_page = None if done else (page + 1)
+
+    return {
+        "ok": True,
+        "uid": uid,
+        "after": after_ts,
+        "before": before_ts,
+        "days": days if after is None else None,
+        "page": page,
+        "per_page": per_page,
+        "batch_limit": batch_limit,
+        "max_activities": max_activities,
+        "imported_count": len(imported),
+        "imported": imported,
+        "errors_count": len(errors),
+        "errors": errors[:50],
+        "next_page": next_page,
+        "done": done,
+        "capped": bool(done_cap and not done_strava),
+    }
+
+
+def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True) -> Dict[str, Any]:
+    rid = str(rid).strip()
+
+    # Keep response-safe debug fields
     debug_session_written: Any = "UNSET"
     debug_session_path: Any = "UNSET"
 
@@ -447,10 +655,10 @@ def import_strava_activity(
     if not tp.exists():
         raise HTTPException(status_code=401, detail="missing_server_tokens_for_user")
 
-    # Sprint 4: sørg for at denne rid’en blir en del av "mine rides" (SSOT: sessions)
-    rides_now = _add_ride_to_sessions_index(uid, str(rid))
+    # Sprint 4 SSOT ownership index
+    rides_now = _add_ride_to_sessions_index(uid, rid)
 
-    # --- PATCH 2.3.2: canonicalize sessions_index.json (SSOT) ---
+    # Canonicalize sessions_index.json (keep your existing behavior)
     try:
         p = _sessions_index_path(uid)
         raw_obj = {}
@@ -459,7 +667,6 @@ def import_strava_activity(
         except Exception:
             raw_obj = {}
 
-        # accept dict keys / legacy list
         if isinstance(raw_obj, dict):
             cand = None
             for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
@@ -473,16 +680,14 @@ def import_strava_activity(
         else:
             items = []
 
-        # filter: digits only (<=20) + ensure rid is included
         cleaned: list[str] = []
         for x in items:
             s = str(x).strip()
             if s.isdigit() and len(s) <= 20:
                 cleaned.append(s)
-        if str(rid).isdigit() and len(str(rid)) <= 20 and str(rid) not in cleaned:
-            cleaned.insert(0, str(rid))
+        if rid.isdigit() and len(rid) <= 20 and rid not in cleaned:
+            cleaned.insert(0, rid)
 
-        # de-dupe, keep order
         seen = set()
         uniq: list[str] = []
         for s in cleaned:
@@ -494,24 +699,19 @@ def import_strava_activity(
         p.write_text(json.dumps({"sessions": uniq}, indent=2), encoding="utf-8")
     except Exception as e:
         print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
-    # --- END PATCH 2.3.2 ---
 
     tokens = _read_json_utf8_sig(tp)
-
-    # pre-flight refresh (utløpt -> refresh nå, og lagre)
     tokens = _maybe_refresh_and_save(uid, tokens, tp)
 
     meta, streams = _fetch_activity_and_streams(rid, uid, tokens, tp)
 
-    # profile: for sprint 2 kan vi holde dette minimalt; analyze har egne defaults/overrides
     profile: Dict[str, Any] = {}
-
     samples = _build_samples_v1(meta, streams)
 
     session_doc = {
         "profile": profile,
         "samples": samples,
-        "weather_hint": {},  # beholdes som objekt (analyze kan fylle)
+        "weather_hint": {},
         "strava": {
             "activity_id": str(rid),
             "mode": "indoor"
@@ -526,9 +726,9 @@ def import_strava_activity(
     debug_session_written = paths.get("debug_session_written", debug_session_written)
     debug_session_path = paths.get("debug_session_path", debug_session_path)
 
-    # ✅ Patch 3D: forward cg_auth into internal analyze call
-    cg_auth = request.cookies.get("cg_auth")
-    analyze = _trigger_analyze_local(rid, cg_auth)
+    analyze_out = None
+    if analyze:
+        analyze_out = _trigger_analyze_local(rid, cg_auth)
 
     return {
         "ok": True,
@@ -541,7 +741,23 @@ def import_strava_activity(
             "latest_path": paths.get("latest_path"),
         },
         "samples_len": len(samples),
-        "analyze": analyze,
+        "analyze": analyze_out,
         "debug_session_written": debug_session_written,
         "debug_session_path": debug_session_path,
     }
+
+
+@router.post("/import/{rid}")
+def import_strava_activity(
+    rid: str,
+    request: Request,
+    user_id: str = Depends(require_auth),
+) -> Dict[str, Any]:
+    FP = "STRAVA_IMPORT_ROUTER_AUTH_3D_20260114"
+    print("[STRAVA_IMPORT]", FP, "rid=", rid)
+
+    uid = user_id
+
+    # Minimal refactor: reuse helper + forward cg_auth into analyze
+    cg_auth = request.cookies.get("cg_auth")
+    return _import_one(uid=uid, rid=str(rid), cg_auth=cg_auth, analyze=True)

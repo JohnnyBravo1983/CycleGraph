@@ -761,7 +761,9 @@ Precision watt is now consistent, sanity-tested, and has clear SSOT (metrics.pre
 ---
 Gi meg først powershell comands på alt du ikke vet som du trenger å vite for å løse tasken. Deretter setter du treffsikre patcher
  hvem hva og vhor så går du gjennom meg etter hver patch eller task og validerer at den er gjennomført slik den skal.
-åp Pass på å ikke starte på ptacher før du har tenkt grundig gjennom å er sikker på beste patch. 
+åp Pass på å ikke starte på ptacher før du har tenkt grundig gjennom å er sikker på beste patch.Pass også på å spisse søkene 
+der det er mulig så vi ikke får så vanvittig mye treff. MEn det må ikke gå på bekostning av 
+kvalitet.  
  Du har regien i denne arhbeidschatten
 
 16396031026,15890366129,16262232459,15635293008
