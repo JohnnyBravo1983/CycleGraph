@@ -1,6 +1,5 @@
 // frontend/src/routes/ImportRidesPage.tsx
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 type Period = "all" | "3years" | "1year" | "6months";
 
@@ -35,13 +34,15 @@ function prettyPeriod(p: Period) {
 function mapErrorMessage(raw?: string) {
   if (!raw) return "Ukjent feil.";
   // små, nyttige mapper (Sprint 2)
-  if (raw.includes("tokens")) return "Strava-tilkobling mangler eller er utløpt. Koble til Strava på nytt.";
-  if (raw.includes("unauthorized")) return "Du er ikke logget inn (session utløpt). Logg inn på nytt.";
+  if (raw.includes("tokens"))
+    return "Strava-tilkobling mangler eller er utløpt. Koble til Strava på nytt.";
+  if (raw.includes("unauthorized"))
+    return "Du er ikke logget inn (session utløpt). Logg inn på nytt.";
   return raw;
 }
 
 export default function ImportRidesPage() {
-  const navigate = useNavigate();
+  const goDashboard = () => window.location.replace("/dashboard");
 
   const [period, setPeriod] = useState<Period>("3years"); // ✅ default hard krav
   const [status, setStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
@@ -110,7 +111,10 @@ export default function ImportRidesPage() {
         if (count > 0) {
           sessionStorage.setItem("cg_toast", `✅ ${count} rides importert!`);
         } else {
-          sessionStorage.setItem("cg_toast", `Ingen rides funnet i perioden (${prettyPeriod(period)}).`);
+          sessionStorage.setItem(
+            "cg_toast",
+            `Ingen rides funnet i perioden (${prettyPeriod(period)}).`
+          );
         }
       } catch {
         // ignore
@@ -122,12 +126,13 @@ export default function ImportRidesPage() {
   }
 
   function onSkip() {
-    // Ingen import: rett til dashboard
-    navigate("/dashboard", { replace: true });
+    // Ingen import: hard redirect for å re-mounte AuthGateProvider (unngå stale isOnboarded)
+    goDashboard();
   }
 
   function onContinue() {
-    navigate("/dashboard", { replace: true });
+    // hard redirect for å re-mounte AuthGateProvider
+    goDashboard();
   }
 
   return (
@@ -135,7 +140,8 @@ export default function ImportRidesPage() {
       <h1 className="text-2xl font-semibold">{title}</h1>
 
       <p className="mt-2 text-sm opacity-80">
-        Velg hvor langt tilbake vi skal hente rides fra Strava. Du kan også hoppe over og importere senere.
+        Velg hvor langt tilbake vi skal hente rides fra Strava. Du kan også hoppe over og importere
+        senere.
       </p>
 
       <div className="mt-6 space-y-3">

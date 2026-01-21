@@ -960,6 +960,15 @@ const DemoProgressionPanel: React.FC = () => {
 export default function DashboardPage() {
   const demo = isDemoMode();
 
+  async function onLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
+      // hard redirect to re-mount AuthGateProvider and avoid stale auth state
+      window.location.replace("/login");
+    }
+  }
+
   // Reusable brand header for real mode too
   const BrandHeader = () => (
     <div className="flex items-center justify-between">
@@ -971,6 +980,15 @@ export default function DashboardPage() {
         <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
         <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
       </Link>
+
+      <button
+        type="button"
+        onClick={onLogout}
+        className="px-3 py-2 rounded-2xl border border-slate-200 bg-white text-sm font-medium shadow-sm hover:bg-slate-50"
+        title="Logg ut"
+      >
+        Logg ut
+      </button>
     </div>
   );
 

@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { getPostAuthRoute } from "../lib/postAuthRoute";
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -74,9 +72,28 @@ export default function LoginPage() {
         return;
       }
 
-      // 3) PATCH 3: Login skal alltid til /dashboard
+      // 3) Post-auth init + finn riktig redirect via SSOT (profile/get)
       await getPostAuthRoute(); // behold hvis den init-er stores
-      navigate("/dashboard", { replace: true });
+
+      // Ikke stol på AuthGate her (den kan være "guest" til neste mount).
+      // Bruk profile/get som SSOT og gjør hard redirect for å re-mounte AuthGateProvider.
+      let next = "/onboarding";
+      try {
+        const profRes = await fetch("/api/profile/get", {
+          method: "GET",
+          credentials: "include",
+        });
+        if (profRes.ok) {
+          const data = (await profRes.json()) as any;
+          const p = data?.profile;
+          const onboarded = !!p && typeof p === "object" && p.onboarded === true;
+          next = onboarded ? "/dashboard" : "/onboarding";
+        }
+      } catch {
+        // ignore -> safe default /onboarding
+      }
+
+      window.location.replace(next);
     } catch {
       setError("Network error – kunne ikke kontakte serveren.");
     } finally {

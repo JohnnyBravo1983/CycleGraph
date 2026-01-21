@@ -73,7 +73,8 @@ export default function SignupPage() {
       await cgApi.authMe();
 
       // 3) Redirect explicitly to onboarding (Task 1.6 scope)
-      navigate("/onboarding", { replace: true });
+      window.location.assign("/onboarding");
+      return;
     } catch (err) {
       setError(mapSignupError(err));
     } finally {

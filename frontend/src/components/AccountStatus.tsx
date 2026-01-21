@@ -12,6 +12,7 @@ function fmtDur(sec: number): string {
 type Origin = "mount" | "poll" | "click";
 
 export function AccountStatus() {
+  console.log("[AccountStatus] RENDER", Date.now());
   const [st, setSt] = useState<StatusResp | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -21,6 +22,15 @@ export function AccountStatus() {
   const [tick, setTick] = useState(0);
   const [lastOrigin, setLastOrigin] = useState<Origin>("mount");
   const [lastAt, setLastAt] = useState<number | null>(null);
+
+  async function onLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
+      // ✅ hard reload så AuthGateProvider må re-sjekke /api/auth/me
+      window.location.assign("/login");
+    }
+  }
 
   async function load(origin: Origin) {
     // Guard: ikke start ny hvis vi allerede er i flight
@@ -91,7 +101,18 @@ export function AccountStatus() {
 
   return (
     <div className="relative z-50 pointer-events-auto rounded-xl border p-3 text-sm">
-      <div className="font-semibold">Account</div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-semibold">Account</div>
+
+        <button
+          type="button"
+          onClick={onLogout}
+          className="rounded-lg border px-2 py-1 text-xs pointer-events-auto relative z-50 hover:bg-slate-50"
+          title="Logg ut"
+        >
+          Logg ut
+        </button>
+      </div>
 
       {err ? (
         <div className="mt-1 opacity-80">Status error: {err}</div>
