@@ -77,11 +77,20 @@ app.include_router(local_auth_router)          # B3.2: Inkluder lokal auth route
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+    # Prod
+    "https://cyclegraph.app",
+    "https://www.cyclegraph.app",
+
+    # (valgfritt) Vercel preview/prod alias
+    "https://cycle-graph.vercel.app",
+
+    # Dev
     os.getenv("VITE_DEV_ORIGIN", "http://localhost:5173"),
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     os.getenv("ALT_DEV_ORIGIN", "http://localhost:5173"),
 ],
+
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
