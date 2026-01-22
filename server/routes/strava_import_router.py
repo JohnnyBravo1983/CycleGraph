@@ -18,6 +18,38 @@ router = APIRouter(prefix="/api/strava", tags=["strava-import"])
 STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
 STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
 
+# ----------------------------
+# Activity filtering (CycleGraph = cycling only)
+# ----------------------------
+_ALLOWED_SPORT_TYPES = {
+    # common cycling sports in Strava
+    "Ride",
+    "VirtualRide",
+    "EBikeRide",
+    "MountainBikeRide",
+    "GravelRide",
+    "EMountainBikeRide",
+}
+
+
+def _activity_sport_type(obj: Dict[str, Any]) -> Optional[str]:
+    # Strava can return both "sport_type" and "type" depending on endpoint
+    st = obj.get("sport_type")
+    if isinstance(st, str) and st.strip():
+        return st.strip()
+    t = obj.get("type")
+    if isinstance(t, str) and t.strip():
+        return t.strip()
+    return None
+
+
+def _is_supported_cycling_activity(obj: Dict[str, Any]) -> bool:
+    st = _activity_sport_type(obj)
+    # If unknown/missing, we treat as "unknown" and allow it through to meta-check later
+    if st is None:
+        return True
+    return st in _ALLOWED_SPORT_TYPES
+
 
 # ----------------------------
 # paths / io
@@ -156,8 +188,6 @@ def _refresh_tokens(refresh_token: str) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="strava_refresh_failed_bad_json")
 
 
-
-    pass
 def _maybe_refresh_and_save(uid: str, tokens: Dict[str, Any], token_path: Path) -> Dict[str, Any]:
     # refresh hvis utløpt eller snart utløpt (leeway)
     leeway = int(os.getenv("STRAVA_REFRESH_LEEWAY_SEC", "120"))
@@ -493,6 +523,7 @@ def sync_strava_activities(
 
     imported: List[str] = []
     errors: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
 
     # One Strava page per call (resumable)
     url_path = (
@@ -505,23 +536,7 @@ def sync_strava_activities(
         acts = _strava_get(url_path, uid, tokens, tp)
     except HTTPException as he:
         if he.status_code == 429:
-            # Vi vil IKKE stoppe frontend-runnen. Returner "rate-limited, prøv igjen"
-            ra = None
-            try:
-                if getattr(he, "headers", None):
-                    ra = he.headers.get("Retry-After")
-            except Exception:
-                ra = None
-
             retry_after_s = 15
-            try:
-                if ra is not None:
-                    retry_after_s = int(ra)
-            except Exception:
-                retry_after_s = 15
-
-            retry_after_s = max(5, min(retry_after_s, 120))
-
             return {
                 "ok": True,
                 "uid": uid,
@@ -536,6 +551,8 @@ def sync_strava_activities(
                 "imported": imported,
                 "errors_count": len(errors),
                 "errors": errors[:50],
+                "skipped_count": len(skipped),
+                "skipped": skipped[:50],
                 "next_page": page,  # samme page igjen
                 "done": False,
                 "rate_limited": True,
@@ -562,12 +579,13 @@ def sync_strava_activities(
             "imported": [],
             "errors_count": 0,
             "errors": [],
+            "skipped_count": 0,
+            "skipped": [],
             "next_page": None,
             "done": True,
         }
 
     # Enkelt "early onboarding cap": stopp etter max_activities basert på page/per_page
-    # (Importer aldri mer enn max_activities totalt)
     remaining_total = max(0, int(max_activities) - ((int(page) - 1) * int(per_page)))
     if remaining_total <= 0:
         return {
@@ -584,19 +602,35 @@ def sync_strava_activities(
             "imported": [],
             "errors_count": len(errors),
             "errors": errors[:50],
+            "skipped_count": len(skipped),
+            "skipped": skipped[:50],
             "next_page": None,
             "done": True,
             "capped": True,
         }
 
-    # Import up to batch_limit from this page, men aldri over remaining_total
     page_cap = min(int(batch_limit), remaining_total)
 
+    # PATCH 1B — filtrer i /sync før _import_one
     for a in acts:
         if len(imported) >= page_cap:
             break
 
-        rid = a.get("id") if isinstance(a, dict) else None
+        if not isinstance(a, dict):
+            continue
+
+        # Skip non-cycling activities early (based on summary fields)
+        if not _is_supported_cycling_activity(a):
+            rid0 = a.get("id")
+            skipped.append(
+                {
+                    "rid": str(rid0) if rid0 is not None else None,
+                    "sport_type": _activity_sport_type(a),
+                }
+            )
+            continue
+
+        rid = a.get("id")
         if rid is None:
             errors.append({"rid": None, "detail": "missing_activity_id"})
             continue
@@ -604,7 +638,13 @@ def sync_strava_activities(
         rid_s = str(rid)
 
         try:
-            _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=analyze)
+            out = _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=analyze)
+
+            # If meta-check inside _import_one decided to skip, don't count as imported
+            if isinstance(out, dict) and out.get("skipped") is True:
+                skipped.append({"rid": rid_s, "sport_type": out.get("sport_type")})
+                continue
+
             imported.append(rid_s)
 
             # ✅ throttle (reduserer 429 dramatisk)
@@ -615,9 +655,6 @@ def sync_strava_activities(
         except Exception as e:
             errors.append({"rid": rid_s, "status_code": 0, "detail": repr(e)})
 
-    # "done" hvis:
-    # - Strava ga < per_page (slutten), eller
-    # - vi er innenfor onboarding-cap og neste page ville være utenfor cap
     done_strava = len(acts) < per_page
     done_cap = ((int(page) * int(per_page)) >= int(max_activities))
     done = bool(done_strava or done_cap)
@@ -638,6 +675,8 @@ def sync_strava_activities(
         "imported": imported,
         "errors_count": len(errors),
         "errors": errors[:50],
+        "skipped_count": len(skipped),
+        "skipped": skipped[:50],
         "next_page": next_page,
         "done": done,
         "capped": bool(done_cap and not done_strava),
@@ -655,13 +694,31 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
     if not tp.exists():
         raise HTTPException(status_code=401, detail="missing_server_tokens_for_user")
 
-    # Sprint 4 SSOT ownership index
+    tokens = _read_json_utf8_sig(tp)
+    tokens = _maybe_refresh_and_save(uid, tokens, tp)
+
+    meta, streams = _fetch_activity_and_streams(rid, uid, tokens, tp)
+
+    # PATCH 1C — Meta-level gate: only store/analyze cycling activities
+    sport_type = _activity_sport_type(meta if isinstance(meta, dict) else {})
+    if sport_type is not None and sport_type not in _ALLOWED_SPORT_TYPES:
+        print(f"[STRAVA_IMPORT] skip non-cycling activity rid={rid} sport_type={sport_type}")
+        return {
+            "ok": True,
+            "uid": uid,
+            "rid": str(rid),
+            "skipped": True,
+            "sport_type": sport_type,
+            "reason": "non_cycling_activity",
+        }
+
+    # Now it's safe to add to SSOT index
     rides_now = _add_ride_to_sessions_index(uid, rid)
 
     # Canonicalize sessions_index.json (keep your existing behavior)
     try:
         p = _sessions_index_path(uid)
-        raw_obj = {}
+        raw_obj: Any = {}
         try:
             raw_obj = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
         except Exception:
@@ -700,11 +757,6 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
     except Exception as e:
         print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
 
-    tokens = _read_json_utf8_sig(tp)
-    tokens = _maybe_refresh_and_save(uid, tokens, tp)
-
-    meta, streams = _fetch_activity_and_streams(rid, uid, tokens, tp)
-
     profile: Dict[str, Any] = {}
     samples = _build_samples_v1(meta, streams)
 
@@ -714,10 +766,12 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
         "weather_hint": {},
         "strava": {
             "activity_id": str(rid),
+            "sport_type": sport_type,
+            "type": meta.get("type") if isinstance(meta, dict) else None,
             "mode": "indoor"
-            if meta.get("trainer") or meta.get("sport_type") == "VirtualRide"
+            if (isinstance(meta, dict) and (meta.get("trainer") or meta.get("sport_type") == "VirtualRide"))
             else "outdoor",
-            "start_date": meta.get("start_date"),
+            "start_date": meta.get("start_date") if isinstance(meta, dict) else None,
         },
     }
 
@@ -744,6 +798,7 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
         "analyze": analyze_out,
         "debug_session_written": debug_session_written,
         "debug_session_path": debug_session_path,
+        "sport_type": sport_type,
     }
 
 

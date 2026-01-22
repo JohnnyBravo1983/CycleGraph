@@ -28,18 +28,39 @@ def _repo_root_from_here() -> Path:
     # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
     return Path(__file__).resolve().parents[2]
 
-
 def _pick_result_path(session_id: str) -> Optional[Path]:
-    # Bruk eksisterende repo-root helper i denne fila
+    """
+    Pick the newest available result_<sid>.json across known locations.
+    Critical: avoid stale _debug results overriding fresh logs/results.
+    """
     root = _repo_root_from_here()
     cand = [
         root / "_debug" / f"result_{session_id}.json",
         root / "logs" / "results" / f"result_{session_id}.json",
     ]
+
+    existing: list[Path] = []
     for p in cand:
-        if p.exists() and p.is_file():
-            return p
-    return None
+        try:
+            if p.exists() and p.is_file():
+                existing.append(p)
+        except Exception:
+            pass
+
+    if not existing:
+        return None
+
+    # NEW: choose newest by mtime
+    try:
+        existing.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except Exception:
+        # fallback: keep original order, but still prefer logs if possible
+        for p in reversed(existing):
+            if "logs/results" in str(p).replace("\\", "/"):
+                return p
+        return existing[0]
+
+    return existing[0]
 
 
 def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
@@ -49,7 +70,7 @@ def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
     """
     try:
         with path.open("rb") as f:
-            chunk = f.read(64_000)  # PATCH: lettvekts-lesing
+            chunk = f.read(512_000)  # PATCH D2.1: increase to avoid missing t_abs in large files
         text = chunk.decode("utf-8", errors="ignore")
         m = _TABS_RE.search(text)
         if not m:
@@ -497,15 +518,18 @@ def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
     return m if isinstance(m, dict) else {}
 
 
+# -------------------------------
+# PATCH D1 — Låst “truth”: liste-watt = detalj-watt
+# -------------------------------
 def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[float]:
+    # List view must match session detail view (truth = precision_watt_avg)
     pw_avg = _to_float(doc.get("precision_watt_avg"))
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("precision_watt_avg"))
 
+    # Defensive fallbacks that still represent "precision" (NOT wheel/total)
     if pw_avg is None:
-        pw_avg = _to_float(metrics.get("model_watt_wheel"))
-    if pw_avg is None:
-        pw_avg = _to_float(metrics.get("total_watt"))
+        pw_avg = _to_float(metrics.get("precision_watt_pedal"))
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("precision_watt"))
 
@@ -537,12 +561,22 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "debug_source_path": str(source_path).replace("\\", "/"),
     }
 
+    # PATCH D2.2: Prefer Strava start_date if present (import writes this; analysis may carry it through)
+    try:
+        if row.get("start_time") in (None, ""):
+            st2 = (doc.get("strava") or {}).get("start_date")
+            if isinstance(st2, str) and st2.strip():
+                row["start_time"] = st2.strip()
+    except Exception:
+        pass
+
     try:
         if row.get("start_time") in (None, ""):
             sid2 = row.get("session_id") or row.get("ride_id")
             if sid2:
                 st = _trend_sessions_lookup_start_time(str(sid2))
-                if st:
+                # PATCH D2.3: Only accept if it looks like a real timestamp (not DATE-only / broken)
+                if st and (not _needs_start_time_fix(st)):
                     row["start_time"] = st
     except Exception:
         pass
@@ -707,8 +741,6 @@ async def list_all(
         }
 
     return out
-
-
 
 
 @router.get("/list/_debug_paths")

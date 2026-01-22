@@ -18,12 +18,3 @@ Viktige Comands
 .venv\Scripts\Activate.ps1
 
 
-Mal Paching 
-
-1
-Her er filen
-2
-Trenger hjelp med følgende patch/es
-3.
-Merge inn endringer og gi meg en ny komplett kode som erstatter hele blokken/filen jeg når delte som jeg kan  lime rett inn og erstatte hele det jeg
-har delt der endrigner er idomatisk merget inn uten bugs. 

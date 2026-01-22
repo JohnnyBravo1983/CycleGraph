@@ -766,4 +766,3 @@ der det er mulig så vi ikke får så vanvittig mye treff. MEn det må ikke gå 
 kvalitet.  
  Du har regien i denne arhbeidschatten
 
-16396031026,15890366129,16262232459,15635293008

@@ -119,7 +119,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 export default function ImportRidesPage() {
   const goDashboard = () => window.location.replace("/dashboard");
 
-  const [period, setPeriod] = useState<Period>("3years"); // ✅ default hard krav
+  // ✅ PATCH C1 — default period til 6 months
+  const [period, setPeriod] = useState<Period>("6months"); // ✅ early onboarding: only option enabled
+
+  // ✅ PATCH C2 — MVP launch copy + helper
+  const MVP_LAUNCH_COPY = "Available on MVP launch 1 April 2026";
+  const ENABLED_PERIOD: Period = "6months";
+
+  function isEnabledPeriod(p: Period) {
+    return p === ENABLED_PERIOD;
+  }
 
   const [status, setStatus] = useState<ImportStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -329,7 +338,6 @@ export default function ImportRidesPage() {
           const retryS = safeNum(ok.retry_after_s, 15);
           const waitS = Math.min(120, Math.max(5, retryS));
           setProgressMsg(`Rate limited – venter ${waitS}s og fortsetter (samme page)…`);
-          // backend setter next_page=page, men vi holder oss eksplisitt på samme
           await sleep(waitS * 1000);
           continue;
         }
@@ -381,10 +389,8 @@ export default function ImportRidesPage() {
 
         // Ikke ferdig: gå til neste page (backend gir fasit)
         if (nxt && Number.isFinite(nxt) && nxt >= currentPage) {
-          // normal: nxt = currentPage+1
           currentPage = nxt;
         } else {
-          // fallback hvis backend ikke gir next_page: øk lokalt
           currentPage += 1;
         }
 
@@ -442,63 +448,97 @@ export default function ImportRidesPage() {
         senere.
       </p>
 
-      {/* Note about backend caps */}
-      {(period === "3years" || period === "all") && (
-        <div className="mt-3 text-xs text-amber-700">
-          Merk: Backend henter i batches og har cap per kall (days ≤ 365, per_page ≤ 200, batch_limit
-          ≤ 200). “3 years / all” betyr derfor “så langt som server-cap tillater” i denne versjonen.
-          Vi kan utvide til flere vinduer senere.
-        </div>
-      )}
+      {/* ✅ PATCH C4 — mer relevant melding nå som kun 6 months er aktiv */}
+      <div style={{ marginTop: 8, fontSize: 13 }}>
+        Vi importerer opptil 150 nylige sykkelturer for å komme raskt i gang.
+      </div>
 
       <div className="mt-6 space-y-3">
-        <label className="flex items-center gap-3 cursor-pointer">
+        {/* ✅ PATCH C3 — disable 3 alternativer + MVP copy */}
+        <label
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 10,
+            opacity: 0.45,
+            cursor: "not-allowed",
+          }}
+        >
           <input
             type="radio"
             name="period"
             value="all"
             checked={period === "all"}
-            disabled={disabled}
-            onChange={() => setPeriod("all")}
+            disabled
+            onChange={() => {}}
           />
           <span>All</span>
+          <span style={{ fontSize: 12 }}>{MVP_LAUNCH_COPY}</span>
         </label>
 
-        <label className="flex items-center gap-3 cursor-pointer">
+        <label
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 10,
+            opacity: 0.45,
+            cursor: "not-allowed",
+          }}
+        >
           <input
             type="radio"
             name="period"
             value="3years"
             checked={period === "3years"}
-            disabled={disabled}
-            onChange={() => setPeriod("3years")}
+            disabled
+            onChange={() => {}}
           />
           <span>Last 3 years</span>
-          <span className="text-xs opacity-70">(default)</span>
+          <span style={{ fontSize: 12 }}>{MVP_LAUNCH_COPY}</span>
         </label>
 
-        <label className="flex items-center gap-3 cursor-pointer">
+        <label
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 10,
+            opacity: 0.45,
+            cursor: "not-allowed",
+          }}
+        >
           <input
             type="radio"
             name="period"
             value="1year"
             checked={period === "1year"}
-            disabled={disabled}
-            onChange={() => setPeriod("1year")}
+            disabled
+            onChange={() => {}}
           />
           <span>Last 1 year</span>
+          <span style={{ fontSize: 12 }}>{MVP_LAUNCH_COPY}</span>
         </label>
 
-        <label className="flex items-center gap-3 cursor-pointer">
+        <label
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 10,
+            background: "#fff3cd",
+            border: "1px solid #ffe69c",
+            padding: "8px 10px",
+            borderRadius: 8,
+          }}
+        >
           <input
             type="radio"
             name="period"
             value="6months"
             checked={period === "6months"}
-            disabled={disabled}
+            disabled={disabled || !isEnabledPeriod("6months")}
             onChange={() => setPeriod("6months")}
           />
           <span>Last 6 months</span>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>(default)</span>
         </label>
       </div>
 
