@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+.venv/
+venv/
+
+# Node / frontend build
+frontend/node_modules/
+frontend/dist/
+landing/node_modules/
+landing/dist/
+
+# Git / misc
+.git/
+.gitignore
+.DS_Store
+
+# Data/state (skal mountes som volume i prod)
+state/
+data/
+logs/
+_debug/
