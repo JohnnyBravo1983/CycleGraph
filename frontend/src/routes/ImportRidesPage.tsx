@@ -192,12 +192,12 @@ export default function ImportRidesPage() {
     qs.set("batch_limit", String(opts.batchLimit));
     qs.set("analyze", opts.analyze ? "1" : "0");
 
-    const resp = await fetch(`/api/strava/sync?${qs.toString()}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      signal: opts.signal,
-    });
+  const resp = await fetch(`/api/strava/sync?${qs.toString()}`, {
+  method: "GET",
+  credentials: "include",
+  signal: opts.signal,
+});
+
 
     let data: SyncResp | null = null;
     try {
