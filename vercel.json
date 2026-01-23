@@ -1,6 +1,14 @@
 ﻿{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [{"key": "X-Config-Test", "value": "v1"}]
+    }
+  ],
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://cyclegraph-api.fly.dev/api/:path*" },
-    { "source": "/:path*", "destination": "/" }
+    {
+      "source": "/api/:path*",
+      "destination": "https://cyclegraph-api.fly.dev/api/:path*"
+    }
   ]
 }
