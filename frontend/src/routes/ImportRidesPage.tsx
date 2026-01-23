@@ -195,11 +195,14 @@ export default function ImportRidesPage() {
 
     // ✅ PATCH S2.5B-IMPORT-BASEURL (bruk backend base, ikke relativ /api)
     const url = `${cgApi.baseUrl()}/api/strava/sync?${qs.toString()}`;
-    const resp = await fetch(url, {
-      method: "GET",
-      credentials: "include",
-      signal: opts.signal,
-    });
+  const resp = await fetch(url, {
+  method: "POST",
+  credentials: "include",
+  headers: { "Content-Type": "application/json" },
+  body: "{}",
+  signal: opts.signal,
+});
+
 
     let data: SyncResp | null = null;
     try {
