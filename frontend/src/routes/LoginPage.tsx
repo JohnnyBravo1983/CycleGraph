@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { getPostAuthRoute } from "../lib/postAuthRoute";
+import { cgApi } from "../lib/cgApi";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -34,7 +35,7 @@ export default function LoginPage() {
       const emailTrimmed = email.trim();
 
       // 1) POST /api/auth/login (backend setter HttpOnly cookie: cg_auth)
-      const loginRes = await fetch("/api/auth/login", {
+      const loginRes = await fetch(`${cgApi.baseUrl()}/api/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -58,7 +59,7 @@ export default function LoginPage() {
       }
 
       // 2) Verifiser at session faktisk ble etablert: GET /api/auth/me
-      const meRes = await fetch("/api/auth/me", {
+      const meRes = await fetch(`${cgApi.baseUrl()}/api/auth/me`, {
         method: "GET",
         credentials: "include",
       });
@@ -79,7 +80,7 @@ export default function LoginPage() {
       // Bruk profile/get som SSOT og gjør hard redirect for å re-mounte AuthGateProvider.
       let next = "/onboarding";
       try {
-        const profRes = await fetch("/api/profile/get", {
+        const profRes = await fetch(`${cgApi.baseUrl()}/api/profile/get`, {
           method: "GET",
           credentials: "include",
         });

@@ -25,7 +25,8 @@ export function AccountStatus() {
 
   async function onLogout() {
     try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      await fetch(`${cgApi.baseUrl()}/api/auth/logout`, { method: "POST", credentials: "include" });
+
     } finally {
       // ✅ hard reload så AuthGateProvider må re-sjekke /api/auth/me
       window.location.assign("/login");

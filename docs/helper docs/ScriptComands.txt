@@ -17,4 +17,57 @@ Viktige Comands
 # venv kommando
 .venv\Scripts\Activate.ps1
 
+#Deploy comando fra Repo Rot
+& "$env:USERPROFILE\.fly\bin\flyctl.exe" deploy
 
+
+
+
+Hva fly deploy faktisk gjør (så du vet hva som skjer)
+
+Når du kjører fly deploy fra repo-root:
+
+🔍 Leser fly.toml
+
+🐳 Bygger nytt image (Docker/Buildpacks)
+
+🚀 Pusher imaget
+
+🔁 Ruller appen (rolling deploy)
+
+♻️ Starter nye maskiner med samme secrets + ny kode
+
+Alt dette skjer automatisk.
+
+Når trenger du IKKE fly deploy?
+
+Kun når du ikke har endret kode:
+
+Endrer secrets → fly secrets set (auto-restart)
+
+Restarter manuelt → fly apps restart
+
+Logger / inspiserer → fly logs, fly ssh console
+
+Men så fort du har endret Python-kode → fly deploy.
+
+Typisk arbeidsflyt (riktig og enkel)
+git status
+git add .
+git commit -m "Fix signup SSOT"
+fly deploy
+
+
+Ferdig.
+
+Vanlige spørsmål (kjapt)
+
+Må jeg bygge manuelt? Nei.
+
+Må jeg stoppe appen først? Nei.
+
+Mister jeg state? Nei (Fly volume bevares).
+
+Må jeg sette secrets på nytt? Nei.
+
+Tar det lang tid? 30–90 sek typisk.

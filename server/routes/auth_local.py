@@ -59,23 +59,35 @@ def _clear_auth_cookie(resp: Response) -> None:
 @router.post("/signup")
 def signup(req: Request, payload: SignupIn):
     """
-    PATCH 2 (Task 1.x / 3E presisering):
-    - Generér uid (ikke fra cg_uid-cookie)
-    - signup_for_uid(uid, email, password)
-    - cg_auth (COOKIE_NAME) er autoritativ
-    - (valgfritt) sett cg_uid=uid som legacy helper cookie
+    PATCH 1 – Backend: gjør signup alltid “fresh”
+    - Ignorer eksisterende cookies
+    - Slett eksisterende auth-cookies eksplisitt
+    - Deretter opprett ny identitet (uid)
     """
+
+    # 🔒 HARD RESET AUTH CONTEXT (signup er alltid identitetsskapende)
+    # NB: Slett først, så setter vi ny state etterpå.
+    resp = JSONResponse({"ok": False})  # midlertidig; overskrives før return
+    resp.delete_cookie(COOKIE_NAME, path="/")
+    resp.delete_cookie("cg_uid", path="/")
+    resp.delete_cookie("cg_next", path="/")
+    resp.delete_cookie("cg_oauth_state", path="/")
+
+    # Generér ny uid (alltid fresh)
     uid = "u_" + secrets.token_urlsafe(16).replace("-", "").replace("_", "")
 
     try:
         u = signup_for_uid(uid, payload.email, payload.password)
     except ValueError as e:
+        # Returner med cookies allerede slettet for å unngå halv-state
         raise HTTPException(status_code=400, detail=str(e))
 
     token = sign_session(uid, ttl_seconds=COOKIE_TTL)
 
-    # ✅ PATCH: bruk JSONResponse (unngå Content-Length/body crash)
+    # ✅ bruk JSONResponse (unngå Content-Length/body crash)
     resp = JSONResponse({"ok": True, "uid": u["uid"], "email": u["email"]})
+
+    # 🔥 OVERSKRIV ALL TIDLIGERE AUTH STATE
     _set_auth_cookie(resp, token)
 
     # legacy helper cookie (ikke autoritativ identitet)
@@ -83,10 +95,15 @@ def signup(req: Request, payload: SignupIn):
         key="cg_uid",
         value=uid,
         httponly=True,
-        samesite="lax",
         secure=COOKIE_SECURE,
+        samesite="lax",
         path="/",
+        max_age=COOKIE_TTL,
     )
+
+    # 🔥 EKSTRA: slett evt gamle helpers
+    resp.delete_cookie("cg_next", path="/")
+    resp.delete_cookie("cg_oauth_state", path="/")
 
     return resp
 

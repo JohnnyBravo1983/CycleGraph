@@ -1,4 +1,3 @@
-# server/auth/local_auth.py
 from __future__ import annotations
 
 import base64
@@ -224,9 +223,9 @@ def signup_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:
     if not email_norm or "@" not in email_norm:
         raise ValueError("Invalid email.")
 
-    # Enforce unique email across all local users
+    # Enforce unique email across all local users (email er global SSOT)
     existing_uid = get_uid_for_email(email_norm)
-    if existing_uid and existing_uid != uid:
+    if existing_uid:
         raise ValueError("Email already registered.")
 
     existing = load_auth(uid)

@@ -1,7 +1,7 @@
 // frontend/src/routes/DashboardPage.tsx
 import React from "react";
 import { Link } from "react-router-dom";
-
+import { cgApi } from "../lib/cgApi";
 import { StravaImportCard } from "../components/StravaImportCard";
 import { AccountStatus } from "../components/AccountStatus";
 import { isDemoMode } from "../demo/demoMode";
@@ -962,7 +962,8 @@ export default function DashboardPage() {
 
   async function onLogout() {
     try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      await fetch(`${cgApi.baseUrl()}/api/auth/logout`, { method: "POST", credentials: "include" });
+
     } finally {
       // hard redirect to re-mount AuthGateProvider and avoid stale auth state
       window.location.replace("/login");
