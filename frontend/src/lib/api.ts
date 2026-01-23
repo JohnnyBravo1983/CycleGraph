@@ -46,21 +46,23 @@ function normalizeBase(url?: string): string | undefined {
  * - Du kan alltid sende inn path som starter med "/api/..."
  */
 function buildApiUrl(base: string, pathStartingWithApi: string): URL {
-  const b = normalizeBase(base) ?? base;
-  const baseEndsWithApi = b.endsWith("/api");
-
-  // Hvis base allerede slutter på /api, fjern "/api" fra pathen for å unngå dobbel.
-  const effectivePath = baseEndsWithApi
-    ? pathStartingWithApi.replace(/^\/api\b/, "")
-    : pathStartingWithApi;
-
-  // Sørg for trailing slash i base når vi bruker URL-konstruktør med relativ path
-  const baseForUrl = b.endsWith("/") ? b : `${b}/`;
-  const rel = effectivePath.startsWith("/")
-    ? effectivePath.slice(1)
-    : effectivePath;
-
-  return new URL(rel, baseForUrl);
+  if (!base) {
+    throw new Error("BASE URL is not defined");
+  }
+  
+  const cleanBase = base.replace(/\/+$/, "");
+  const baseEndsWithApi = cleanBase.endsWith("/api");
+  let effectivePath = pathStartingWithApi;
+  
+  if (baseEndsWithApi && pathStartingWithApi.startsWith("/api")) {
+    effectivePath = pathStartingWithApi.replace(/^\/api/, "");
+  }
+  
+  const fullPath = effectivePath.startsWith("/") 
+    ? effectivePath 
+    : "/" + effectivePath;
+  
+  return new URL(cleanBase + fullPath);
 }
 
 type FetchSessionOpts = {
