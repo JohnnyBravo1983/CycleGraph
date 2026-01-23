@@ -17,5 +17,5 @@ primary_region = "ams"
     hard_limit = 100
 
 [[mounts]]
-  source = "cyclegraph_state"
-  destination = "/app/state"
+  source = "cg_state"
+  destination = "/data"
