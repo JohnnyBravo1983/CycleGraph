@@ -1,4 +1,21 @@
 // frontend/src/main.tsx
+// FETCH INTERCEPTOR - redirect /api/* to backend
+(function() {
+  const BACKEND = 'https://api.cyclegraph.app';
+  const originalFetch = window.fetch;
+  
+  window.fetch = function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    if (typeof input === 'string' && input.startsWith('/api/')) {
+      console.log('[INTERCEPTOR] Redirect:', input, '→', BACKEND + input);
+      input = BACKEND + input;
+    }
+    return originalFetch(input, init);
+  };
+  
+  console.log('[INTERCEPTOR] Loaded from main.tsx');
+})();
+
+// frontend/src/main.tsx
 import "./index.css";
 import "./devFetchShim";
 import React from "react";
