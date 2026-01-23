@@ -18,4 +18,4 @@ primary_region = "ams"
 
 [[mounts]]
   source = "cg_state"
-  destination = "/data"
+  destination = "/app/state"
