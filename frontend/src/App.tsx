@@ -57,7 +57,14 @@ export default function App() {
 
       <DemoBanner />
 
-      <main className="max-w-5xl mx-auto px-6 py-6">
+      {/* PROD FINGERPRINT (temporary) */}
+      <div className="max-w-5xl mx-auto px-6">
+        <div className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
+          PROD FINGERPRINT 2026-01-23
+        </div>
+      </div>
+
+        <main className="max-w-5xl mx-auto px-6 py-6">
         <Outlet />
       </main>
     </div>
