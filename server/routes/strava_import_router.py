@@ -59,12 +59,51 @@ def _repo_root_from_here() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _debug_fs(where: str, uid: Optional[str] = None) -> None:
+    """
+    Debug helper to understand where we write state/users/<uid> on Fly.
+    Safe to keep for now; produces log lines only.
+    """
+    try:
+        cwd = Path.cwd()
+        repo = _repo_root_from_here()
+        state = repo / "state"
+        users = state / "users"
+        target = (users / uid) if uid else None
+
+        print(f"[FSDBG] where={where}")
+        print(f"[FSDBG] cwd={cwd} exists={cwd.exists()}")
+        print(f"[FSDBG] __file__={Path(__file__).resolve()}")
+        print(f"[FSDBG] repo_root={repo} exists={repo.exists()}")
+        print(f"[FSDBG] state={state} exists={state.exists()}")
+        print(f"[FSDBG] users={users} exists={users.exists()}")
+
+        # list a few entries defensively (avoid huge spam)
+        try:
+            print(f"[FSDBG] cwd_list={sorted([p.name for p in cwd.iterdir()])[:40]}")
+        except Exception as e:
+            print(f"[FSDBG] cwd_list_error={type(e).__name__}: {e}")
+
+        try:
+            if repo.exists():
+                print(f"[FSDBG] repo_list={sorted([p.name for p in repo.iterdir()])[:40]}")
+        except Exception as e:
+            print(f"[FSDBG] repo_list_error={type(e).__name__}: {e}")
+
+        if target is not None:
+            print(f"[FSDBG] user_dir={target} exists={target.exists()}")
+
+    except Exception as e:
+        print(f"[FSDBG] ERROR where={where}: {type(e).__name__}: {e}")
+
+
 def _user_dir(uid: str) -> Path:
     return _repo_root_from_here() / "state" / "users" / uid
 
 
 def _tokens_path(uid: str) -> Path:
     return _user_dir(uid) / "strava_tokens.json"
+
 
 
 # ----------------------------
