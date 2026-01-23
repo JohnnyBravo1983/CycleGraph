@@ -1,28 +1,34 @@
 ﻿{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://cyclegraph-api.fly.dev/api/:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/"
+    }
+  ],
   "headers": [
     {
-      "source": "/assets/(.*)\\.js",
+      "source": "/assets/:path*.js",
       "headers": [
         { "key": "Content-Type", "value": "text/javascript; charset=utf-8" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
     },
     {
-      "source": "/assets/(.*)\\.mjs",
+      "source": "/assets/:path*.mjs",
       "headers": [
         { "key": "Content-Type", "value": "text/javascript; charset=utf-8" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
     },
     {
-      "source": "/assets/(.*)\\.css",
+      "source": "/assets/:path*.css",
       "headers": [
         { "key": "Content-Type", "value": "text/css; charset=utf-8" }
       ]
     }
-  ],
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "^(?!/api/).*$", "dest": "/index.html" }
   ]
 }
