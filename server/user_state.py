@@ -1,10 +1,26 @@
 import os
 import json
+from pathlib import Path
 from typing import Any, Dict, List
 
 
+def state_root() -> Path:
+    """
+    Source of truth for persistent state.
+    - Fly: /data/state (via volume mount + CG_STATE_DIR)
+    - Local/dev: <repo>/state
+    """
+    env = (os.getenv("CG_STATE_DIR") or "").strip()
+    if env:
+        return Path(env)
+    # fallback: eksisterende repo-root/state
+    return Path(__file__).resolve().parents[1] / "state"
+
+
 def user_dir(base_dir: str, uid: str) -> str:
-    return os.path.join(base_dir, "state", "users", uid)
+    # PATCH: use state_root() as SSOT for where "state" lives.
+    # base_dir is kept for compatibility with existing call sites.
+    return str(state_root() / "users" / uid)
 
 
 def user_sessions_index_path(base_dir: str, uid: str) -> str:
@@ -22,7 +38,7 @@ def load_user_sessions_index(base_dir: str, user_id: str) -> Dict[str, Any]:
     Leser state/users/<uid>/sessions_index.json.
     Tåler UTF-8 BOM (utf-8-sig) og returnerer alltid en dict med "sessions": list.
     """
-    path = os.path.join(base_dir, "state", "users", str(user_id), "sessions_index.json")
+    path = os.path.join(user_dir(base_dir, str(user_id)), "sessions_index.json")
     if not os.path.exists(path):
         return {"sessions": []}
 
@@ -73,7 +89,8 @@ def maybe_bootstrap_demo_sessions(base_dir: str, uid: str) -> None:
     if os.path.exists(u_path):
         return
 
-    g_path = os.path.join(base_dir, "state", "sessions_index.json")
+    # global sessions index under state_root()
+    g_path = str(state_root() / "sessions_index.json")
     if not os.path.exists(g_path):
         # Ingen global index å bootstrappe fra (og vi skal ikke skrive en tom index her)
         return
