@@ -113,7 +113,16 @@ function baseUrl(): string {
 // ✅ PATCH: trygg URL-builder som håndterer base="" (same-origin)
 function apiUrl(pathStartingWithApi: string): string {
   const base = baseUrl();
-  // base er alltid satt nå, men behold logikken defensivt
+  
+  // HARDCODED FIX: Always use full backend URL in production
+  if (import.meta.env.PROD) {
+    const cleanPath = pathStartingWithApi.startsWith('/api') 
+      ? pathStartingWithApi 
+      : '/api' + pathStartingWithApi;
+    return 'https://api.cyclegraph.app' + cleanPath;
+  }
+  
+  // Dev: use buildApiUrl
   if (!base) return pathStartingWithApi;
   return buildApiUrl(base, pathStartingWithApi).toString();
 }
