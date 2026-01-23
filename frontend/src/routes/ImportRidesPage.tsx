@@ -1,5 +1,6 @@
 // frontend/src/routes/ImportRidesPage.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cgApi } from "../lib/cgApi";
 
 type Period = "all" | "3years" | "1year" | "6months";
 
@@ -192,12 +193,13 @@ export default function ImportRidesPage() {
     qs.set("batch_limit", String(opts.batchLimit));
     qs.set("analyze", opts.analyze ? "1" : "0");
 
-  const resp = await fetch(`/api/strava/sync?${qs.toString()}`, {
-  method: "GET",
-  credentials: "include",
-  signal: opts.signal,
-});
-
+    // ✅ PATCH S2.5B-IMPORT-BASEURL (bruk backend base, ikke relativ /api)
+    const url = `${cgApi.baseUrl()}/api/strava/sync?${qs.toString()}`;
+    const resp = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      signal: opts.signal,
+    });
 
     let data: SyncResp | null = null;
     try {
@@ -464,14 +466,7 @@ export default function ImportRidesPage() {
             cursor: "not-allowed",
           }}
         >
-          <input
-            type="radio"
-            name="period"
-            value="all"
-            checked={period === "all"}
-            disabled
-            onChange={() => {}}
-          />
+          <input type="radio" name="period" value="all" checked={period === "all"} disabled onChange={() => {}} />
           <span>All</span>
           <span style={{ fontSize: 12 }}>{MVP_LAUNCH_COPY}</span>
         </label>
@@ -506,14 +501,7 @@ export default function ImportRidesPage() {
             cursor: "not-allowed",
           }}
         >
-          <input
-            type="radio"
-            name="period"
-            value="1year"
-            checked={period === "1year"}
-            disabled
-            onChange={() => {}}
-          />
+          <input type="radio" name="period" value="1year" checked={period === "1year"} disabled onChange={() => {}} />
           <span>Last 1 year</span>
           <span style={{ fontSize: 12 }}>{MVP_LAUNCH_COPY}</span>
         </label>
@@ -554,9 +542,7 @@ export default function ImportRidesPage() {
           <div className="text-sm opacity-90">
             <div>
               <b>Importert:</b> {importedTotal}
-              {lastBatchCount > 0 ? (
-                <span className="opacity-80"> (siste batch {lastBatchCount})</span>
-              ) : null}
+              {lastBatchCount > 0 ? <span className="opacity-80"> (siste batch {lastBatchCount})</span> : null}
             </div>
             <div className="opacity-80">
               <b>Page:</b> {page}
@@ -595,12 +581,7 @@ export default function ImportRidesPage() {
       )}
 
       <div className="mt-8 flex gap-3 flex-wrap">
-        <button
-          className="px-4 py-2 rounded border"
-          disabled={disabled}
-          onClick={onImportClick}
-          aria-disabled={disabled}
-        >
+        <button className="px-4 py-2 rounded border" disabled={disabled} onClick={onImportClick} aria-disabled={disabled}>
           Importer rides
         </button>
 
