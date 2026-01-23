@@ -1,6 +1,7 @@
 ﻿{
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://cyclegraph-api.fly.dev/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+  "routes": [
+    { "src": "^/api/(.*)$", "dest": "https://cyclegraph-api.fly.dev/api/$1" },
+    { "handle": "filesystem" },
+    { "src": "^(?!/api/).*$", "dest": "/index.html" }
   ]
 }
