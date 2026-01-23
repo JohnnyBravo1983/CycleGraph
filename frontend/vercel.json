@@ -1,8 +1,4 @@
-{
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://cyclegraph-api.fly.dev/api/$1" },
-    { "source": "/(.*)", "destination": "/" }
-  ],
+﻿{
   "headers": [
     {
       "source": "/assets/(.*)\\.js",
@@ -24,5 +20,9 @@
         { "key": "Content-Type", "value": "text/css; charset=utf-8" }
       ]
     }
+  ],
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "^(?!/api/).*$", "dest": "/index.html" }
   ]
 }
