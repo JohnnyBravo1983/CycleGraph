@@ -1,0 +1,6 @@
+﻿{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://cyclegraph-api.fly.dev/api/:path*" },
+    { "source": "/:path*", "destination": "/" }
+  ]
+}
