@@ -11,6 +11,26 @@
     <!-- Forbedrer tekstgjengivelse og layout på iOS/Android -->
     <meta name="theme-color" content="#ffffff" />
     <meta name="mobile-web-app-capable" content="yes" />
+     <!-- Global fetch interceptor for /api/* debugging -->
+    <script>
+      (function() {
+        const BACKEND = 'https://api.cyclegraph.app';
+        const originalFetch = window.fetch;
+        window.fetch = function(input, init) {
+          if (typeof input === 'string' && input.startsWith('/api/')) {
+            console.log('[Fetch Interceptor]', input, '→', BACKEND + input);
+            input = BACKEND + input;
+          }
+          return originalFetch(input, init);
+        };
+      })();
+    </script>
+  </head>
+    
+    
+    
+    
+    
     <meta name="apple-mobile-web-app-capable" content="yes" />
   </head>
 
