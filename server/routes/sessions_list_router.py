@@ -28,39 +28,44 @@ def _repo_root_from_here() -> Path:
     # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
     return Path(__file__).resolve().parents[2]
 
-def _pick_result_path(session_id: str) -> Optional[Path]:
+def _pick_result_path(sid: str) -> Path | None:
     """
-    Pick the newest available result_<sid>.json across known locations.
-    Critical: avoid stale _debug results overriding fresh logs/results.
+    ✅ PROD FIX: Search actual filesystem paths where analyze writes
+    Priority:
+    1. /app/out/result_{sid}.json
+    2. /app/src/cyclegraph/result_{sid}.json
+    3. Debug folders (if any)
+    4. Legacy paths
     """
-    root = _repo_root_from_here()
-    cand = [
-        root / "_debug" / f"result_{session_id}.json",
-        root / "logs" / "results" / f"result_{session_id}.json",
+    root = Path("/app")
+    
+    # Primary locations (prod-verified 2026-01-24)
+    candidates = [
+        root / "out" / f"result_{sid}.json",
+        root / "src" / "cyclegraph" / f"result_{sid}.json",
     ]
-
-    existing: list[Path] = []
-    for p in cand:
-        try:
-            if p.exists() and p.is_file():
-                existing.append(p)
-        except Exception:
-            pass
-
-    if not existing:
-        return None
-
-    # NEW: choose newest by mtime
-    try:
-        existing.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    except Exception:
-        # fallback: keep original order, but still prefer logs if possible
-        for p in reversed(existing):
-            if "logs/results" in str(p).replace("\\", "/"):
-                return p
-        return existing[0]
-
-    return existing[0]
+    
+    for path in candidates:
+        if path.exists():
+            return path
+    
+    # Debug folders (edge cases)
+    for debug_dir in ["_debug_WithWeather", "_debug_NoWeather", "_debug"]:
+        candidate = root / debug_dir / f"result_{sid}.json"
+        if candidate.exists():
+            return candidate
+    
+    # Legacy/localhost paths
+    legacy = [
+        root / "logs" / "results" / f"result_{sid}.json",
+        Path.cwd() / "logs" / "results" / f"result_{sid}.json",
+    ]
+    
+    for path in legacy:
+        if path.exists():
+            return path
+    
+    return None
 
 
 def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
