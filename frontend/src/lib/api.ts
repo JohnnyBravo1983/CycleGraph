@@ -47,8 +47,8 @@ function normalizeBase(url?: string): string | undefined {
  * - Tåler at BASE er "http://localhost:5175" ELLER "http://localhost:5175/api"
  * - Du kan alltid sende inn path som starter med "/api/..."
  */
-function buildApiUrl(base: string, pathStartingWithApi: string): string {
-  return base + pathStartingWithApi;
+function buildApiUrl(base: string, pathStartingWithApi: string): URL {
+  return new URL(base + pathStartingWithApi);
 }
 
 type FetchSessionOpts = {
