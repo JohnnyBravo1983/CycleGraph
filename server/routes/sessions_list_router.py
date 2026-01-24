@@ -589,7 +589,8 @@ def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dic
     ✅ Scope-minimum for /list/all:
     - vi bruker sessions_index.json som SSOT for hvilke ride_ids som tilhører user_id
     """
-    index_path = root / "state" / "users" / uid / "sessions_index.json"
+    from server.user_state import state_root
+    index_path = state_root() / "users" / uid / "sessions_index.json"
 
     idx = None
     wanted: set[str] = set()
