@@ -20,8 +20,14 @@ Viktige Comands
 #Deploy comando fra Repo Rot
 & "$env:USERPROFILE\.fly\bin\flyctl.exe" deploy
 
+viktige comands fly 
 
+##Start machine
+fly machine start 286ed97be1d938 -a cyclegraph-api
+## start fly terminal 
+fly ssh console -a cyclegraph-api
 
+https://api.cyclegraph.app/api/sessions/list/all?debug=1
 
 Hva fly deploy faktisk gjør (så du vet hva som skjer)
 
@@ -58,16 +64,532 @@ git commit -m "Fix signup SSOT"
 fly deploy
 
 
-Ferdig.
+📦 FULL KONTEKSTBLOKK - Sprint 3: Data Enrichment & Completion
 
-Vanlige spørsmål (kjapt)
+🎯 MÅL FOR SPRINT 3
+Få ALLE rides synlige med KOMPLETT metadata:
 
-Må jeg bygge manuelt? Nei.
+✅ Precision Watt (virker!)
+❌ Start time (mangler)
+❌ Distance km (mangler)
+❌ Weather source (mangler)
+❌ Profile label (mangler)
+❌ 55 av 67 rides mangler result-filer
 
-Må jeg stoppe appen først? Nei.
 
-Mister jeg state? Nei (Fly volume bevares).
+✅ HVA SOM VIRKER NÅ (GJENNOMBRUDD!)
+Backend API
 
-Må jeg sette secrets på nytt? Nei.
+✅ /api/sessions/list/all returnerer data (12 rides)
+✅ precision_watt_avg vises korrekt (f.eks. 256.07W)
+✅ Result-filer finnes og inneholder komplett data:
+jsonCopy{
+  "precision_watt": 256.07,
+  "metrics": { ... },
+  "weather_used": { "wind_ms": 3.0, ... },
+  "distance_km": 45.2,
+  "start_time": "2024-11-10T10:30:00Z"
+}
 
-Tar det lang tid? 30–90 sek typisk.
+✅ _pick_result_path() finner filer i /app/_debug_WithWeather/
+✅ State path fikset: /app/state/ (ikke /data/state/)
+
+Frontend
+
+✅ /rides page viser 12 rides
+✅ Precision Watt vises
+✅ Ride ID vises
+❌ Alle andre felter er null/tom
+
+Infrastructure
+
+✅ Fly.io volume persistent (/app/state/)
+✅ Vercel SPA routing virker
+✅ CORS fungerer
+✅ Auth/cookies fungerer
+
+
+❌ HVA SOM IKKE VIRKER (PRIORITERT)
+🔴 KRITISK: Incomplete metadata parsing
+Problem:
+jsonCopy{
+  "precision_watt_avg": 256.07,  ← ✅ Virker
+  "start_time": null,            ← ❌ Finnes i result-fil men parses ikke
+  "distance_km": null,           ← ❌ Finnes i result-fil men parses ikke
+  "weather_source": null,        ← ❌ Finnes i result-fil men parses ikke
+  "profile_label": null          ← ❌ Finnes i result-fil men parses ikke
+}
+Årsak: _row_from_doc() i sessions_list_router.py henter ikke riktige felter fra result-JSON.
+Bevis:
+bashCopy# Result-filen HAR dataen:
+cat /app/_debug_WithWeather/result_16127771071.json
+→ Inneholder "distance_km", "start_time", "weather_used", etc.
+
+🟡 VIKTIG: 55 rides mangler result-filer
+Problem:
+Copywanted_count: 67      ← Sessions index har 67 ride IDs
+rows_returned: 12     ← Bare 12 result-filer funnet
+Årsak: Kun 12 av 67 rides har blitt analysert og skrevet til result-filer.
+Mulige årsaker:
+
+Strava rate limit stoppet import midtveis
+Analyze feiler stille for enkelte rides
+Result-filer ligger i ukjent lokasjon
+
+Test i SSH:
+bashCopy# Tell result-filer per user:
+ls /app/_debug_WithWeather/result_*.json | wc -l
+ls /app/out/result_*.json | wc -l
+find /app -name "result_*.json" | wc -l
+
+🟢 NICE-TO-HAVE: UI forbedringer
+Mangler i /rides visning:
+
+End time
+Duration
+Elevation gain
+Better formatting (dato i stedet for null)
+Loading states
+Error messages
+
+
+🔍 DIAGNOSTISERT ROOT CAUSE
+Problem 1: _row_from_doc() parsing feil
+Lokasjon: server/routes/sessions_list_router.py linje ~50-80
+Nåværende kode (forenklet):
+pythonCopydef _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
+    metrics = doc.get("metrics", {})
+    
+    row = {
+        "session_id": doc.get("session_id") or fallback_sid,
+        "precision_watt_avg": metrics.get("precision_watt_avg"),  # ✅ Virker
+        "distance_km": doc.get("distance_km"),                    # ❌ Feil nøkkel?
+        "start_time": doc.get("start_time"),                      # ❌ Feil nøkkel?
+        "weather_source": doc.get("weather_source"),              # ❌ Feil nøkkel?
+    }
+    return row
+Faktisk struktur i result-fil:
+jsonCopy{
+  "metrics": {
+    "precision_watt": 256.07,  ← Ikke "precision_watt_avg"!
+    "distance_km": 45.2,       ← Inne i metrics, ikke root!
+    "weather_used": {
+      "wind_ms": 3.0
+    }
+  },
+  "start_time": "2024-11-10T10:30:00Z",  ← Kan ligge her
+  "weather_meta": {
+    "provider": "open-meteo/era5"  ← Weather source
+  }
+}
+Mismatch:
+
+precision_watt vs. precision_watt_avg
+distance_km ligger i metrics, ikke root
+weather_source må hentes fra weather_meta.provider
+
+
+Problem 2: Analyze kjører ikke for nye imports
+Bevis:
+bashCopy# Ny bruker u_Dp1h92XJY30w1vE7hmgyw importerte 67 rides
+# Men har bare 12 result-filer
+# Betyr 55 rides aldri ble analysert
+Mulig årsak:
+
+analyze=1 parameter ignoreres i prod
+Strava 429 rate limit stopper analyse
+Analyze krasjer stille for enkelte ride-typer
+
+Test:
+bashCopyfly logs -a cyclegraph-api | grep -i "analyz"
+# Se etter "Analyzing ride X..." meldinger
+
+🛠️ TASK PLAN - SPRINT 3
+FASE 1: Fix metadata parsing (2-4 timer)
+Task 1.1: Debug result-fil struktur
+Mål: Forstå nøyaktig JSON-struktur i result-filer.
+Steps:
+bashCopy# SSH til Fly:
+fly ssh console -a cyclegraph-api
+
+# Dump komplett struktur av EN result-fil:
+cat /app/_debug_WithWeather/result_16127771071.json | python3 -c "
+import sys, json
+data = json.load(open('/app/_debug_WithWeather/result_16127771071.json', 'r', encoding='utf-8-sig'))
+print('ROOT KEYS:', list(data.keys()))
+print('METRICS KEYS:', list(data.get('metrics', {}).keys()))
+print('DISTANCE:', data.get('distance_km'), 'or', data.get('metrics', {}).get('distance_km'))
+print('START TIME:', data.get('start_time'))
+print('WEATHER:', data.get('weather_meta', {}).get('provider'))
+"
+Output til dokument.
+
+Task 1.2: Patch _row_from_doc()
+Mål: Ekstraher riktige felter fra result-JSON.
+Lokasjon: server/routes/sessions_list_router.py
+Fix (basert på Task 1.1 output):
+pythonCopydef _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
+    metrics = doc.get("metrics", {})
+    weather_meta = doc.get("weather_meta", {})
+    profile_used = metrics.get("profile_used", {})
+    
+    # ✅ FIX: Hent fra riktige steder
+    precision_watt = (
+        metrics.get("precision_watt") or           # Primary
+        metrics.get("precision_watt_avg") or       # Fallback
+        doc.get("precision_watt_avg")              # Legacy
+    )
+    
+    distance_km = (
+        metrics.get("distance_km") or              # Primary
+        doc.get("distance_km")                     # Fallback
+    )
+    
+    start_time = (
+        doc.get("start_time") or
+        doc.get("start_date") or
+        metrics.get("start_time")
+    )
+    
+    weather_source = (
+        weather_meta.get("provider") or
+        doc.get("weather_source")
+    )
+    
+    profile_label = (
+        profile_used.get("profile_label") or
+        doc.get("profile_label")
+    )
+    
+    row = {
+        "session_id": doc.get("session_id") or fallback_sid,
+        "ride_id": doc.get("ride_id") or fallback_sid,
+        "start_time": start_time,
+        "distance_km": distance_km,
+        "precision_watt_avg": precision_watt,
+        "weather_source": weather_source,
+        "profile_label": profile_label,
+        "debug_source_path": str(source_path),
+    }
+    
+    return row
+Test:
+bashCopygit add server/routes/sessions_list_router.py
+git commit -m "fix: extract metadata from correct JSON paths"
+git push
+fly deploy
+
+# Test:
+https://api.cyclegraph.app/api/sessions/list/all?debug=1
+Success criteria: distance_km, start_time, weather_source ikke lenger null.
+
+FASE 2: Fix manglende result-filer (3-6 timer)
+Task 2.1: Diagnostiser hvorfor 55 rides mangler
+Mål: Finn ut om result-filer eksisterer eller må genereres.
+Steps:
+bashCopy# SSH:
+fly ssh console -a cyclegraph-api
+
+NEW_UID="u_Dp1h92XJY30w1vE7hmgyw"
+
+# Hent alle ride IDs fra index:
+cat /app/state/users/$NEW_UID/sessions_index.json | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for rid in data.get('sessions', []):
+    print(rid)
+" > /tmp/all_ride_ids.txt
+
+# Sjekk hvilke som mangler result-filer:
+for rid in $(cat /tmp/all_ride_ids.txt); do
+  if ! ls /app/_debug_*/result_$rid.json 2>/dev/null | grep -q .; then
+    echo "MISSING: $rid"
+  fi
+done | tee /tmp/missing_rides.txt
+
+wc -l /tmp/missing_rides.txt
+Dokumenter: Antall manglende + første 10 ride IDs.
+
+Task 2.2: Re-analyze manglende rides
+Mål: Trigger analyze for de 55 manglende rides.
+Alternativ A: Via API (hvis endpoint finnes)
+bashCopy# For hver manglende ride:
+curl -X POST "https://api.cyclegraph.app/api/sessions/16127771071/analyze" \
+  -H "Cookie: cg_auth=..." \
+  -H "Content-Type: application/json"
+Alternativ B: Via Python script i container
+pythonCopy# SSH console:
+python3 << 'EOF'
+import sys
+sys.path.insert(0, '/app')
+
+# Import analyze function
+from server.routes.sessions import analyze_session_logic  # Adjust import
+
+missing_rides = [
+    "15254984802",
+    "15267397041",
+    # ... (de 55 manglende)
+]
+
+for rid in missing_rides:
+    print(f"Analyzing {rid}...")
+    try:
+        result = analyze_session_logic(rid, uid="u_Dp1h92XJY30w1vE7hmgyw")
+        print(f"  ✅ Success")
+    except Exception as e:
+        print(f"  ❌ Failed: {e}")
+EOF
+Alternativ C: Re-import fra Strava
+bashCopy# Frontend UI: Klikk "Re-import rides"
+# Eller API:
+curl -X POST "https://api.cyclegraph.app/api/strava/sync?days=365&analyze=1" \
+  -H "Cookie: cg_auth=..."
+Success criteria: rows_returned: 67 (ikke 12).
+
+Task 2.3: Investigate analyze failures
+Mål: Finn hvorfor analyze feiler for enkelte rides.
+Steps:
+bashCopy# Fly logs under import:
+fly logs -a cyclegraph-api | grep -A 5 "15254984802"
+
+# Se etter:
+# - "Analyzing ride 15254984802..."
+# - Error messages
+# - Rate limit 429
+Mulige issues:
+
+Ride type er ikke "Ride" (f.eks. "VirtualRide", "EBikeRide")
+Mangler GPS data
+Mangler power data
+Weather API timeout
+
+
+FASE 3: UI polish (2-3 timer)
+Task 3.1: Format dates i frontend
+Lokasjon: frontend/src/routes/RidesPage.tsx
+Fix:
+typescriptCopyfunction formatStartTime(start: string | null): string {
+  if (!start) return "Ukjent dato";
+  
+  try {
+    const date = new Date(start);
+    return date.toLocaleDateString("nb-NO", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  } catch {
+    return "Ugyldig dato";
+  }
+}
+
+Task 3.2: Vis distance og weather
+Før:
+tsxCopy<div>{ride.precision_watt_avg} W</div>
+Etter:
+tsxCopy<div>
+  <span>{ride.precision_watt_avg?.toFixed(0)} W</span>
+  <span className="text-slate-500 ml-2">
+    {ride.distance_km?.toFixed(1)} km
+  </span>
+  <span className="text-slate-400 ml-2">
+    {ride.weather_source ? `📍 ${ride.weather_source}` : ''}
+  </span>
+</div>
+
+Task 3.3: Handle loading/error states
+tsxCopyif (loadingList) {
+  return <div>Laster økter...</div>;
+}
+
+if (errorList) {
+  return (
+    <div>
+      <p>Kunne ikke laste økter: {errorList}</p>
+      <button onClick={loadSessionsList}>Prøv igjen</button>
+    </div>
+  );
+}
+
+if (rows.length === 0) {
+  return <div>Ingen økter funnet. <Link to="/import">Importer fra Strava?</Link></div>;
+}
+
+📊 SUCCESS CRITERIA - SPRINT 3
+Must-have ✅
+
+ Alle 12 synlige rides viser distance_km
+ Alle 12 synlige rides viser start_time (formatert)
+ Alle 12 synlige rides viser weather_source
+ /api/sessions/list/all returnerer minst 50+ rides (ikke 12)
+
+Should-have 🎯
+
+ Alle 67 rides har result-filer
+ UI viser duration (beregnet fra start/end time)
+ Error handling i UI
+ Loading spinner under fetch
+
+Nice-to-have 💎
+
+ Sort by date (newest first)
+ Filter by precision watt range
+ Click ride → open detail view
+
+
+🔧 TEKNISK GJELD Å ADRESSERE
+1. Konsolider result-fil lokasjoner
+Problem: Result-filer spredt over:
+
+/app/_debug_WithWeather/
+/app/_debug_NoWeather/
+/app/out/
+/app/src/cyclegraph/
+
+Fix (senere sprint):
+pythonCopy# Standardiser på:
+RESULT_DIR = Path("/app/state/results")
+
+# Flytt alle result-filer dit ved oppstart
+# Eller refactor analyze til å skrive direkte dit
+
+2. UTF-8 BOM issue
+Problem: Result-filer har BOM header → parsing feiler.
+Current workaround: encoding="utf-8-sig"
+Permanent fix: Skriv filer uten BOM i analyze-funksjonen.
+
+3. Multiple user testing
+Problem: Har testet med 15+ forskjellige user IDs, vanskelig å tracke.
+Fix:
+
+Bruk EN testbruker framover
+Dokumenter credentials
+Eller lag "test mode" med hardcoded user
+
+
+🎓 LEARNINGS FRA SPRINT 1-2
+Hva tok tid:
+
+Multi-platform debugging (Vercel + Fly) → 70% av tiden
+Path mismatches (/data vs /app) → 20% av tiden
+Multiple API-wrapper systemer (cgApi + api.ts) → 10% av tiden
+
+Hva fungerte bra:
+
+SSH debugging i Fly container
+?debug=1 parameter i API
+Systematisk eliminering av hypoteser
+
+For framtiden:
+
+Start med SSH + logs før kode-endringer
+Test lokalt først når mulig
+Én endring om gangen → deploy → test
+
+
+📞 ONBOARDING FOR NY CLAUDE-INSTANS
+Quick start (copy-paste dette):
+markdownCopy# CycleGraph Sprint 3 - Data Enrichment
+
+## Current state:
+- ✅ 12 rides vises med precision_watt_avg
+- ❌ distance_km, start_time, weather_source er null
+- ❌ 55 av 67 rides mangler result-filer
+
+## Your mission:
+1. Fix `_row_from_doc()` i `sessions_list_router.py`
+   - Extract metadata fra riktige JSON-paths
+   - Test: distance_km skal ikke være null
+   
+2. Generate result-filer for 55 manglende rides
+   - Find missing ride IDs via SSH
+   - Trigger re-analyze
+   
+3. UI improvements i `RidesPage.tsx`
+   - Format dates
+   - Show distance + weather
+
+## Key files:
+- `server/routes/sessions_list_router.py` (parsing)
+- `server/routes/strava_import_router.py` (import/analyze)
+- `frontend/src/routes/RidesPage.tsx` (UI)
+
+## Test command:
+https://api.cyclegraph.app/api/sessions/list/all?debug=1
+
+## SSH access:
+fly ssh console -a cyclegraph-api
+
+## Success = All metadata visible + 67 rides shown
+
+🚀 PRIORITERT REKKEFØLGE
+Dag 1 (4 timer):
+
+Task 1.1: Debug result-fil struktur (30 min)
+Task 1.2: Patch _row_from_doc() (2 timer)
+Deploy + test (30 min)
+Task 3.1-3.2: UI formatting (1 time)
+
+Goal: Metadata vises korrekt for de 12 rides som allerede virker.
+
+Dag 2 (4 timer):
+
+Task 2.1: Diagnostiser manglende rides (1 time)
+Task 2.2: Re-analyze manglende (2 timer)
+Task 3.3: Error handling (1 time)
+
+Goal: 67 rides synlige med full metadata.
+
+Dag 3 (2 timer):
+
+Polish & testing
+Dokumentasjon
+Deploy final version
+
+Goal: Production-ready /rides page.
+
+💪 MOTIVASJON
+Du er 85% ferdig!
+Copy✅ Auth & signup
+✅ Strava connect
+✅ Import pipeline
+✅ Backend API returnerer data
+✅ Frontend viser rides (12 av 67)
+🔨 Metadata parsing (siste 10%)
+🔨 Re-analyze missing (siste 5%)
+Når Sprint 3 er ferdig:
+
+Full end-to-end MVP
+Production-ready app
+Ready for beta testing
+
+
+Lykke til med Sprint 3! Du har dette! 🚀🔥
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
