@@ -51,9 +51,7 @@ export type ProfileSaveResp = {
   [k: string]: unknown;
 };
 
-export type ProfileSaveBody =
-  | Record<string, unknown>
-  | { profile: Record<string, unknown> };
+export type ProfileSaveBody = Record<string, unknown> | { profile: Record<string, unknown> };
 
 // ✅ PATCH: auth body
 export type AuthBody = {
@@ -78,53 +76,39 @@ function normalizeBase(url?: string): string | undefined {
  * - Du kan alltid sende inn path som starter med "/api/..."
  */
 function buildApiUrl(base: string, pathStartingWithApi: string): URL {
-  if (!base) {
-    throw new Error("BASE URL is not defined");
-  }
-  
+  if (!base) throw new Error("BASE URL is not defined");
+
   const cleanBase = base.replace(/\/+$/, "");
   const baseEndsWithApi = cleanBase.endsWith("/api");
+
   let effectivePath = pathStartingWithApi;
-  
   if (baseEndsWithApi && pathStartingWithApi.startsWith("/api")) {
     effectivePath = pathStartingWithApi.replace(/^\/api/, "");
   }
-  
-  const fullPath = effectivePath.startsWith("/") 
-    ? effectivePath 
-    : "/" + effectivePath;
-  
+
+  const fullPath = effectivePath.startsWith("/") ? effectivePath : "/" + effectivePath;
   return new URL(cleanBase + fullPath);
 }
 
 /**
- * ✅ FIX (CRITICAL):
- * Tidligere returnerte dev "" (forutsatte Vite proxy).
- * Hos deg er proxy ikke i bruk => requests gikk til 5173 og authMe fikk 401 i loop.
- *
- * Nå: I dev/test bruk BACKEND BASE direkte (5175).
+ * ✅ FIX:
+ * Bruk BACKEND BASE direkte (5175) i dev/test for å unngå "same-origin uten proxy".
+ * I prod bruker vi VITE_BACKEND_URL/BASE eller default localhost.
  */
 function baseUrl(): string {
-  // Dev/test: snakk direkte med backend for å unngå "same-origin uten proxy"-fellen
   const b = normalizeBase(BASE) ?? "http://localhost:5175";
   return b;
 }
 
-// ✅ PATCH: trygg URL-builder som håndterer base="" (same-origin)
+/**
+ * ✅ PATCH S2.5B-IMPORT-BASEURL:
+ * Én SSOT for absolutt URL til backend API.
+ * - Dev: BASE (typisk http://localhost:5175)
+ * - Prod: kan være https://api.cyclegraph.app (via env), ellers fallback.
+ */
 function apiUrl(pathStartingWithApi: string): string {
-  const base = baseUrl();
-  
-  // HARDCODED FIX: Always use full backend URL in production
-  if (import.meta.env.PROD) {
-    const cleanPath = pathStartingWithApi.startsWith('/api') 
-      ? pathStartingWithApi 
-      : '/api' + pathStartingWithApi;
-    return 'https://api.cyclegraph.app' + cleanPath;
-  }
-  
-  // Dev: use buildApiUrl
-  if (!base) return pathStartingWithApi;
-  return buildApiUrl(base, pathStartingWithApi).toString();
+  const b = baseUrl();
+  return buildApiUrl(b, pathStartingWithApi).toString();
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -133,13 +117,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function extractErrorMessage(json: unknown): unknown {
   if (!isRecord(json)) return null;
-  return (
-    (json as any).detail ??
-    (json as any).reason ??
-    (json as any).error ??
-    (json as any).message ??
-    null
-  );
+  return (json as any).detail ?? (json as any).reason ?? (json as any).error ?? (json as any).message ?? null;
 }
 
 /**
@@ -148,10 +126,8 @@ function extractErrorMessage(json: unknown): unknown {
  *  - Objekt: { value: [...], Count: n } (eller lignende casing)
  */
 function normalizeListAll(json: unknown): SessionListItem[] {
-  // B) [...] (eldre/andre varianter)
   if (Array.isArray(json)) return json as SessionListItem[];
 
-  // A) { value: [...], Count: n } (nåværende)
   if (json && typeof json === "object") {
     const v =
       (json as any).value ??
@@ -181,7 +157,6 @@ class ApiError extends Error {
 }
 
 async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  // ✅ PATCH: bruk apiUrl() for å unngå absolutt URL i dev (cookies)
   const url = apiUrl(path);
 
   const res = await fetch(url, {
@@ -200,7 +175,7 @@ async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promi
   try {
     json = text ? (JSON.parse(text) as unknown) : null;
   } catch {
-    json = null; // non-JSON
+    json = null;
   }
 
   if (!res.ok) {
@@ -212,24 +187,20 @@ async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promi
       (text ? text : null) ||
       `HTTP ${res.status} ${res.statusText}`;
 
-    // ✅ throw typed error so UI can map 409/400/etc
     throw new ApiError(res.status, msg, json);
   }
 
-  // hvis server svarer tomt men OK
   return (json ?? null) as T;
 }
 
-// ✅ PATCH 1: implementer profileGet() i samme stil (bruker apiUrl + include cookies)
+// ✅ PATCH 1: implementer profileGet() i samme stil (bruk apiUrl + include cookies)
 async function profileGet(): Promise<ProfileGetResp> {
   const url = apiUrl("/api/profile/get");
 
   const res = await fetch(url, {
     method: "GET",
     credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
   });
 
   if (!res.ok) {
@@ -266,7 +237,6 @@ async function profileSave(body: ProfileSaveBody): Promise<ProfileSaveResp> {
 
 // ✅ PATCH: authSignup/authLogin (for SignupPage.tsx)
 async function authSignup(email: string, password: string): Promise<void> {
-  // bruker cgFetchJson for konsistent error-handling + credentials: include
   await cgFetchJson<unknown>("/api/auth/signup", {
     method: "POST",
     body: JSON.stringify({ email, password } satisfies AuthBody),
@@ -281,7 +251,6 @@ async function authLogin(email: string, password: string): Promise<void> {
 }
 
 // ✅ PATCH 1: authMe() (DoD) — GET /api/auth/me
-// ✅ MIDLERTIDIG LOGGING: bevis hva authMe faktisk kaller i nettleser
 async function authMe(): Promise<unknown> {
   const url = apiUrl("/api/auth/me");
   console.log("[cgApi] authMe url =", url);
@@ -292,6 +261,7 @@ export const cgApi = {
   baseUrl: () => baseUrl(),
 
   async status(): Promise<StatusResp> {
+    // NB: dette bruker "/status" som i din eksisterende backend (beholdt)
     return cgFetchJson<StatusResp>("/status", { method: "GET" });
   },
 
@@ -318,10 +288,10 @@ export const cgApi = {
   authLogin,
   authMe,
 
-  // ✅ PATCH 1: eksporter profileGet
+  // ✅ PROFILE
   profileGet,
-
-  // ✅ PATCH: eksporter profileSave
   profileSave,
 };
 
+// (Valgfritt) eksportér ApiError hvis du vil mappe 409/400 i UI-lag
+export { ApiError };
