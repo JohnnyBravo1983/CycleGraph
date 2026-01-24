@@ -681,7 +681,22 @@ async def list_all(
             try:
                 st = row.get("start_time")
                 if _needs_start_time_fix(st):
-                    t_abs = _extract_first_t_abs_fast(rp)
+                    # 1) SSOT: session_<sid>.json (actual10/latest)
+                    t_abs = None
+                    sp = _pick_session_path(sid_str, uid=uid)
+                    if sp:
+                        obj = _json_load_any(sp)
+                        if isinstance(obj, dict):
+                            ss = obj.get("samples")
+                            if isinstance(ss, list) and ss:
+                                first = ss[0] if isinstance(ss[0], dict) else None
+                                if first:
+                                    t_abs = first.get("t_abs")
+
+                    # 2) fallback: legacy attempt (result json)
+                    if not t_abs:
+                        t_abs = _extract_first_t_abs_fast(rp)
+
                     if t_abs:
                         row["start_time"] = t_abs
                         print("[/list/all]", "START_TIME_BACKFILL", "sid=", sid_str, "t_abs=", t_abs)
@@ -736,6 +751,7 @@ async def list_all(
         }
 
     return out
+
 
 
 @router.get("/list/_debug_paths")
