@@ -7,13 +7,18 @@ from typing import Any, Dict, List
 def state_root() -> Path:
     """
     Source of truth for persistent state.
-    - Fly: /data/state (via volume mount + CG_STATE_DIR)
+    - Fly: /app/state (via volume mount)
     - Local/dev: <repo>/state
     """
     env = (os.getenv("CG_STATE_DIR") or "").strip()
     if env:
         return Path(env)
-    # fallback: eksisterende repo-root/state
+    
+    # ✅ FIX: Default to /app/state if in Fly container
+    if Path("/app/state").exists():
+        return Path("/app/state")
+    
+    # Fallback: local dev repo-root/state
     return Path(__file__).resolve().parents[1] / "state"
 
 
