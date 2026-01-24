@@ -1,5 +1,12 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://cyclegraph-api.fly.dev/api/$1" }
+    { 
+      "source": "/api/(.*)", 
+      "destination": "https://cyclegraph-api.fly.dev/api/$1" 
+    },
+    { 
+      "source": "/(.*)", 
+      "destination": "/index.html" 
+    }
   ]
 }
