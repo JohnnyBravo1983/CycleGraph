@@ -445,11 +445,12 @@ export type SessionListItem = {
 
 // PATCH: Replace fetchSessionsList() komplett
 export async function fetchSessionsList(): Promise<SessionListItem[]> {
-  // ✅ PATCH 2 (KRITISK): dev = same-origin via Vite proxy, prod = absolutt base hvis mulig
-  const url =
-    import.meta.env.MODE !== "production"
-      ? "/api/sessions/list/all"
-      : buildApiUrl(normalizeBase(BASE) ?? "", "/api/sessions/list/all").toString();
+  // ✅ FIX: Bruk samme URL-building pattern som cgApi.ts
+  const base = import.meta.env.PROD 
+    ? "https://api.cyclegraph.app"
+    : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
+  
+  const url = base + "/api/sessions/list/all";
 
   console.log("[API] fetchSessionsList →", url);
 
