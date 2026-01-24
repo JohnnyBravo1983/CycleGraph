@@ -107,8 +107,10 @@ function baseUrl(): string {
  * - Prod: kan være https://api.cyclegraph.app (via env), ellers fallback.
  */
 function apiUrl(pathStartingWithApi: string): string {
-  const b = baseUrl();
-  return buildApiUrl(b, pathStartingWithApi).toString();
+  const base = import.meta.env.PROD 
+    ? "https://api.cyclegraph.app"
+    : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
+  return base + pathStartingWithApi;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
