@@ -9,7 +9,9 @@ type Err = { ok: false; error: string; source?: "mock" | "live" };
 export type FetchSessionResult = Ok | Err;
 
 // Hent Vite-variabler (.env.local).
-const BASE = import.meta.env.VITE_BACKEND_URL as string | undefined;
+const BASE = import.meta.env.PROD 
+  ? "https://api.cyclegraph.app"
+  : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
 
 /**
  * 🔧 Sprint 4: Stabil cookie-binding (cg_uid)
@@ -45,24 +47,8 @@ function normalizeBase(url?: string): string | undefined {
  * - Tåler at BASE er "http://localhost:5175" ELLER "http://localhost:5175/api"
  * - Du kan alltid sende inn path som starter med "/api/..."
  */
-function buildApiUrl(base: string, pathStartingWithApi: string): URL {
-  if (!base) {
-    throw new Error("BASE URL is not defined");
-  }
-  
-  const cleanBase = base.replace(/\/+$/, "");
-  const baseEndsWithApi = cleanBase.endsWith("/api");
-  let effectivePath = pathStartingWithApi;
-  
-  if (baseEndsWithApi && pathStartingWithApi.startsWith("/api")) {
-    effectivePath = pathStartingWithApi.replace(/^\/api/, "");
-  }
-  
-  const fullPath = effectivePath.startsWith("/") 
-    ? effectivePath 
-    : "/" + effectivePath;
-  
-  return new URL(cleanBase + fullPath);
+function buildApiUrl(base: string, pathStartingWithApi: string): string {
+  return base + pathStartingWithApi;
 }
 
 type FetchSessionOpts = {
