@@ -30,43 +30,32 @@ def _repo_root_from_here() -> Path:
 
 def _pick_result_path(sid: str) -> Path | None:
     """
-    ✅ PROD FIX: Search actual filesystem paths where analyze writes
-    Priority:
-    1. /app/out/result_{sid}.json
-    2. /app/src/cyclegraph/result_{sid}.json
-    3. Debug folders (if any)
-    4. Legacy paths
+    ✅ PROD FIX (2026-01-24): Files actually in _debug_* folders
     """
     root = Path("/app")
     
-    # Primary locations (prod-verified 2026-01-24)
+    # PRIORITY: Where files ACTUALLY are (verified via SSH)
     candidates = [
-        root / "out" / f"result_{sid}.json",
-        root / "src" / "cyclegraph" / f"result_{sid}.json",
+        root / "_debug_WithWeather" / f"result_{sid}.json",
+        root / "_debug_NoWeather" / f"result_{sid}.json",
+        root / "scripts" / "_debug" / f"result_{sid}.json",
     ]
     
     for path in candidates:
         if path.exists():
             return path
     
-    # Debug folders (edge cases)
-    for debug_dir in ["_debug_WithWeather", "_debug_NoWeather", "_debug"]:
-        candidate = root / debug_dir / f"result_{sid}.json"
-        if candidate.exists():
-            return candidate
-    
-    # Legacy/localhost paths
-    legacy = [
-        root / "logs" / "results" / f"result_{sid}.json",
-        Path.cwd() / "logs" / "results" / f"result_{sid}.json",
+    # Fallback (for other environments/old files)
+    fallback = [
+        root / "out" / f"result_{sid}.json",
+        root / "src" / "cyclegraph" / f"result_{sid}.json",
     ]
     
-    for path in legacy:
+    for path in fallback:
         if path.exists():
             return path
     
     return None
-
 
 def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
     """
