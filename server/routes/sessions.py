@@ -1077,20 +1077,11 @@ def list_sessions(
     except Exception:
         pass
 
-    # 1) Finn user sin sessions_index.json (SSOT for hvilke rides som tilhører user)
-    index_path = os.path.join(
-        os.getcwd(), "state", "users", str(user_id), "sessions_index.json"
-    )
-        # Hvis index ikke finnes: returner tom liste (IKKE opprett fil her).
-    # Viktig for cascading delete: vi skal ikke "resurrecte" slettede brukere ved en GET.
-    if not os.path.exists(index_path):
-        return rows
+    # 1) Finn user sin sessions_index.json (SSOT) via state_root()/CG_STATE_DIR
+    from server.user_state import load_user_sessions_index
 
-    try:
-        with open(index_path, "r", encoding="utf-8") as f:
-            index_doc = json.load(f) or {}
-    except Exception:
-        return rows
+    index_doc = load_user_sessions_index(os.getcwd(), str(user_id)) or {"sessions": []}
+
 
     # ==================== PATCH 2.3-B: Bruk helper for å hente ride IDs ====================
     # 2) Hent tillatte IDer fra indeksen (med rekkefølge)
