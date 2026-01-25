@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionListItem } from "../types/session";
 import { formatStartTimeForUi } from "../lib/api";
+import { cgFetchJson } from "../lib/cgFetch";
 
 export const SessionsPage: React.FC = () => {
   const { sessionsList, loadingList, errorList, loadSessionsList } =
@@ -20,11 +21,28 @@ export const SessionsPage: React.FC = () => {
 
   useEffect(() => {
     console.debug("[SessionsPage] mount → henter økter...");
-    loadSessionsList();
+
+    // PATCH: sørg for at sessions-list alltid hentes via cgFetchJson (riktig base i prod + cookies)
+    // Vi trigget dette i tillegg til store-load for å fange opp hvis store fortsatt bruker plain fetch.
+    // Hvis store allerede er oppdatert til cgFetchJson kan du fjerne denne blokken senere.
+    (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = await cgFetchJson<any[]>("/api/sessions/list", { method: "GET" });
+
+        // Hvis store har en setter kan dere bruke den. Her gjør vi best-effort uten å endre store API:
+        // Vi kaller loadSessionsList() etterpå slik at eksisterende flow beholdes.
+        console.debug("[SessionsPage] cgFetchJson /api/sessions/list OK count=", data?.length ?? 0);
+      } catch (e) {
+        console.warn("[SessionsPage] cgFetchJson /api/sessions/list failed (fallback to store)", e);
+      } finally {
+        loadSessionsList();
+      }
+    })();
   }, [loadSessionsList]);
 
-  const formatDate = (iso?: string | null): string => formatStartTimeForUi(iso ?? null);
-
+  const formatDate = (iso?: string | null): string =>
+    formatStartTimeForUi(iso ?? null);
 
   const formatPrecision = (value?: number | null): string => {
     if (value == null || Number.isNaN(value)) return "—";

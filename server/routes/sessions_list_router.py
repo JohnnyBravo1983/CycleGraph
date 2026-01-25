@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from server.auth_guard import require_auth
+from server.user_state import state_root
 
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -24,9 +25,133 @@ _TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
 _LAST_TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
 
 
+# -------------------------------
+# NEW HELPERS (activity distance fallback)
+# -------------------------------
 def _repo_root_from_here() -> Path:
-    # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
+    # .../frontend/server/routes/sessions_list_router.py -> repo root = CycleGraph
     return Path(__file__).resolve().parents[2]
+
+
+def _safe_sid(sid: str) -> str:
+    return re.sub(r"[^0-9A-Za-z_-]+", "", str(sid or ""))
+
+
+def _ssot_user_result_path(uid: str, sid: str) -> Path:
+    sid2 = _safe_sid(sid)
+    return state_root() / "users" / uid / "results" / f"result_{sid2}.json"
+
+
+def _logs_result_path(sid: str) -> Path:
+    sid2 = _safe_sid(sid)
+    return _repo_root_from_here() / "logs" / "results" / f"result_{sid2}.json"
+
+
+def _read_json_if_exists(p: Path) -> Optional[Dict[str, Any]]:
+    try:
+        if p and p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
+def _extract_list_item(sid: str, doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    d = doc or {}
+    m = d.get("metrics") or {}
+    if not isinstance(m, dict):
+        m = {}
+
+    return {
+        "ride_id": sid,
+        "id": sid,
+        "profile_version": (d.get("profile_version") or m.get("profile_version")),
+        "weather_source": (d.get("weather_source") or m.get("weather_source")),
+        "start_time": (
+            d.get("start_time")
+            or m.get("start_time")
+            or d.get("start_time_iso")
+            or m.get("start_time_iso")
+        ),
+        "distance_km": (
+            d.get("distance_km")
+            or m.get("distance_km")
+            or d.get("distance")
+            or m.get("distance")
+        ),
+        "precision_watt_avg": (
+            d.get("precision_watt_avg")
+            or m.get("precision_watt_avg")
+            or m.get("precision_watt_pedal")
+            or m.get("precision_watt")
+        ),
+    }
+
+
+def _allowed_ids_list_from_index_doc(index_doc: Any) -> List[str]:
+    """
+    Returner ride_ids i rekkefølge (best effort) fra sessions_index.json.
+    Vi prøver flere kjente keys, men bevarer rekkefølgen i lista.
+    """
+    out: List[str] = []
+    seen: set[str] = set()
+
+    def push(v: Any) -> None:
+        s = str(v).strip()
+        if not s:
+            return
+        if s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
+    if isinstance(index_doc, dict):
+        # vanligste: {"sessions":[...]} eller {"ride_ids":[...]} osv
+        for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
+            v = index_doc.get(key)
+            if isinstance(v, list) and v:
+                for x in v:
+                    push(x)
+                if out:
+                    return out
+
+    if isinstance(index_doc, list):
+        for x in index_doc:
+            push(x)
+
+    return out
+
+
+def _distance_km_from_activity(sid: str) -> Optional[float]:
+    """
+    Strava activity JSON har vanligvis 'distance' i meter.
+    Vi prøver begge kjente steder i container:
+      - /app/data/raw/activity_<sid>.json  (legacy)
+      - /app/src/cyclegraph/data/raw/activity_<sid>.json (nåværende)
+    """
+    root = _repo_root_from_here()
+    candidates = [
+        root / "data" / "raw" / f"activity_{sid}.json",
+        root / "src" / "cyclegraph" / "data" / "raw" / f"activity_{sid}.json",
+    ]
+    for p in candidates:
+        doc = _read_json_if_exists(p)
+        if not isinstance(doc, dict):
+            continue
+
+        d_m = doc.get("distance")
+        if d_m is None and isinstance(doc.get("activity"), dict):
+            d_m = doc["activity"].get("distance")
+
+        try:
+            if d_m is not None:
+                km = float(d_m) / 1000.0
+                # ikke overdriv presisjon i UI
+                return round(km, 3)
+        except Exception:
+            pass
+
+    return None
 
 
 def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
@@ -576,7 +701,7 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "profile_label": doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label"),
         "weather_source": weather_source,
         "debug_source_path": str(source_path).replace("\\", "/"),
-        # ✅ NEW: analyzed marker for UI
+        # ✅ analyzed marker for UI
         "analyzed": True,
     }
 
@@ -608,8 +733,6 @@ def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dic
     ✅ Scope-minimum for /list/all:
     - vi bruker sessions_index.json som SSOT for hvilke ride_ids som tilhører user_id
     """
-    from server.user_state import state_root
-
     index_path = state_root() / "users" / uid / "sessions_index.json"
 
     idx = None
@@ -651,6 +774,67 @@ def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dic
 # -----------------------------------
 # Routes
 # -----------------------------------
+
+
+@router.get("")        # ✅ ALIAS: /api/sessions
+@router.get("/list")   # ✅ Original: /api/sessions/list
+async def list_sessions(
+    req: Request,
+    response: Response,
+    user_id: str = Depends(require_auth),
+    debug: int = Query(0, ge=0, le=1),
+) -> List[Dict[str, Any]]:
+    """
+    Returnerer en liste over økter for innlogget bruker (scopet til sessions_index.json),
+    og beriker radene med data fra result_*.json der de finnes:
+      1) SSOT: state/users/<uid>/results/result_<sid>.json
+      2) Fallback: logs/results/result_<sid>.json
+    """
+    uid = str(user_id)
+    root = _repo_root_from_here()
+
+    # Bruk sessions_index.json som SSOT for hvilke rides som tilhører bruker
+    index_path = state_root() / "users" / uid / "sessions_index.json"
+    index_doc: Any = _read_json_utf8_sig(index_path) if index_path.exists() else {"sessions": []}
+    ride_ids = _allowed_ids_list_from_index_doc(index_doc)
+
+    out: List[Dict[str, Any]] = []
+
+    for sid_raw in ride_ids:
+        sid = str(sid_raw).strip()
+        if not sid:
+            continue
+
+        # 1) SSOT først
+        ssot_p = _ssot_user_result_path(uid, sid)
+        doc = _read_json_if_exists(ssot_p)
+
+        # 2) Fallback: logs/results
+        logs_p = _logs_result_path(sid)
+        if doc is None:
+            doc = _read_json_if_exists(logs_p)
+
+        item = _extract_list_item(sid, doc)
+
+        # optional: minimal debug uten paths
+        if debug:
+            item["debug"] = {
+                "has_ssot_result": ssot_p.exists(),
+                "has_logs_result": logs_p.exists(),
+            }
+
+        # activity distance fallback (hvis vi fortsatt mangler distance)
+        try:
+            if item.get("distance_km") is None:
+                dk = _distance_km_from_activity(sid)
+                if dk is not None:
+                    item["distance_km"] = dk
+        except Exception:
+            pass
+
+        out.append(item)
+
+    return out
 
 
 @router.get("/list/all")
@@ -699,25 +883,43 @@ async def list_all(
 
             if not rp:
                 # ✅ NEW: include placeholder rows so UI can list all rides
-                rows.append(
-                    {
-                        "session_id": sid_str,
-                        "ride_id": sid_str,
-                        "start_time": None,
-                        "end_time": None,
-                        "distance_km": None,
-                        "precision_watt_avg": None,
-                        "profile_label": None,
-                        "weather_source": None,
-                        "debug_source_path": None,
-                        "analyzed": False,
-                    }
-                )
+                item = {
+                    "session_id": sid_str,
+                    "ride_id": sid_str,
+                    "start_time": None,
+                    "end_time": None,
+                    "distance_km": None,
+                    "precision_watt_avg": None,
+                    "profile_label": None,
+                    "weather_source": None,
+                    "debug_source_path": None,
+                    "analyzed": False,
+                }
+
+                # ✅ NEW: activity distance fallback
+                try:
+                    if item.get("distance_km") is None:
+                        dk = _distance_km_from_activity(str(item.get("id") or item.get("ride_id") or ""))
+                        if dk is not None:
+                            item["distance_km"] = dk
+                except Exception:
+                    pass
+
+                rows.append(item)
                 continue
 
             raw = _read_json_utf8_sig(rp)
             doc = _normalize_doc(raw)
             row = _row_from_doc(doc, rp, fallback_sid=sid_str)
+
+            # ✅ NEW: activity distance fallback (after item exists and has id/ride_id)
+            try:
+                if row.get("distance_km") is None:
+                    dk = _distance_km_from_activity(str(row.get("id") or row.get("ride_id") or ""))
+                    if dk is not None:
+                        row["distance_km"] = dk
+            except Exception:
+                pass
 
             # --- start_time fix (UTC ISO), kun når missing/DATE-only ---
             try:

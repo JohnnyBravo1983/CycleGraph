@@ -1095,6 +1095,7 @@ def _ride_id_from_result_path(path: str) -> str:
     return ""
 
 @router.get("/list")
+@router.get("")  # ✅ ALIAS: /api/sessions (same handler as /api/sessions/list)
 def list_sessions(
     user_id: str = Depends(require_auth),
 ) -> List[Dict[str, Any]]:
@@ -1104,9 +1105,12 @@ def list_sessions(
     """
     rows: List[Dict[str, Any]] = []
 
+    # NOTE: list endpoint uses user_id via auth guard (SSOT)
+
     # (Demo) sørg for at demo-sessions kan finnes i index hvis demo-mode brukes
     try:
         from server.user_state import maybe_bootstrap_demo_sessions
+
         maybe_bootstrap_demo_sessions(os.getcwd(), user_id)
     except Exception:
         pass
@@ -1116,7 +1120,6 @@ def list_sessions(
 
     index_doc = load_user_sessions_index(os.getcwd(), str(user_id)) or {"sessions": []}
 
-
     # ==================== PATCH 2.3-B: Bruk helper for å hente ride IDs ====================
     # 2) Hent tillatte IDer fra indeksen (med rekkefølge)
     ride_ids = _allowed_ids_list_from_index(index_doc)
@@ -1125,6 +1128,9 @@ def list_sessions(
     # 3) Bygg liste basert på user sine ride_ids
     for ride_id in ride_ids:
         try:
+            # ✅ Always define, so we never crash or return garbage
+            precision_watt_avg: float = 0.0
+
             # Bruk samme logikk som /sessions/{id} for å hente analysert resultat
             base_dir = os.getcwd()
             result_doc = _load_result_doc(base_dir, str(user_id), str(ride_id))
@@ -1155,7 +1161,6 @@ def list_sessions(
                             if isinstance(pw2, (int, float)):
                                 precision_watt_avg = float(pw2)
 
-
             profile_used = result_doc.get("profile_used") or metrics.get("profile_used") or {}
             profile_version = result_doc.get("profile_version") or profile_used.get("profile_version")
 
@@ -1167,8 +1172,21 @@ def list_sessions(
                 or weather_used.get("source")
             )
 
-            start_time = result_doc.get("start_time")
-            distance_km = result_doc.get("distance_km")
+            # ✅ start_time: try multiple known locations
+            start_time = (
+                result_doc.get("start_time")
+                or metrics.get("start_time")
+                or result_doc.get("start_time_iso")
+                or metrics.get("start_time_iso")
+            )
+
+            # ✅ distance_km: try multiple known locations (some docs keep it inside metrics)
+            distance_km = (
+                result_doc.get("distance_km")
+                or metrics.get("distance_km")
+                or result_doc.get("distance")
+                or metrics.get("distance")
+            )
 
             if not start_time:
                 try:
@@ -1193,7 +1211,6 @@ def list_sessions(
             continue
 
     return rows
-
 
 
 G = 9.80665
