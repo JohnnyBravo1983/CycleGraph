@@ -24,7 +24,10 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-too
 # Install maturin (builder-only)
 RUN python -m pip install --upgrade pip && python -m pip install "maturin>=1.4,<2.0"
 
-# Copy only core first (better cache)
+# IMPORTANT: Cargo.toml references ../README.md, so it must exist at /app/README.md
+COPY README.md /app/README.md
+
+# Copy core crate
 COPY core/ /app/core/
 
 # Build wheel
