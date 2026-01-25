@@ -3310,32 +3310,6 @@ async def analyze_session(
         resp["debug"] = resp_dbg
     # ==================== END PATCH B2.1 ====================
 
-    # ---- PATCH: CANONICALIZE (legacy -> SSOT state_root) ----
-# ---- PATCH: CANONICALIZE (legacy -> SSOT state_root) ----
-try:
-    sp = _pick_best_session_path(sid)
-    rp = _result_path(sid)  # logs/results/result_<sid>.json
-
-    ok_sess = _copy2(sp, _canonical_user_session_path(user_id, sid))
-    ok_res  = _copy2(rp, _canonical_user_result_path(user_id, sid))
-
-    if want_debug:
-        resp.setdefault("debug", {})["canonicalize"] = {
-            "session_src": str(sp) if sp else None,
-            "result_src": str(rp),
-            "session_copied": ok_sess,
-            "result_copied": ok_res,
-            "state_root": str(state_root()),
-        }
-
-    print(f"[CANON] sid={sid} uid={user_id} sess={ok_sess} res={ok_res}", file=sys.stderr)
-except Exception as e:
-    print(f"[CANON] FAIL sid={sid} uid={user_id} err={e!r}", file=sys.stderr)
-# ---- END PATCH ----
-
-
-
-
 # ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
 from fastapi.responses import JSONResponse
 from fastapi import Depends, Query, Request
