@@ -1,4 +1,5 @@
 // frontend/src/lib/fetchJSON.ts
+import { cgFetchJSON } from "./cgFetch";
 
 /**
  * Les Vite-miljø trygt
@@ -73,29 +74,15 @@ function isAbortError(err: unknown): boolean {
  * Sentralt JSON-fetch helper.
  * - Returnerer `undefined` ved abort (stille fallback, ingen logging).
  * - Kaster på andre feil og non-2xx statuskoder.
+ *
+ * NOTE: Switched to cgFetchJSON for consistent auth/cookies/proxy handling.
  */
 export async function fetchJSON<T = unknown>(
   input: string,
   init?: RequestInit & { signal?: AbortSignal }
 ): Promise<T | undefined> {
-  const normalized = normalizeApiUrl(input);
-
   try {
-    const res = await fetch(normalized, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} ${res.statusText} – ${text}`);
-    }
-
-    const data: T = (await res.json()) as T;
-    return data;
+    return await cgFetchJSON<T>(input, init ?? {});
   } catch (err) {
     if (isAbortError(err)) {
       // Stille fallback ved avbrutt fetch
@@ -115,8 +102,7 @@ export type TrendsMode = "live" | "mock";
  * - hvis mode er udefinert → styres av USE_LIVE_TRENDS
  */
 function buildTrendsUrl(sessionId: string, mode?: TrendsMode): string {
-  const effective: TrendsMode =
-    mode ?? (USE_LIVE_TRENDS ? "live" : "mock");
+  const effective: TrendsMode = mode ?? (USE_LIVE_TRENDS ? "live" : "mock");
 
   if (effective === "live") {
     const base = getBackendBase(); // tom streng i dev/mock → same-origin

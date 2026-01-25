@@ -16,6 +16,7 @@
 })();
 
 // frontend/src/main.tsx
+import "./devFetchShim";
 import "./index.css";
 import "./devFetchShim";
 import React from "react";

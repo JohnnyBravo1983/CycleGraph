@@ -569,6 +569,31 @@ Ready for beta testing
 
 Lykke til med Sprint 3! Du har dette! 🚀🔥
 
+# Backend Fly.io
+fly status -a cyclegraph-api
+
+# Frontend Vercel (via git)
+git log --oneline -5
+
+# Sjekk siste deploy-dato
+(Get-Item "server/routes/sessions_list_router.py").LastWriteTime 
+App                                                                633;C
+  Name     = cyclegraph-api
+  Owner    = personal
+  Hostname = cyclegraph-api.fly.dev
+  Image    = cyclegraph-api:deployment-01KFQSTDDK39EP115FXFYK6472
+
+Machines
+PROCESS ID              VERSION REGION  STATE   ROLE    CHECKS  LAST UPDATED
+app     286ed97be1d938  21      ams     started                 2026-01-24T11:09:37Z
+
+53125f5 (HEAD -> fix/fly-deploy, origin/fix/fly-deploy) fix: default to /app/state in Fly
+30dd0ec fix: search _debug_* folders where result files actually exist
+241beae fix: search /app/out and /app/src/cyclegraph for result files
+7e4532b fix: move vercel.json to frontend folder
+caed00b fix: add SPA fallback to vercel.json
+
+lørdag 24. januar 2026 11:30:07
 
 
 
@@ -579,8 +604,15 @@ Lykke til med Sprint 3! Du har dette! 🚀🔥
 
 
 
+eyJ1aWQiOiJ1X0s2a1JZak9WS1BPTk1CWnpLZkRjaGciLCJleHAiOjE3Njk5NTc3NzB9.-8vUyZd4ysQ7Ag17Nx7rVxph1Zcddsw8zb2UThpfLbY
 
 
+$cg  = "eyJ1aWQiOiJ1X0s2a1JZak9WS1BPTk1CWnpLZkRjaGciLCJleHAiOjE3Njk5NTc3NzB9.-8vUyZd4ysQ7Ag17Nx7rVxph1Zcddsw8zb2UThpfLbY"
+$rid = "15254984802"
+
+curl.exe -v -X POST "https://api.cyclegraph.app/api/sessions/$rid/analyze?debug=1&force_recompute=1" `
+  -H "Cookie: cg_auth=$cg" `
+  -H "Accept: application/json"
 
 
 

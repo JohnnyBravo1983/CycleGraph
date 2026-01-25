@@ -1,0 +1,170 @@
+﻿{
+    "value":  [
+                  {
+                      "session_id":  "16405483541",
+                      "ride_id":  "16405483541",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  224.56328492350892,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16405483541.json"
+                  },
+                  {
+                      "session_id":  "16396031026",
+                      "ride_id":  "16396031026",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  189.50007614056352,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16396031026.json"
+                  },
+                  {
+                      "session_id":  "16381383185",
+                      "ride_id":  "16381383185",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  193.19894554720548,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16381383185.json"
+                  },
+                  {
+                      "session_id":  "16342459294",
+                      "ride_id":  "16342459294",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  165.2061423831912,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16342459294.json"
+                  },
+                  {
+                      "session_id":  "16333270450",
+                      "ride_id":  "16333270450",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  197.9455766332263,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16333270450.json"
+                  },
+                  {
+                      "session_id":  "16311219004",
+                      "ride_id":  "16311219004",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  152.54473513895354,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16311219004.json"
+                  },
+                  {
+                      "session_id":  "16279854313",
+                      "ride_id":  "16279854313",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  215.11040573334225,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16279854313.json"
+                  },
+                  {
+                      "session_id":  "16262232459",
+                      "ride_id":  "16262232459",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  236.70741902428006,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16262232459.json"
+                  },
+                  {
+                      "session_id":  "16251885270",
+                      "ride_id":  "16251885270",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  110.28712881034568,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/src/cyclegraph/result_16251885270.json"
+                  },
+                  {
+                      "session_id":  "16231049823",
+                      "ride_id":  "16231049823",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  161.2265091330459,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/src/cyclegraph/result_16231049823.json"
+                  },
+                  {
+                      "session_id":  "16184045158",
+                      "ride_id":  "16184045158",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  125.82964813805073,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/src/cyclegraph/result_16184045158.json"
+                  },
+                  {
+                      "session_id":  "16127771071",
+                      "ride_id":  "16127771071",
+                      "start_time":  null,
+                      "end_time":  null,
+                      "distance_km":  null,
+                      "precision_watt_avg":  256.07355718709084,
+                      "profile_label":  null,
+                      "weather_source":  null,
+                      "debug_source_path":  "/app/_debug_WithWeather/result_16127771071.json"
+                  }
+              ],
+    "Count":  12,
+    "debug":  {
+                  "uid":  "u_K6kRYjOVKPONMBZzKfDchg",
+                  "index_path":  "/app/state/users/u_K6kRYjOVKPONMBZzKfDchg/sessions_index.json",
+                  "index_exists":  true,
+                  "idx_type":  "dict",
+                  "idx_keys":  [
+                                   "sessions"
+                               ],
+                  "wanted_count":  71,
+                  "wanted_sample":  [
+                                        "15254984802",
+                                        "15267397041",
+                                        "15272816372",
+                                        "15320984409",
+                                        "15368952062",
+                                        "15378170998",
+                                        "15390075591",
+                                        "15399883249",
+                                        "15412107820",
+                                        "15444190050",
+                                        "15466845731",
+                                        "15491616226",
+                                        "15504000542",
+                                        "15524767996",
+                                        "15539917403",
+                                        "15559087826",
+                                        "15559087846",
+                                        "15570657624",
+                                        "15606907279",
+                                        "15615723651"
+                                    ],
+                  "rows_returned":  12
+              }
+}
