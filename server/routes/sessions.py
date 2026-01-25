@@ -1529,6 +1529,17 @@ def _base_debug(force_recompute: bool, used_fallback: bool) -> Dict[str, Any]:
         "reason": "ok",
     }
 
+def _http409_missing_input(sid: str, dbg: Dict[str, Any]) -> None:
+    """
+    Missing input guard for analyze. Must raise 409 with a machine-readable payload.
+    """
+    payload = {
+        "ok": False,
+        "error": "missing_input_data",
+        "sid": str(sid),
+        "debug": dbg if isinstance(dbg, dict) else {"reason": "missing_input_data"},
+    }
+    raise HTTPException(status_code=409, detail=payload)
 
 def _fallback_metrics(samples, profile, weather_applied: bool, profile_used=None):
     """
