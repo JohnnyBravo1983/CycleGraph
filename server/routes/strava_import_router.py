@@ -97,8 +97,10 @@ def _debug_fs(where: str, uid: Optional[str] = None) -> None:
         print(f"[FSDBG] ERROR where={where}: {type(e).__name__}: {e}")
 
 
+from server.user_state import state_root
+
 def _user_dir(uid: str) -> Path:
-    return _repo_root_from_here() / "state" / "users" / uid
+    return state_root() / "users" / uid
 
 
 def _tokens_path(uid: str) -> Path:

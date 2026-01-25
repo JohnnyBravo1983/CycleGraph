@@ -21,14 +21,11 @@ DEFAULT_PROFILE = {
 }
 
 
-def _repo_root() -> str:
-    # Robust nok: appen kjøres fra repo root hos deg
-    return os.getcwd()
-
+from server.user_state import state_root
 
 def _user_dir(uid: str) -> str:
-    # samme base som tokens: state/users/<uid>/
-    return os.path.join(_repo_root(), "state", "users", uid)
+    return str(state_root() / "users" / uid)
+
 
 
 def _paths(uid: str) -> tuple[str, str]:

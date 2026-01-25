@@ -92,6 +92,29 @@ def _write_json_atomic(path: Path, obj: dict) -> None:
     tmp.replace(path)
 # ==================== END PATCH ====================
 
+import shutil
+from server.user_state import state_root
+
+def _canonical_user_session_path(uid: str, sid: str) -> Path:
+    return state_root() / "users" / uid / "sessions" / f"session_{sid}.json"
+
+def _canonical_user_result_path(uid: str, sid: str) -> Path:
+    return state_root() / "users" / uid / "results" / f"result_{sid}.json"
+
+def _copy2(src: Path | None, dst: Path) -> bool:
+    try:
+        if src is None:
+            return False
+        if not src.exists():
+            return False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        return True
+    except Exception:
+        return False
+
+
+
 # ==================== PATCH S2B: Weather FP from key function ====================
 def _weather_fp_from_key(ts_hour: int, lat: float, lon: float, source: str) -> str:
     """
@@ -652,6 +675,9 @@ def _probe_streams_file(path: str) -> dict:
 # ==================== END STREAMS PROBE HELPER ====================
 
 # ==================== PATCH: SESSIONS META SUPPORT ====================
+
+from server.user_state import state_root
+
 def _sessions_index_path(uid: str) -> Path:
     """Returner path til sessions_index.json for en gitt bruker."""
     return _repo_root_from_here() / "state" / "users" / uid / "sessions_index.json"
@@ -3284,7 +3310,31 @@ async def analyze_session(
         resp["debug"] = resp_dbg
     # ==================== END PATCH B2.1 ====================
 
-    return _RET(resp)
+    # ---- PATCH: CANONICALIZE (legacy -> SSOT state_root) ----
+# ---- PATCH: CANONICALIZE (legacy -> SSOT state_root) ----
+try:
+    sp = _pick_best_session_path(sid)
+    rp = _result_path(sid)  # logs/results/result_<sid>.json
+
+    ok_sess = _copy2(sp, _canonical_user_session_path(user_id, sid))
+    ok_res  = _copy2(rp, _canonical_user_result_path(user_id, sid))
+
+    if want_debug:
+        resp.setdefault("debug", {})["canonicalize"] = {
+            "session_src": str(sp) if sp else None,
+            "result_src": str(rp),
+            "session_copied": ok_sess,
+            "result_copied": ok_res,
+            "state_root": str(state_root()),
+        }
+
+    print(f"[CANON] sid={sid} uid={user_id} sess={ok_sess} res={ok_res}", file=sys.stderr)
+except Exception as e:
+    print(f"[CANON] FAIL sid={sid} uid={user_id} err={e!r}", file=sys.stderr)
+# ---- END PATCH ----
+
+
+
 
 # ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
 from fastapi.responses import JSONResponse
@@ -3315,8 +3365,14 @@ async def analyze_session_sessionspy(
 
 # ==================== END PATCH ====================
 
+from typing import Any, Dict, Optional
 
+import json
+import os
+
+from fastapi import Depends, HTTPException, Request
 from server.auth_guard import require_auth
+
 
 @router.get("/{session_id}")
 def get_session(
@@ -3326,81 +3382,92 @@ def get_session(
 ) -> Dict[str, Any]:
     """
     Returner enkel sessions-respons, med Precision Watt hentet fra
-    enten _debug/result_<id>.json (fasit) eller logs/results/result_<id>.json (fallback).
+    state/users/<uid>/results/result_<id>.json (SSOT) eller logs/results/result_<id>.json (fallback).
 
-    Sikkerhet (Task 1.2):
+    Sikkerhet:
     - Krever auth (401 hvis ikke innlogget)
     - Eiersjekk: session må tilhøre innlogget bruker, ellers 404
     - SSOT for eierskap = per-user sessions_index.json (ikke doc)
     - Ikke lek ut lokale filpaths i respons
     """
-    from server.user_state import load_user_sessions_index, maybe_bootstrap_demo_sessions
+    from server.user_state import (
+        load_user_sessions_index,
+        maybe_bootstrap_demo_sessions,
+        state_root,
+    )
 
-    base_dir = os.getcwd()
+    sid = str(session_id).strip()
+    uid = str(user_id).strip()
 
     # (Demo) sørg for at demo-sessions kan finnes i index hvis demo-mode brukes
-    maybe_bootstrap_demo_sessions(base_dir, user_id)
+    base_dir = os.getcwd()  # kun for demo-bootstrap og backward compat-signaturer
+    maybe_bootstrap_demo_sessions(base_dir, uid)
 
     # ---- EIERSJEKK via per-user index (SSOT) ----
-    idx = load_user_sessions_index(base_dir, user_id) or {}
-    
-    # ==================== PATCH 2.3-B: Bruk helper for å sjekke eierskap ====================
+    idx = load_user_sessions_index(base_dir, uid) or {}
     allowed = _allowed_ids_set_from_index(idx)
-    if str(session_id) not in allowed:
+    if sid not in allowed:
         # Ikke avslør om session finnes globalt
         raise HTTPException(status_code=404, detail="Session not found")
-    # ==================== END PATCH 2.3-B ====================
 
-    # ---- Hent result-doc fra fil (lokalt), men ikke eksponer paths ----
-    debug_path = os.path.join(base_dir, "_debug", f"result_{session_id}.json")
-    results_path = os.path.join(base_dir, "logs", "results", f"result_{session_id}.json")
+    # ---- Paths (ikke eksponer i respons) ----
+    root = state_root()
+    ssot_result_path = root / "users" / uid / "results" / f"result_{sid}.json"
+    logs_result_path = (root.parent / "logs" / "results" / f"result_{sid}.json") if (root.name == "state") else None
 
-    debug_exists = os.path.exists(debug_path)
-    results_exists = os.path.exists(results_path)
+    # Optional debug (kun hvis eksplisitt tillatt)
+    allow_debug = (os.getenv("CG_ALLOW_DEBUG_INPUTS", "").lower() in ("1", "true", "yes"))
+    debug_result_path = (root.parent / "_debug" / f"result_{sid}.json") if allow_debug else None
 
     doc: Optional[Dict[str, Any]] = None
     source: Optional[str] = None
-    debug_error: Optional[str] = None
+    read_error: Optional[str] = None
 
-    # 1) Prøv _debug først
-    if debug_exists:
+    # 1) SSOT først: state/users/<uid>/results/
+    if ssot_result_path.exists():
         try:
-            with open(debug_path, "r", encoding="utf-8-sig") as f:
-                doc = json.load(f)
-                source = "_debug"
-        except Exception as e_any:
-            debug_error = f"debug read error: {e_any!r}"
+            doc = json.loads(ssot_result_path.read_text(encoding="utf-8-sig"))
+            source = "state/users/*/results"
+        except Exception as e:
+            read_error = f"ssot read error: {e!r}"
             doc = None
 
-    # 2) Fallback: logs/results
-    if doc is None and results_exists:
+    # 2) fallback: logs/results (kun hvis ikke fant SSOT)
+    if doc is None and logs_result_path is not None and logs_result_path.exists():
         try:
-            with open(results_path, "r", encoding="utf-8") as f:
-                doc = json.load(f)
-                source = "logs/results"
-        except Exception as e_any:
-            debug_error = f"results read error: {e_any!r}"
+            doc = json.loads(logs_result_path.read_text(encoding="utf-8-sig"))
+            source = "logs/results"
+        except Exception as e:
+            read_error = f"logs read error: {e!r}"
             doc = None
 
-    # Hvis ingen fil finnes: skal være 404 (ikke 200), og uten path-lekkasje
-    if doc is None:
+    # 3) optional debug fallback (kun hvis tillatt)
+    if doc is None and debug_result_path is not None and debug_result_path.exists():
+        try:
+            doc = json.loads(debug_result_path.read_text(encoding="utf-8-sig"))
+            source = "_debug"
+        except Exception as e:
+            read_error = f"debug read error: {e!r}"
+            doc = None
+
+    if doc is None or not isinstance(doc, dict):
         raise HTTPException(status_code=404, detail="Session not found")
 
-    metrics = doc.get("metrics") or {}
+    metrics = doc.get("metrics") if isinstance(doc.get("metrics"), dict) else {}
     precision_watt = metrics.get("precision_watt")
     precision_watt_ci = metrics.get("precision_watt_ci")
 
     # Backfill start_time hvis mangler (bruk eksisterende helper hvis tilgjengelig)
     if not doc.get("start_time"):
         try:
-            st = _trend_sessions_lookup_start_time(session_id)
+            st = _trend_sessions_lookup_start_time(sid)
             if st:
                 doc["start_time"] = st
         except Exception:
             pass
 
     resp: Dict[str, Any] = {
-        "session_id": session_id,
+        "session_id": sid,
         "precision_watt": precision_watt,
         "precision_watt_ci": precision_watt_ci,
         "strava_activity_id": doc.get("strava_activity_id"),
@@ -3414,12 +3481,17 @@ def get_session(
         "raw_has_metrics": bool(metrics),
     }
 
-    # Minimal debug uten filpaths (kan fjernes helt hvis du vil være enda strengere)
+    # Minimal debug uten filpaths
     resp["debug"] = {
-        "checked_debug": bool(debug_exists),
-        "checked_results": bool(results_exists),
         "source": source,
-        "read_error": debug_error,
+        "read_error": read_error,
+        "checked": {
+            "ssot": bool(ssot_result_path.exists()),
+            "logs": bool(logs_result_path.exists()) if logs_result_path is not None else False,
+            "debug": bool(debug_result_path.exists()) if debug_result_path is not None else False,
+        },
+        "allow_debug_inputs": allow_debug,
     }
 
     return resp
+
