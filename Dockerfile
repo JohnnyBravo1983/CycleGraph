@@ -28,7 +28,8 @@ RUN python -m pip install --upgrade pip && python -m pip install "maturin>=1.4,<
 COPY core/ /app/core/
 
 # Build wheel
-RUN maturin build --release -m /app/core/pyproject.toml -o /tmp/wheels
+RUN maturin build --release -m /app/core/Cargo.toml -o /tmp/wheels
+
 
 # ---------- RUNTIME: app ----------
 FROM python:3.12-slim AS runtime
