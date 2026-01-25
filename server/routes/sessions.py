@@ -12,6 +12,14 @@ import sys
 print(f"[CG] sessions.py __file__={__file__}", file=sys.stderr)
 print(f"[CG] cwd={os.getcwd()}", file=sys.stderr)
 
+# ==================== PATCH: IMPORT FOR SELF-HEALING ====================
+try:
+    from server.routes.strava_import_router import _import_one as _strava_import_one
+except ImportError as e:
+    _strava_import_one = None
+    print(f"[SVR] Could not import _strava_import_one: {e}", file=sys.stderr)
+# ==================== END PATCH ====================
+
 def _fallback_compute_estimated_error_and_hint(profile_used, weather_used):
     """
     Fallback-heuristikk:
@@ -1904,6 +1912,34 @@ async def analyze_session(
         dbg["input_paths"] = avail["paths"]
         _http409_missing_input(sid, dbg)
     # ==================================================================
+
+    # ==================== PATCH 3b: SELF-HEALING ANALYZE ====================
+    # Hvis analyze mangler input (ingen session/result/streams/activity), fetch fra Strava
+    # og skriv session til persistent state før vi fortsetter analyse.
+    if (not avail.get("has_any_input")) and (not force_recompute):
+        try:
+            cg_auth = request.cookies.get("cg_auth")
+            if not cg_auth:
+                # Strava import trenger cg_auth for intern analyze-trigger i noen flows,
+                # men her bruker vi analyze=False. Likevel: uten auth-cookie er dette hard fail.
+                raise HTTPException(status_code=401, detail="Not authenticated (missing cg_auth cookie)")
+
+            # Reuse existing Strava import pipeline (tokens refresh + fetch + build samples + write session)
+            out = _strava_import_one(uid=user_id, rid=str(sid), cg_auth=cg_auth, analyze=False)
+
+            # Etter import, oppdater availability slik at resten av analyze finner session
+            avail = _input_availability(sid)
+
+            print(
+                f"[SELF_HEAL] sid={sid} uid={user_id} imported={out.get('ok')} samples_len={out.get('samples_len')}",
+                file=sys.stderr,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[SELF_HEAL] FAIL sid={sid} uid={user_id} err={repr(e)}", file=sys.stderr)
+            raise HTTPException(status_code=500, detail=f"Self-heal failed: {repr(e)}")
+    # ==================== END PATCH 3b ====================
 
     # ==================== PATCH 1: logg force_recompute tidlig ====================
     print(
