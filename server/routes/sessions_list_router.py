@@ -28,34 +28,43 @@ def _repo_root_from_here() -> Path:
     # .../CycleGraph/frontend/server/routes/sessions_list_router.py → repo root = CycleGraph
     return Path(__file__).resolve().parents[2]
 
-def _pick_result_path(sid: str) -> Path | None:
+
+def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
     """
     ✅ PROD FIX (2026-01-24): Files actually in _debug_* folders
+    ✅ PATCH 0B: prefer /app/state/users/<uid>/results/result_<sid>.json (SSOT) when uid provided
     """
     root = Path("/app")
-    
+
+    # PRIORITY: per-user persistent storage (SSOT)
+    if uid:
+        user_rp = root / "state" / "users" / uid / "results" / f"result_{sid}.json"
+        if user_rp.exists():
+            return user_rp
+
     # PRIORITY: Where files ACTUALLY are (verified via SSH)
     candidates = [
         root / "_debug_WithWeather" / f"result_{sid}.json",
         root / "_debug_NoWeather" / f"result_{sid}.json",
         root / "scripts" / "_debug" / f"result_{sid}.json",
     ]
-    
+
     for path in candidates:
         if path.exists():
             return path
-    
+
     # Fallback (for other environments/old files)
     fallback = [
         root / "out" / f"result_{sid}.json",
         root / "src" / "cyclegraph" / f"result_{sid}.json",
     ]
-    
+
     for path in fallback:
         if path.exists():
             return path
-    
+
     return None
+
 
 def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
     """
@@ -213,6 +222,7 @@ def _fmt_dt(dt: datetime) -> str:
 # PATCH C4-REPLACE: “siste mile”
 # -------------------------------
 
+
 def _json_load_any(p: Path) -> Optional[dict]:
     try:
         return json.loads(p.read_text(encoding="utf-8-sig"))
@@ -308,6 +318,7 @@ def _extract_end_time_and_km(session_id: str) -> tuple[Optional[str], Optional[f
 # -------------------------------
 # PATCH E: Les fra session_<sid>.json (actual10/latest) og beregn km + end_time
 # -------------------------------
+
 
 def _pick_session_path(session_id: str, uid: Optional[str] = None) -> Optional[Path]:
     root = _repo_root_from_here()
@@ -543,6 +554,18 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
 
     sid = str(doc.get("session_id") or doc.get("ride_id") or doc.get("id") or fallback_sid)
 
+    # PATCH 0A — Fix weather_source (SSOT from analyzer)
+    # prefer metrics.weather_meta.provider, fallback to older layouts
+    weather_meta = metrics.get("weather_meta") if isinstance(metrics, dict) else None
+    if not isinstance(weather_meta, dict):
+        weather_meta = {}
+
+    weather_source = (
+        weather_meta.get("provider")
+        or doc.get("weather_source")
+        or (doc.get("weather") or {}).get("source")
+    )
+
     row: Dict[str, Any] = {
         "session_id": sid,
         "ride_id": str(doc.get("ride_id")) if doc.get("ride_id") is not None else sid,
@@ -551,8 +574,10 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "distance_km": distance_km,
         "precision_watt_avg": pw_avg,
         "profile_label": doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label"),
-        "weather_source": doc.get("weather_source") or (doc.get("weather") or {}).get("source"),
+        "weather_source": weather_source,
         "debug_source_path": str(source_path).replace("\\", "/"),
+        # ✅ NEW: analyzed marker for UI
+        "analyzed": True,
     }
 
     # PATCH D2.2: Prefer Strava start_date if present (import writes this; analysis may carry it through)
@@ -584,6 +609,7 @@ def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dic
     - vi bruker sessions_index.json som SSOT for hvilke ride_ids som tilhører user_id
     """
     from server.user_state import state_root
+
     index_path = state_root() / "users" / uid / "sessions_index.json"
 
     idx = None
@@ -668,9 +694,25 @@ async def list_all(
                 print("[LIST/ALL] skip invalid sid:", sid_str)
                 continue
 
-            rp = _pick_result_path(sid_str)
+            # PATCH 0B: pass uid to find per-user results first
+            rp = _pick_result_path(sid_str, uid=uid)
+
             if not rp:
-                # ingen resultfil funnet – vi lar det være stille i MVP
+                # ✅ NEW: include placeholder rows so UI can list all rides
+                rows.append(
+                    {
+                        "session_id": sid_str,
+                        "ride_id": sid_str,
+                        "start_time": None,
+                        "end_time": None,
+                        "distance_km": None,
+                        "precision_watt_avg": None,
+                        "profile_label": None,
+                        "weather_source": None,
+                        "debug_source_path": None,
+                        "analyzed": False,
+                    }
+                )
                 continue
 
             raw = _read_json_utf8_sig(rp)
@@ -731,8 +773,13 @@ async def list_all(
         except Exception:
             continue
 
-    # behold samme filtrering/sortering som før
-    rows = [r for r in rows if (_to_float(r.get("precision_watt_avg")) or 0.0) > 0.0]
+    # ✅ Keep placeholders (analyzed=False) even though they have no watt yet
+    rows = [
+        r
+        for r in rows
+        if (r.get("analyzed") is False)
+        or ((_to_float(r.get("precision_watt_avg")) or 0.0) > 0.0)
+    ]
     rows.sort(key=lambda r: str(r.get("start_time") or ""), reverse=True)
     rows = rows[:200]
 
@@ -751,7 +798,6 @@ async def list_all(
         }
 
     return out
-
 
 
 @router.get("/list/_debug_paths")
