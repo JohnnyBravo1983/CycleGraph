@@ -1916,6 +1916,77 @@ def _extract_start_time_from_session_file(sess_path: Path) -> int | None:
         return None
 # ==================== END PATCH C/E ====================
 
+# ==================== PATCH: META HELPER FUNCTIONS FOR PRECISION_WATT_AVG CACHE ====================
+def _meta_path(uid: str) -> Path:
+    """Returner path til sessions_meta.json for bruker."""
+    return Path("/app/state/users") / str(uid) / "sessions_meta.json"
+
+def _load_json_file(p: Path) -> Any:
+    """Last JSON-fil trygt."""
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+def _save_json_atomic(p: Path, obj: Any) -> None:
+    """Skriv JSON-fil atomisk."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)
+
+def _extract_precision_watt_avg(result: Any) -> Optional[float]:
+    """
+    Best-effort: prøver flere vanlige plasseringer.
+    Returnerer float eller None.
+    """
+    try:
+        if isinstance(result, dict):
+            # 1) direkte
+            if "precision_watt_avg" in result:
+                v = result.get("precision_watt_avg")
+                return float(v) if v is not None else None
+
+            # 2) metrics / summary / report
+            for k in ("metrics", "summary", "report", "session"):
+                sub = result.get(k)
+                if isinstance(sub, dict) and "precision_watt_avg" in sub:
+                    v = sub.get("precision_watt_avg")
+                    return float(v) if v is not None else None
+
+            # 3) alternative navn (hvis dere bruker annet internt)
+            for alt in ("precision_watt_mean", "precision_watt", "avg_precision_watt"):
+                if alt in result:
+                    v = result.get(alt)
+                    return float(v) if v is not None else None
+                for k in ("metrics", "summary", "report"):
+                    sub = result.get(k)
+                    if isinstance(sub, dict) and alt in sub:
+                        v = sub.get(alt)
+                        return float(v) if v is not None else None
+    except Exception:
+        return None
+    return None
+
+def _meta_set_precision_watt(uid: str, sid: str, watt: Optional[float]) -> None:
+    """Lagre precision_watt_avg i sessions_meta.json."""
+    try:
+        p = _meta_path(uid)
+        meta = _load_json_file(p)
+        if not isinstance(meta, dict):
+            meta = {}
+
+        s = meta.get(str(sid))
+        if not isinstance(s, dict):
+            s = {}
+            meta[str(sid)] = s
+
+        s["precision_watt_avg"] = watt
+        _save_json_atomic(p, meta)
+    except Exception as e:
+        print(f"[META] failed to set precision_watt_avg sid={sid}: {e}", file=sys.stderr)
+# ==================== END PATCH ====================
+
 
 # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
 @router.post("/{sid}/analyze")
@@ -1997,6 +2068,13 @@ async def analyze_session(
             x = _final_ui_override(x)
         except Exception:
             pass
+        # ==================== PATCH 3D: cache precision_watt_avg into sessions_meta ====================
+        try:
+            watt = _extract_precision_watt_avg(x)
+            _meta_set_precision_watt(user_id, str(sid), watt)
+        except Exception as e:
+            print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
+        # ==================== END PATCH 3D ====================
         return x
     # ===========================================================================================
 
@@ -3327,6 +3405,8 @@ async def analyze_session(
         resp["debug"] = resp_dbg
     # ==================== END PATCH B2.1 ====================
 
+    return _RET(resp)
+
 # ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
 from fastapi.responses import JSONResponse
 from fastapi import Depends, Query, Request
@@ -3485,4 +3565,3 @@ def get_session(
     }
 
     return resp
-

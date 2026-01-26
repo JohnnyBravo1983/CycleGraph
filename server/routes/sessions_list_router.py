@@ -1,4 +1,4 @@
-# frontend/server/routes/sessions_list_router.py
++# frontend/server/routes/sessions_list_router.py
 from __future__ import annotations
 
 import csv
@@ -708,7 +708,8 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "end_time": doc.get("end_time"),
         "distance_km": distance_km,
         "precision_watt_avg": pw_avg,
-        "profile_label": doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label"),
+        "profile_label": doc.get("profile_label")
+        or (doc.get("profile_used") or {}).get("profile_label"),
         "weather_source": weather_source,
         "debug_source_path": str(source_path).replace("\\", "/"),
         "analyzed": True,
@@ -827,8 +828,6 @@ def _strava_get_activity(uid: str, sid: str) -> dict | None:
         return None
 
 
-
-
 def _try_load_precision_watt_avg_from_results(sid: str) -> float | None:
     """
     Load precision_watt_avg from exact result file in prod logs.
@@ -862,6 +861,11 @@ def _try_load_precision_watt_avg_from_results(sid: str) -> float | None:
         return float(v)
     except Exception:
         return None
+
+
+# ✅ Alias for patch-block (some earlier patch text referenced this name)
+def _try_load_precision_watt_avg_anywhere(sid: str) -> float | None:
+    return _try_load_precision_watt_avg_from_results(sid)
 
 
 def _build_rows_from_state(uid: str) -> list[dict]:
@@ -921,14 +925,13 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
                 debug_src = "sessions_meta+strava"
 
-        # ✅ PATCH: try fill precision_watt_avg from anywhere once + cache
-        pw = m.get("precision_watt_avg")
-        if pw is None:
-            pw2 = _try_load_precision_watt_avg_anywhere(sid)
-            if pw2 is not None:
-                m["precision_watt_avg"] = pw2
-                pw = pw2
-                changed = True
+        # ✅ PATCH: list skal hente watt fra sessions_meta (null risiko)
+        precision_watt_avg = m.get("precision_watt_avg")
+        if precision_watt_avg is not None:
+            try:
+                precision_watt_avg = float(precision_watt_avg)
+            except Exception:
+                precision_watt_avg = None
 
         rows.append(
             {
@@ -937,7 +940,7 @@ def _build_rows_from_state(uid: str) -> list[dict]:
                 "start_time": start_time,
                 "end_time": m.get("end_time"),
                 "distance_km": distance_km,
-                "precision_watt_avg": pw,  # ✅ PATCH: use computed pw
+                "precision_watt_avg": precision_watt_avg,
                 "profile_label": m.get("profile_label"),
                 "weather_source": m.get("weather_source"),
                 "debug_source_path": debug_src,
@@ -1024,6 +1027,7 @@ async def list_all(
     - Returnerer kun sessions som ligger i state/users/<user_id>/sessions_index.json
     - PATCH: Bruk sessions_meta.json som cache for start_time + distance_km,
       og fallback til Strava activity én gang per session hvis mangler.
+    - PATCH: precision_watt_avg leses kun fra sessions_meta (null risiko)
     """
     uid = str(user_id)
     rows = _build_rows_from_state(uid)
