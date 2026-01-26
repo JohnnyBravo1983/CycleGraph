@@ -156,37 +156,56 @@ def _distance_km_from_activity(sid: str) -> Optional[float]:
 
 def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
     """
-    ✅ PROD FIX (2026-01-24): Files actually in _debug_* folders
-    ✅ PATCH 0B: prefer /app/state/users/<uid>/results/result_<sid>.json (SSOT) when uid provided
+    Return best matching result json for a session id.
+    Supports both legacy + self-healed naming/layouts.
     """
+    # In Fly container, repo root is /app
     root = Path("/app")
 
-    # PRIORITY: per-user persistent storage (SSOT)
+    cand_dirs: list[Path] = [
+        # ✅ PROD SSOT (confirmed by find)
+        root / "logs" / "results",
+    ]
+
+    # Optional user-scoped candidates (keep, but after prod SSOT)
     if uid:
-        user_rp = root / "state" / "users" / uid / "results" / f"result_{sid}.json"
-        if user_rp.exists():
-            return user_rp
+        cand_dirs += [
+            root / "state" / "users" / str(uid) / "results",
+            root / "state" / "users" / str(uid) / "logs" / "results",
+            root / "state" / "users" / str(uid) / "_debug",
+        ]
 
-    # PRIORITY: Where files ACTUALLY are (verified via SSH)
-    candidates = [
-        root / "_debug_WithWeather" / f"result_{sid}.json",
-        root / "_debug_NoWeather" / f"result_{sid}.json",
-        root / "scripts" / "_debug" / f"result_{sid}.json",
+    # Legacy / other fallbacks
+    cand_dirs += [
+        root / "state" / "results",
+        root / "_debug",
+        root / "logs" / "_debug",
     ]
 
-    for path in candidates:
-        if path.exists():
-            return path
-
-    # Fallback (for other environments/old files)
-    fallback = [
-        root / "out" / f"result_{sid}.json",
-        root / "src" / "cyclegraph" / f"result_{sid}.json",
+    patterns = [
+        f"result_{sid}.json",
+        f"{sid}.json",
+        f"result_{sid}_*.json",
+        f"*{sid}*.json",  # last resort
     ]
 
-    for path in fallback:
-        if path.exists():
-            return path
+    for d in cand_dirs:
+        try:
+            if not d.exists():
+                continue
+
+            # exact first
+            exact = d / f"result_{sid}.json"
+            if exact.exists() and exact.is_file():
+                return exact
+
+            # then globs by recency
+            for pat in patterns[1:]:
+                hits = sorted(d.glob(pat), key=lambda x: x.stat().st_mtime, reverse=True)
+                if hits:
+                    return hits[0]
+        except Exception:
+            continue
 
     return None
 
