@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from fastapi import APIRouter, Depends, Query, Request, Response
 from server.auth_guard import require_auth
 from server.user_state import state_root
@@ -146,7 +148,6 @@ def _distance_km_from_activity(sid: str) -> Optional[float]:
         try:
             if d_m is not None:
                 km = float(d_m) / 1000.0
-                # ikke overdriv presisjon i UI
                 return round(km, 3)
         except Exception:
             pass
@@ -157,41 +158,39 @@ def _distance_km_from_activity(sid: str) -> Optional[float]:
 def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
     """
     Return the exact result json for a session id.
-    IMPORTANT: Do NOT fuzzy-match other files, or we may attach wrong results to a ride.
+
+    Prod data lives on the Fly volume mounted at /app/state, user-scoped.
+    We must NOT fuzzy match other files (wrong ride -> wrong metadata).
     """
-    root = Path("/app")
+    if not uid:
+        return None
+
+    root = Path("/app/state") / "users" / str(uid)
 
     cand_dirs: list[Path] = [
-        # ✅ PROD SSOT (confirmed by find)
+        root / "results",
         root / "logs" / "results",
-    ]
-
-    # Optional user-scoped candidates (keep as fallbacks)
-    if uid:
-        cand_dirs += [
-            root / "state" / "users" / str(uid) / "results",
-            root / "state" / "users" / str(uid) / "logs" / "results",
-            root / "state" / "users" / str(uid) / "_debug",
-        ]
-
-    # Legacy / other fallbacks
-    cand_dirs += [
-        root / "state" / "results",
         root / "_debug",
-        root / "logs" / "_debug",
+        root / "sessions" / "results",
+        root / "sessions",
     ]
 
     filename = f"result_{sid}.json"
 
     for d in cand_dirs:
         try:
-            if not d.exists():
-                continue
             exact = d / filename
             if exact.exists() and exact.is_file():
                 return exact
         except Exception:
             continue
+
+    try:
+        for p in root.rglob(filename):
+            if p.is_file():
+                return p
+    except Exception:
+        pass
 
     return None
 
@@ -203,7 +202,7 @@ def _extract_first_t_abs_fast(path: Path) -> Optional[str]:
     """
     try:
         with path.open("rb") as f:
-            chunk = f.read(512_000)  # PATCH D2.1: increase to avoid missing t_abs in large files
+            chunk = f.read(512_000)
         text = chunk.decode("utf-8", errors="ignore")
         m = _TABS_RE.search(text)
         if not m:
@@ -271,7 +270,7 @@ def _compute_distance_km_from_result(p: Path) -> Optional[float]:
 
             if prev_t is not None and prev_v is not None:
                 dt = float(t) - float(prev_t)
-                if dt > 0 and dt < 60:  # basic sanity
+                if dt > 0 and dt < 60:
                     dist_m += 0.5 * (float(prev_v) + float(v)) * dt
 
             prev_t = t
@@ -410,7 +409,6 @@ def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optio
                 print("[LIST/ALL][C4 RETURN]", end_time, km)
                 return end_time, km
 
-    # fallback: session_<sid>.json (actual10/latest + evt andre actual*/latest)
     cand: List[Path] = []
     cand.append(root / "logs" / "actual10" / "latest" / f"session_{sid}.json")
 
@@ -657,12 +655,10 @@ def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
 # PATCH D1 — Låst “truth”: liste-watt = detalj-watt
 # -------------------------------
 def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[float]:
-    # List view must match session detail view (truth = precision_watt_avg)
     pw_avg = _to_float(doc.get("precision_watt_avg"))
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("precision_watt_avg"))
 
-    # Defensive fallbacks that still represent "precision" (NOT wheel/total)
     if pw_avg is None:
         pw_avg = _to_float(metrics.get("precision_watt_pedal"))
     if pw_avg is None:
@@ -675,41 +671,32 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
     metrics = _safe_get_metrics(doc)
     strava = doc.get("strava") or {}
 
-    # -------------------------
-    # distance_km (legacy + self-healed)
-    # -------------------------
     distance_km = _to_float(doc.get("distance_km"))
 
-    # ✅ self-healed: metrics.distance_km
     if distance_km is None and isinstance(metrics, dict):
         distance_km = _to_float(metrics.get("distance_km"))
 
-    # legacy: distance_m in doc
     if distance_km is None:
         dm = _to_float(doc.get("distance_m"))
         if dm is not None:
             distance_km = dm / 1000.0
 
-    # ✅ self-healed: strava.distance in meters
     if distance_km is None:
         sd = _to_float(strava.get("distance"))
         if sd is not None:
             distance_km = sd / 1000.0
 
-    # precision watt avg (already multi-source in helper)
     pw_avg = _pick_precision_watt_avg(doc, metrics)
 
     sid = str(doc.get("session_id") or doc.get("ride_id") or doc.get("id") or fallback_sid)
 
-    # PATCH 0A — Fix weather_source (SSOT from analyzer)
-    # prefer metrics.weather_meta.provider, fallback to older layouts
     weather_meta = metrics.get("weather_meta") if isinstance(metrics, dict) else None
     if not isinstance(weather_meta, dict):
         weather_meta = {}
 
     weather_source = (
         weather_meta.get("provider")
-        or (doc.get("weather_meta") or {}).get("provider")   # ✅ extra safe fallback
+        or (doc.get("weather_meta") or {}).get("provider")
         or doc.get("weather_source")
         or (doc.get("weather") or {}).get("source")
     )
@@ -724,14 +711,12 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "profile_label": doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label"),
         "weather_source": weather_source,
         "debug_source_path": str(source_path).replace("\\", "/"),
-        # ✅ analyzed marker for UI
         "analyzed": True,
     }
 
-    # PATCH D2.2: Prefer Strava start_date if present (import writes this; analysis may carry it through)
     try:
         if row.get("start_time") in (None, ""):
-            st2 = (strava.get("start_date") or doc.get("start_date"))  # ✅ include doc.start_date fallback
+            st2 = (strava.get("start_date") or doc.get("start_date"))
             if isinstance(st2, str) and st2.strip():
                 row["start_time"] = st2.strip()
     except Exception:
@@ -742,7 +727,6 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
             sid2 = row.get("session_id") or row.get("ride_id")
             if sid2:
                 st = _trend_sessions_lookup_start_time(str(sid2))
-                # PATCH D2.3: Only accept if it looks like a real timestamp (not DATE-only / broken)
                 if st and (not _needs_start_time_fix(st)):
                     row["start_time"] = st
     except Exception:
@@ -794,6 +778,133 @@ def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dic
     return index_path, wanted, idx, idx_keys
 
 
+# ============================================================
+# PATCH: sessions_meta.json + Strava activity fallback + cache
+# ============================================================
+
+def _user_dir(uid: str) -> Path:
+    # Use state_root() for portability (Fly volume mounted at /app/state)
+    return state_root() / "users" / uid
+
+
+def _load_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _save_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_user_strava_tokens(uid: str) -> dict | None:
+    # per your patch: /app/state/users/<uid>/strava_tokens.json
+    p = _user_dir(uid) / "strava_tokens.json"
+    doc = _load_json(p)
+    return doc if isinstance(doc, dict) else None
+
+
+def _strava_get_activity(uid: str, sid: str) -> dict | None:
+    tokens = _load_user_strava_tokens(uid)
+    if not tokens:
+        return None
+    access = tokens.get("access_token")
+    if not access:
+        return None
+
+    url = f"https://www.strava.com/api/v3/activities/{sid}"
+    try:
+        r = requests.get(url, headers={"Authorization": f"Bearer {access}"}, timeout=15)
+    except Exception:
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        return r.json()
+    except Exception:
+        return None
+
+
+def _build_rows_from_state(uid: str) -> list[dict]:
+    udir = _user_dir(uid)
+
+    idx = _load_json(udir / "sessions_index.json") or {}
+    meta = _load_json(udir / "sessions_meta.json") or {}
+
+    sessions: list[str] = []
+    if isinstance(idx, dict) and isinstance(idx.get("sessions"), list):
+        sessions = [str(x) for x in idx["sessions"]]
+    elif isinstance(idx, list):
+        sessions = [str(x) for x in idx]
+    else:
+        sessions = []
+
+    if not isinstance(meta, dict):
+        meta = {}
+
+    changed = False
+    rows: list[dict] = []
+
+    for sid in sessions:
+        sid = str(sid).strip()
+        if not sid:
+            continue
+
+        m = meta.get(sid)
+        if not isinstance(m, dict):
+            m = {}
+            meta[sid] = m
+            changed = True
+
+        start_time = m.get("start_time")
+        distance_km = m.get("distance_km")
+
+        debug_src = "sessions_meta"
+
+        # If missing, fetch from Strava once + cache
+        if (not start_time) or (distance_km is None):
+            act = _strava_get_activity(uid, sid)
+            if isinstance(act, dict):
+                st = act.get("start_date")
+                if (not start_time) and isinstance(st, str) and st.strip():
+                    start_time = st.strip()
+                    m["start_time"] = start_time
+                    changed = True
+
+                dist_m = act.get("distance")
+                try:
+                    if distance_km is None and dist_m is not None:
+                        distance_km = float(dist_m) / 1000.0
+                        m["distance_km"] = distance_km
+                        changed = True
+                except Exception:
+                    pass
+
+                debug_src = "sessions_meta+strava"
+
+        rows.append(
+            {
+                "session_id": sid,
+                "ride_id": sid,
+                "start_time": start_time,
+                "end_time": m.get("end_time"),
+                "distance_km": distance_km,
+                "precision_watt_avg": m.get("precision_watt_avg"),
+                "profile_label": m.get("profile_label"),
+                "weather_source": m.get("weather_source"),
+                "debug_source_path": debug_src,
+                "analyzed": True,
+            }
+        )
+
+    if changed:
+        _save_json(udir / "sessions_meta.json", meta)
+
+    return rows
+
+
 # -----------------------------------
 # Routes
 # -----------------------------------
@@ -814,9 +925,7 @@ async def list_sessions(
       2) Fallback: logs/results/result_<sid>.json
     """
     uid = str(user_id)
-    root = _repo_root_from_here()
 
-    # Bruk sessions_index.json som SSOT for hvilke rides som tilhører bruker
     index_path = state_root() / "users" / uid / "sessions_index.json"
     index_doc: Any = _read_json_utf8_sig(index_path) if index_path.exists() else {"sessions": []}
     ride_ids = _allowed_ids_list_from_index_doc(index_doc)
@@ -828,25 +937,21 @@ async def list_sessions(
         if not sid:
             continue
 
-        # 1) SSOT først
         ssot_p = _ssot_user_result_path(uid, sid)
         doc = _read_json_if_exists(ssot_p)
 
-        # 2) Fallback: logs/results
         logs_p = _logs_result_path(sid)
         if doc is None:
             doc = _read_json_if_exists(logs_p)
 
         item = _extract_list_item(sid, doc)
 
-        # optional: minimal debug uten paths
         if debug:
             item["debug"] = {
                 "has_ssot_result": ssot_p.exists(),
                 "has_logs_result": logs_p.exists(),
             }
 
-        # activity distance fallback (hvis vi fortsatt mangler distance)
         try:
             if item.get("distance_km") is None:
                 dk = _distance_km_from_activity(sid)
@@ -871,154 +976,22 @@ async def list_all(
     🔒 Auth + scope-minimum:
     - Ingen cg_uid-cookie identitet
     - Returnerer kun sessions som ligger i state/users/<user_id>/sessions_index.json
+    - PATCH: Bruk sessions_meta.json som cache for start_time + distance_km,
+      og fallback til Strava activity én gang per session hvis mangler.
     """
-    uid = user_id
-    FP = "LIST_ALL_AUTH_SCOPED_20260114"
-    root = _repo_root_from_here()
-    print("[/list/all]", FP, "uid=", uid, "root=", root)
-
-    index_path, wanted, idx, idx_keys = _read_user_sessions_index(root, uid)
-
-    if not wanted:
-        # ingen index => ingen sessions for denne brukeren
-        out: Dict[str, Any] = {"value": [], "Count": 0}
-        if debug:
-            out["debug"] = {
-                "uid": uid,
-                "index_path": str(index_path).replace("\\", "/"),
-                "index_exists": index_path.exists(),
-                "wanted_count": 0,
-            }
-        return out
-
-    rows: List[Dict[str, Any]] = []
-
-    # ✅ Scope: iterer kun over ride_ids i index (ikke scan globalt)
-    for sid_item in sorted(wanted, reverse=True):
-        try:
-            sid_str = str(sid_item)
-            if (not sid_str.isdigit()) or (len(sid_str) > 20):
-                print("[LIST/ALL] skip invalid sid:", sid_str)
-                continue
-
-            # PATCH 0B: pass uid to find per-user results first
-            rp = _pick_result_path(sid_str, uid=uid)
-
-            if not rp:
-                # ✅ NEW: include placeholder rows so UI can list all rides
-                item = {
-                    "session_id": sid_str,
-                    "ride_id": sid_str,
-                    "start_time": None,
-                    "end_time": None,
-                    "distance_km": None,
-                    "precision_watt_avg": None,
-                    "profile_label": None,
-                    "weather_source": None,
-                    "debug_source_path": None,
-                    "analyzed": False,
-                }
-
-                # ✅ NEW: activity distance fallback
-                try:
-                    if item.get("distance_km") is None:
-                        dk = _distance_km_from_activity(str(item.get("id") or item.get("ride_id") or ""))
-                        if dk is not None:
-                            item["distance_km"] = dk
-                except Exception:
-                    pass
-
-                rows.append(item)
-                continue
-
-            raw = _read_json_utf8_sig(rp)
-            doc = _normalize_doc(raw)
-            row = _row_from_doc(doc, rp, fallback_sid=sid_str)
-
-            # ✅ NEW: activity distance fallback (after item exists and has id/ride_id)
-            try:
-                if row.get("distance_km") is None:
-                    dk = _distance_km_from_activity(str(row.get("id") or row.get("ride_id") or ""))
-                    if dk is not None:
-                        row["distance_km"] = dk
-            except Exception:
-                pass
-
-            # --- start_time fix (UTC ISO), kun når missing/DATE-only ---
-            try:
-                st = row.get("start_time")
-                if _needs_start_time_fix(st):
-                    # 1) SSOT: session_<sid>.json (actual10/latest)
-                    t_abs = None
-                    sp = _pick_session_path(sid_str, uid=uid)
-                    if sp:
-                        obj = _json_load_any(sp)
-                        if isinstance(obj, dict):
-                            ss = obj.get("samples")
-                            if isinstance(ss, list) and ss:
-                                first = ss[0] if isinstance(ss[0], dict) else None
-                                if first:
-                                    t_abs = first.get("t_abs")
-
-                    # 2) fallback: legacy attempt (result json)
-                    if not t_abs:
-                        t_abs = _extract_first_t_abs_fast(rp)
-
-                    if t_abs:
-                        row["start_time"] = t_abs
-                        print("[/list/all]", "START_TIME_BACKFILL", "sid=", sid_str, "t_abs=", t_abs)
-            except Exception as e:
-                print("[/list/all]", "START_TIME_BACKFILL_ERR", "sid=", sid_str, "err=", repr(e))
-
-            # --- PATCH C4: end_time + distance_km (result JSON fallback) ---
-            try:
-                need_end = row.get("end_time") is None
-                need_km = row.get("distance_km") is None
-                if need_end or need_km:
-                    end_abs, km = _compute_end_time_and_km(root, sid_str)
-                    if need_end and end_abs:
-                        row["end_time"] = end_abs
-                    if need_km and km is not None:
-                        row["distance_km"] = km
-            except Exception as e:
-                print("[/list/all]", "END_KM_BACKFILL_ERR", "sid=", sid_str, "err=", repr(e))
-
-            # --- PATCH E: SSOT fra session_<sid>.json (actual10/latest eller per-user sessions) ---
-            try:
-                if row.get("end_time") is None or row.get("distance_km") is None:
-                    end_t, km2 = _extract_end_time_and_km_from_session(sid_str, uid=uid)
-                    if row.get("end_time") is None:
-                        row["end_time"] = end_t
-                    if row.get("distance_km") is None:
-                        row["distance_km"] = km2
-            except Exception as e:
-                print("[/list/all]", "E_SESSION_BACKFILL_ERR", "sid=", sid_str, "err=", repr(e))
-
-            rows.append(row)
-        except Exception:
-            continue
-
-    # ✅ Keep placeholders (analyzed=False) even though they have no watt yet
-    rows = [
-        r
-        for r in rows
-        if (r.get("analyzed") is False)
-        or ((_to_float(r.get("precision_watt_avg")) or 0.0) > 0.0)
-    ]
-    rows.sort(key=lambda r: str(r.get("start_time") or ""), reverse=True)
-    rows = rows[:200]
+    uid = str(user_id)
+    rows = _build_rows_from_state(uid)
 
     out: Dict[str, Any] = {"value": rows, "Count": len(rows)}
 
     if debug:
+        udir = _user_dir(uid)
         out["debug"] = {
             "uid": uid,
-            "index_path": str(index_path).replace("\\", "/"),
-            "index_exists": index_path.exists(),
-            "idx_type": type(idx).__name__ if idx is not None else None,
-            "idx_keys": idx_keys,
-            "wanted_count": len(wanted),
-            "wanted_sample": sorted(list(wanted))[:20],
+            "index_path": str((udir / "sessions_index.json")).replace("\\", "/"),
+            "meta_path": str((udir / "sessions_meta.json")).replace("\\", "/"),
+            "index_exists": (udir / "sessions_index.json").exists(),
+            "meta_exists": (udir / "sessions_meta.json").exists(),
             "rows_returned": len(rows),
         }
 
@@ -1036,7 +1009,6 @@ async def _debug_paths(
     """
     uid = str(user_id)
 
-    # Kun relative hints (ingen samples, ingen faktiske disk-paths)
     return {
         "uid": uid,
         "paths": {
