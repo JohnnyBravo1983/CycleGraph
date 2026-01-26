@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
 import type { SessionListItem } from "../types/session";
 import { formatStartTimeForUi } from "../lib/api";
-import { cgFetchJson } from "../lib/cgFetch";
+import { cgFetchJSON } from "../lib/cgFetch";
+
 
 export const SessionsPage: React.FC = () => {
   const { sessionsList, loadingList, errorList, loadSessionsList } =
@@ -28,7 +29,7 @@ export const SessionsPage: React.FC = () => {
     (async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await cgFetchJson<any[]>("/api/sessions/list", { method: "GET" });
+      const data = await cgFetchJSON<SessionListItem[]>("/api/sessions/list", { method: "GET" });  
 
         // Hvis store har en setter kan dere bruke den. Her gjør vi best-effort uten å endre store API:
         // Vi kaller loadSessionsList() etterpå slik at eksisterende flow beholdes.
