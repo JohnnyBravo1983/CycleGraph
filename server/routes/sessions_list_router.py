@@ -156,10 +156,9 @@ def _distance_km_from_activity(sid: str) -> Optional[float]:
 
 def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
     """
-    Return best matching result json for a session id.
-    Supports both legacy + self-healed naming/layouts.
+    Return the exact result json for a session id.
+    IMPORTANT: Do NOT fuzzy-match other files, or we may attach wrong results to a ride.
     """
-    # In Fly container, repo root is /app
     root = Path("/app")
 
     cand_dirs: list[Path] = [
@@ -167,7 +166,7 @@ def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
         root / "logs" / "results",
     ]
 
-    # Optional user-scoped candidates (keep, but after prod SSOT)
+    # Optional user-scoped candidates (keep as fallbacks)
     if uid:
         cand_dirs += [
             root / "state" / "users" / str(uid) / "results",
@@ -182,28 +181,15 @@ def _pick_result_path(sid: str, uid: Optional[str] = None) -> Path | None:
         root / "logs" / "_debug",
     ]
 
-    patterns = [
-        f"result_{sid}.json",
-        f"{sid}.json",
-        f"result_{sid}_*.json",
-        f"*{sid}*.json",  # last resort
-    ]
+    filename = f"result_{sid}.json"
 
     for d in cand_dirs:
         try:
             if not d.exists():
                 continue
-
-            # exact first
-            exact = d / f"result_{sid}.json"
+            exact = d / filename
             if exact.exists() and exact.is_file():
                 return exact
-
-            # then globs by recency
-            for pat in patterns[1:]:
-                hits = sorted(d.glob(pat), key=lambda x: x.stat().st_mtime, reverse=True)
-                if hits:
-                    return hits[0]
         except Exception:
             continue
 
