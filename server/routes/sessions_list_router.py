@@ -827,6 +827,43 @@ def _strava_get_activity(uid: str, sid: str) -> dict | None:
         return None
 
 
+
+
+def _try_load_precision_watt_avg_from_results(sid: str) -> float | None:
+    """
+    Load precision_watt_avg from exact result file in prod logs.
+    Safe: exact filename only (no fuzzy matching).
+    """
+    p = Path("/app/logs/results") / f"result_{sid}.json"
+    if not p.exists() or not p.is_file():
+        return None
+
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    if not isinstance(doc, dict):
+        return None
+
+    metrics = doc.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+
+    v = (
+        doc.get("precision_watt_avg")
+        or metrics.get("precision_watt_avg")
+        or metrics.get("precision_watt")
+    )
+    if v is None:
+        return None
+
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
 def _build_rows_from_state(uid: str) -> list[dict]:
     udir = _user_dir(uid)
 
@@ -884,6 +921,15 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
                 debug_src = "sessions_meta+strava"
 
+        # ✅ PATCH: try fill precision_watt_avg from anywhere once + cache
+        pw = m.get("precision_watt_avg")
+        if pw is None:
+            pw2 = _try_load_precision_watt_avg_anywhere(sid)
+            if pw2 is not None:
+                m["precision_watt_avg"] = pw2
+                pw = pw2
+                changed = True
+
         rows.append(
             {
                 "session_id": sid,
@@ -891,7 +937,7 @@ def _build_rows_from_state(uid: str) -> list[dict]:
                 "start_time": start_time,
                 "end_time": m.get("end_time"),
                 "distance_km": distance_km,
-                "precision_watt_avg": m.get("precision_watt_avg"),
+                "precision_watt_avg": pw,  # ✅ PATCH: use computed pw
                 "profile_label": m.get("profile_label"),
                 "weather_source": m.get("weather_source"),
                 "debug_source_path": debug_src,
