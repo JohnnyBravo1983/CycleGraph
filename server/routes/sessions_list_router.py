@@ -668,13 +668,30 @@ def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Op
 
 def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
     metrics = _safe_get_metrics(doc)
+    strava = doc.get("strava") or {}
 
+    # -------------------------
+    # distance_km (legacy + self-healed)
+    # -------------------------
     distance_km = _to_float(doc.get("distance_km"))
+
+    # ✅ self-healed: metrics.distance_km
+    if distance_km is None and isinstance(metrics, dict):
+        distance_km = _to_float(metrics.get("distance_km"))
+
+    # legacy: distance_m in doc
     if distance_km is None:
         dm = _to_float(doc.get("distance_m"))
         if dm is not None:
             distance_km = dm / 1000.0
 
+    # ✅ self-healed: strava.distance in meters
+    if distance_km is None:
+        sd = _to_float(strava.get("distance"))
+        if sd is not None:
+            distance_km = sd / 1000.0
+
+    # precision watt avg (already multi-source in helper)
     pw_avg = _pick_precision_watt_avg(doc, metrics)
 
     sid = str(doc.get("session_id") or doc.get("ride_id") or doc.get("id") or fallback_sid)
@@ -687,6 +704,7 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
 
     weather_source = (
         weather_meta.get("provider")
+        or (doc.get("weather_meta") or {}).get("provider")   # ✅ extra safe fallback
         or doc.get("weather_source")
         or (doc.get("weather") or {}).get("source")
     )
@@ -708,7 +726,7 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
     # PATCH D2.2: Prefer Strava start_date if present (import writes this; analysis may carry it through)
     try:
         if row.get("start_time") in (None, ""):
-            st2 = (doc.get("strava") or {}).get("start_date")
+            st2 = (strava.get("start_date") or doc.get("start_date"))  # ✅ include doc.start_date fallback
             if isinstance(st2, str) and st2.strip():
                 row["start_time"] = st2.strip()
     except Exception:
