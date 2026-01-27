@@ -2090,11 +2090,18 @@ async def analyze_session(
             print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
 
         # Persist full result doc to user-scoped results dir (SSOT)
+        # Persist full result doc to user-scoped results dir (SSOT)
         try:
-            if isinstance(x, dict) and _is_full_result_doc(x):
+            if isinstance(x, dict) and x.get("metrics"):
                 _persist_user_result(str(user_id), str(sid), x)
+                print(f"[PERSIST] ✅ Persisted SSOT for {sid}", file=sys.stderr)
+            else:
+                has_metrics = isinstance(x.get("metrics"), dict) if isinstance(x, dict) else False
+                print(f"[PERSIST] ⚠️  SKIP for {sid}: is_dict={isinstance(x, dict)}, has_metrics={has_metrics}", file=sys.stderr)
         except Exception as e:
-            print(f"[SVR] persist_user_result failed sid={sid} err={e!r}", file=sys.stderr)
+            print(f"[PERSIST] ❌ FAILED for {sid}: {e!r}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
 
         return x
     # ===========================================================================================
