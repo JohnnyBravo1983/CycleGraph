@@ -62,11 +62,30 @@ export const useSessionStore = create<SessionState>((set, get) => {
     if (!result.ok) {
       console.warn(
         "[sessionStore.loadSession] analyze-feil:",
-        result.error,
+        (result as any)?.error,
         "source=",
-        result.source
+        (result as any)?.source
       );
-      const msg = result.error || "Noe gikk galt ved henting av økt.";
+
+      // ✅ PATCH: Ikke trigge errorSession når dette er Strava rate limit (429)
+      // (SessionView håndterer banner/disable via analyzeSession-catch path.)
+      const status = (result as any)?.status;
+      const detail = (result as any)?.detail;
+      const isRateLimited =
+        status === 429 &&
+        (detail?.error === "strava_rate_limited" ||
+          detail?.reason === "read_daily_limit_exceeded");
+
+      if (isRateLimited) {
+        set({
+          loadingSession: false,
+          loading: false,
+          // IKKE sett errorSession/error her (unngår "Noe gikk galt" view)
+        });
+        return;
+      }
+
+      const msg = (result as any)?.error || "Noe gikk galt ved henting av økt.";
       set({
         loadingSession: false,
         loading: false,
