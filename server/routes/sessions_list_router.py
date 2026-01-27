@@ -1,4 +1,4 @@
-+# frontend/server/routes/sessions_list_router.py
+## frontend/server/routes/sessions_list_router.py
 from __future__ import annotations
 
 import csv
@@ -869,6 +869,13 @@ def _try_load_precision_watt_avg_anywhere(sid: str) -> float | None:
 
 
 def _build_rows_from_state(uid: str) -> list[dict]:
+    """
+    Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
+    PATCH: Beriker precision_watt_avg fra result-filer hvis mangler i meta.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     udir = _user_dir(uid)
 
     idx = _load_json(udir / "sessions_index.json") or {}
@@ -887,6 +894,9 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
     changed = False
     rows: list[dict] = []
+    
+    # Stats for debugging
+    stats = {"total": len(sessions), "missing_power": 0, "enriched": 0, "failed": 0}
 
     for sid in sessions:
         sid = str(sid).strip()
@@ -925,13 +935,73 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
                 debug_src = "sessions_meta+strava"
 
-        # ✅ PATCH: list skal hente watt fra sessions_meta (null risiko)
+        # ✅ PATCH: Prøv å hente precision_watt_avg fra meta først
         precision_watt_avg = m.get("precision_watt_avg")
         if precision_watt_avg is not None:
             try:
                 precision_watt_avg = float(precision_watt_avg)
             except Exception:
                 precision_watt_avg = None
+        
+        # ✅ PATCH: Hvis mangler i meta, hent fra result-filer
+        if precision_watt_avg is None:
+            stats["missing_power"] += 1
+            
+            try:
+                # Bruk eksisterende _ssot_user_result_path helper
+                ssot_path = _ssot_user_result_path(uid, sid)
+                logs_path = _logs_result_path(sid)
+                
+                result_doc = None
+                source = None
+                
+                # 1) SSOT først: state/users/<uid>/results/
+                if ssot_path.exists():
+                    result_doc = _read_json_if_exists(ssot_path)
+                    source = "ssot_result"
+                
+                # 2) Fallback: logs/results/
+                if result_doc is None and logs_path.exists():
+                    result_doc = _read_json_if_exists(logs_path)
+                    source = "logs_result"
+                
+                # 3) Ekstraher power fra result-fil
+                if isinstance(result_doc, dict):
+                    metrics = result_doc.get("metrics", {})
+                    if not isinstance(metrics, dict):
+                        metrics = {}
+                    
+                    power = (
+                        result_doc.get("precision_watt_avg")
+                        or metrics.get("precision_watt_avg")
+                        or metrics.get("precision_watt")
+                        or metrics.get("precision_watt_pedal")
+                    )
+                    
+                    if power is not None:
+                        try:
+                            precision_watt_avg = float(power)
+                            
+                            # Cache tilbake til meta
+                            m["precision_watt_avg"] = precision_watt_avg
+                            changed = True
+                            stats["enriched"] += 1
+                            
+                            debug_src = f"sessions_meta+{source}"
+                            
+                            logger.info(f"Enriched session {sid} with power {precision_watt_avg}W from {source}")
+                        except Exception:
+                            pass
+                    else:
+                        logger.warning(f"Result file for {sid} exists but no power metric found")
+                        stats["failed"] += 1
+                else:
+                    logger.debug(f"No result file found for session {sid}")
+                    stats["failed"] += 1
+                    
+            except Exception as e:
+                logger.error(f"Failed to enrich session {sid}: {e}")
+                stats["failed"] += 1
 
         rows.append(
             {
@@ -948,11 +1018,20 @@ def _build_rows_from_state(uid: str) -> list[dict]:
             }
         )
 
+    # Skriv tilbake til meta hvis noe ble endret
     if changed:
-        _save_json(udir / "sessions_meta.json", meta)
+        try:
+            _save_json(udir / "sessions_meta.json", meta)
+            if stats["enriched"] > 0:
+                logger.info(f"Updated sessions_meta for user {uid}: enriched {stats['enriched']} sessions")
+        except Exception as e:
+            logger.error(f"Failed to save sessions_meta for {uid}: {e}")
+    
+    # Log stats hvis vi beriket noe
+    if stats["missing_power"] > 0:
+        logger.info(f"List enrichment stats for {uid}: {stats}")
 
     return rows
-
 
 # -----------------------------------
 # Routes
@@ -1027,7 +1106,7 @@ async def list_all(
     - Returnerer kun sessions som ligger i state/users/<user_id>/sessions_index.json
     - PATCH: Bruk sessions_meta.json som cache for start_time + distance_km,
       og fallback til Strava activity én gang per session hvis mangler.
-    - PATCH: precision_watt_avg leses kun fra sessions_meta (null risiko)
+    - PATCH: precision_watt_avg berikes fra result-filer hvis mangler i meta ✅
     """
     uid = str(user_id)
     rows = _build_rows_from_state(uid)
@@ -1036,6 +1115,10 @@ async def list_all(
 
     if debug:
         udir = _user_dir(uid)
+        
+        # ✅ PATCH: Legg til null_power_count
+        null_power_count = sum(1 for r in rows if r.get("precision_watt_avg") is None)
+        
         out["debug"] = {
             "uid": uid,
             "index_path": str((udir / "sessions_index.json")).replace("\\", "/"),
@@ -1043,6 +1126,7 @@ async def list_all(
             "index_exists": (udir / "sessions_index.json").exists(),
             "meta_exists": (udir / "sessions_meta.json").exists(),
             "rows_returned": len(rows),
+            "null_power_count": null_power_count,  # ✅ NY
         }
 
     return out
