@@ -924,13 +924,12 @@ def _safe_load_json(path: Path) -> dict | None:
 def _build_rows_from_state(uid: str) -> list[dict]:
     """
     Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
-    PATCH: Beriker precision_watt_avg fra result-filer hvis mangler i meta.
-
-    ✅ PATCH-SPEC: enrichment reads from /app/logs/results/result_<sid>.json
-    (via _logs_result_path) to match analyze output SSOT.
+    PATCH: Detaljert debug for hver ride som mangler power.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     udir = _user_dir(uid)
-
     idx = _load_json(udir / "sessions_index.json") or {}
     meta = _load_json(udir / "sessions_meta.json") or {}
 
@@ -939,23 +938,23 @@ def _build_rows_from_state(uid: str) -> list[dict]:
         sessions = [str(x) for x in idx["sessions"]]
     elif isinstance(idx, list):
         sessions = [str(x) for x in idx]
-    else:
-        sessions = []
 
     if not isinstance(meta, dict):
         meta = {}
 
     changed = False
     rows: list[dict] = []
-
+    
+    # Stats + per-ride debug
     stats = {"total": len(sessions), "missing_power": 0, "enriched": 0, "failed": 0}
+    failed_details = []  # ✅ NY: samle detaljer per failed ride
 
     for sid in sessions:
         sid = str(sid).strip()
         if not sid:
             continue
 
-        m = meta.get(sid)
+        m = meta.get(sid, {})
         if not isinstance(m, dict):
             m = {}
             meta[sid] = m
@@ -987,66 +986,132 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
                 debug_src = "sessions_meta+strava"
 
-        # precision_watt_avg from meta first
         precision_watt_avg = m.get("precision_watt_avg")
         if precision_watt_avg is not None:
             try:
                 precision_watt_avg = float(precision_watt_avg)
             except Exception:
                 precision_watt_avg = None
-
-        # ✅ PATCH-SPEC (1B): if missing, read from /logs/results/result_<sid>.json
+        
+        # ✅ PATCH: Hvis mangler, prøv å berike MED DETALJERT DEBUG
         if precision_watt_avg is None:
             stats["missing_power"] += 1
-
-            p = _logs_result_path(sid)
-            logger.info(f"[LIST] check_result_path sid={sid} path={p} exists={p.exists()}")
-            if p.exists() and p.is_file():
-                doc = _safe_load_json(p)
-                watt = _extract_precision_watt_avg(doc) if doc else None
-                if watt is not None:
-                    precision_watt_avg = float(watt)
-
-                    # cache back to sessions_meta.json (safe: only for sessions already in user list)
-                    m["precision_watt_avg"] = precision_watt_avg
-                    changed = True
-
-                    stats["enriched"] += 1
-                    debug_src = "sessions_meta+logs_results"
-                    logger.info(f"[LIST] enriched sid={sid} watt={precision_watt_avg} path={str(p)}")
-                else:
-                    stats["failed"] += 1
-                    logger.info(f"[LIST] result_has_no_watt sid={sid} path={str(p)}")
-            else:
-                stats["failed"] += 1
-                logger.info(f"[LIST] result_missing sid={sid} path={str(p)}")
-
-        rows.append(
-            {
-                "session_id": sid,
-                "ride_id": sid,
-                "start_time": start_time,
-                "end_time": m.get("end_time"),
-                "distance_km": distance_km,
-                "precision_watt_avg": precision_watt_avg,
-                "profile_label": m.get("profile_label"),
-                "weather_source": m.get("weather_source"),
-                "debug_source_path": debug_src,
-                "analyzed": True,
+            
+            # Alle paths vi sjekker
+            ssot_path = _ssot_user_result_path(uid, sid)
+            logs_path = _logs_result_path(sid)
+            
+            debug_info = {
+                "sid": sid,
+                "paths_checked": {
+                    "ssot": str(ssot_path),
+                    "ssot_exists": ssot_path.exists(),
+                    "logs": str(logs_path),
+                    "logs_exists": logs_path.exists(),
+                },
+                "result_doc": None,
+                "extract_result": None,
+                "error": None,
             }
-        )
+            
+            try:
+                result_doc = None
+                source = None
+                
+                # 1) SSOT først
+                if ssot_path.exists():
+                    result_doc = _read_json_if_exists(ssot_path)
+                    source = "ssot"
+                    debug_info["paths_checked"]["ssot_readable"] = (result_doc is not None)
+                
+                # 2) Fallback: logs
+                if result_doc is None and logs_path.exists():
+                    result_doc = _read_json_if_exists(logs_path)
+                    source = "logs"
+                    debug_info["paths_checked"]["logs_readable"] = (result_doc is not None)
+                
+                debug_info["result_doc"] = {
+                    "found": (result_doc is not None),
+                    "source": source,
+                    "is_dict": isinstance(result_doc, dict),
+                    "has_metrics": isinstance(result_doc.get("metrics"), dict) if isinstance(result_doc, dict) else False,
+                }
+                
+                # 3) Ekstraher power
+                if isinstance(result_doc, dict):
+                    metrics = result_doc.get("metrics", {})
+                    if not isinstance(metrics, dict):
+                        metrics = {}
+                    
+                    # Prøv alle kjente keys
+                    power = (
+                        result_doc.get("precision_watt_avg")
+                        or metrics.get("precision_watt_avg")
+                        or metrics.get("precision_watt")
+                        or metrics.get("precision_watt_pedal")
+                    )
+                    
+                    debug_info["extract_result"] = {
+                        "top_level_precision_watt_avg": result_doc.get("precision_watt_avg"),
+                        "metrics_precision_watt_avg": metrics.get("precision_watt_avg"),
+                        "metrics_precision_watt": metrics.get("precision_watt"),
+                        "final_power": power,
+                    }
+                    
+                    if power is not None:
+                        try:
+                            precision_watt_avg = float(power)
+                            m["precision_watt_avg"] = precision_watt_avg
+                            changed = True
+                            stats["enriched"] += 1
+                            logger.info(f"✅ Enriched {sid}: {precision_watt_avg}W from {source}")
+                        except Exception as e:
+                            debug_info["error"] = f"Failed to convert power to float: {e}"
+                            stats["failed"] += 1
+                            failed_details.append(debug_info)
+                    else:
+                        debug_info["error"] = "Result doc exists but no power metric found"
+                        stats["failed"] += 1
+                        failed_details.append(debug_info)
+                else:
+                    debug_info["error"] = "Result doc is not a dict or not found"
+                    stats["failed"] += 1
+                    failed_details.append(debug_info)
+                    
+            except Exception as e:
+                debug_info["error"] = f"Exception during enrichment: {str(e)}"
+                stats["failed"] += 1
+                failed_details.append(debug_info)
+                logger.error(f"❌ Failed to enrich {sid}: {e}", exc_info=True)
 
-    # write back meta if changed
+        rows.append({
+            "session_id": sid,
+            "ride_id": sid,
+            "start_time": start_time,
+            "end_time": m.get("end_time"),
+            "distance_km": distance_km,
+            "precision_watt_avg": precision_watt_avg,
+            "profile_label": m.get("profile_label"),
+            "weather_source": m.get("weather_source"),
+            "debug_source_path": debug_src,
+            "analyzed": True,
+        })
+
     if changed:
         try:
             _save_json(udir / "sessions_meta.json", meta)
         except Exception as e:
-            logger.error(f"Failed to save sessions_meta for {uid}: {e}")
-
+            logger.error(f"Failed to save sessions_meta: {e}")
+    
+    # ✅ Log detaljert stats
     logger.info(f"List enrichment stats for {uid}: {stats}")
+    
+    if failed_details:
+        logger.warning(f"First 5 failed enrichments (of {len(failed_details)}):")
+        for detail in failed_details[:5]:
+            logger.warning(f"  {detail}")
 
     return rows
-
 
 # -----------------------------------
 # Routes
