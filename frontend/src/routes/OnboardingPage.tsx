@@ -33,13 +33,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function getNum(obj: unknown, key: string): number | null {
   if (!isRecord(obj)) return null;
-  const v = obj[key];
+  const v = (obj as Record<string, unknown>)[key];
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 function getStr(obj: unknown, key: string): string | null {
   if (!isRecord(obj)) return null;
-  const v = obj[key];
+  const v = (obj as Record<string, unknown>)[key];
   return typeof v === "string" ? v : null;
 }
 
@@ -52,7 +52,8 @@ function pickNewestSessionId(items: unknown[]): string | null {
     if (!isRecord(it)) continue;
 
     const sidRaw = (it as any).session_id ?? (it as any).ride_id;
-    const sid = typeof sidRaw === "string" || typeof sidRaw === "number" ? String(sidRaw) : "";
+    const sid =
+      typeof sidRaw === "string" || typeof sidRaw === "number" ? String(sidRaw) : "";
     if (!sid) continue;
 
     const st = getStr(it, "start_time");
@@ -100,8 +101,7 @@ export default function OnboardingPage() {
     init();
   }, [init]);
 
-  // Auto-check status ved mount + URL-change (OAuth redirect)
-    // Auto-check Strava status ved mount + URL-change (OAuth redirect)
+  // Auto-check Strava status ved mount + URL-change (OAuth redirect)
   useEffect(() => {
     (async () => {
       setStBusy(true);
@@ -116,11 +116,9 @@ export default function OnboardingPage() {
         setStBusy(false);
       }
     })();
-    
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  
-  }, [location.pathname, location.search]);
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search]);
 
   // ✅ PATCH 1B: Etter “Fullfør” → re-analyze ALLE økter fra listAll() + refresh list før navigation
   const onFinish = async () => {
@@ -185,12 +183,27 @@ export default function OnboardingPage() {
           override,
         });
 
+        // ✅ PATCH 3: stop bulk re-analyze if Strava rate limited/locked
         for (const sid of pickAll) {
           console.log("[Onboarding] re-analyze sid", sid);
-          await loadSession(String(sid), {
-            forceRecompute: true,
-            profileOverride: override,
-          });
+          try {
+            await loadSession(String(sid), {
+              forceRecompute: true,
+              profileOverride: override,
+            });
+          } catch (e: unknown) {
+            // If backend says rate limited -> STOP the loop immediately
+            const msg = String((e as any)?.message ?? "");
+            if (
+              msg.includes("429") ||
+              msg.includes("STRAVA_RATE_LIMITED") ||
+              msg.includes("strava_rate_limited")
+            ) {
+              console.log("[Onboarding] bulk re-analyze STOP (rate limited):", e);
+              break;
+            }
+            console.log("[Onboarding] bulk re-analyze error (ignored):", e);
+          }
         }
 
         // Refresh rides-listen før navigation
@@ -228,8 +241,8 @@ export default function OnboardingPage() {
       <h1 className="text-2xl font-semibold tracking-tight">Velkommen til CycleGraph</h1>
 
       <p className="text-slate-600">
-        Før vi starter trenger vi et grovt utgangspunkt for profilen din. Dette kan justeres
-        senere.
+        Før vi starter trenger vi et grovt utgangspunkt for profilen din. Dette kan
+        justeres senere.
       </p>
 
       {error ? <div className="text-red-600 text-sm">{error}</div> : null}
@@ -285,16 +298,16 @@ export default function OnboardingPage() {
 
           {tokenExpired ? (
             <div className="mt-2 text-xs text-amber-700">
-              Strava-token er utløpt. Trykk <b>Reconnect Strava</b> eller importer en tur senere i
-              Dashboard for å trigge refresh.
+              Strava-token er utløpt. Trykk <b>Reconnect Strava</b> eller importer en tur
+              senere i Dashboard for å trigge refresh.
             </div>
           ) : null}
 
           {!hasTokens && st ? (
             <div className="mt-2 text-xs text-slate-600">
               Du har ikke koblet til Strava ennå. Trykk{" "}
-              <span className="font-semibold">Connect Strava</span> og fullfør innlogging – så
-              oppdateres status automatisk når du kommer tilbake.
+              <span className="font-semibold">Connect Strava</span> og fullfør
+              innlogging – så oppdateres status automatisk når du kommer tilbake.
             </div>
           ) : null}
 

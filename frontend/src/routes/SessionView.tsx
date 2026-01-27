@@ -1,5 +1,5 @@
 // frontend/src/routes/SessionView.tsx
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
 
 import { useSessionStore } from "../state/sessionStore";
@@ -406,15 +406,15 @@ const RealSessionView: React.FC = () => {
       if (!isRecord(parsed)) return null;
 
       const rider =
-        typeof parsed.rider_weight_kg === "number"
-          ? parsed.rider_weight_kg
-          : typeof parsed.weight_kg === "number"
-            ? parsed.weight_kg
+        typeof (parsed as any).rider_weight_kg === "number"
+          ? (parsed as any).rider_weight_kg
+          : typeof (parsed as any).weight_kg === "number"
+            ? (parsed as any).weight_kg
             : undefined;
 
       const bike =
-        typeof parsed.bike_weight_kg === "number"
-          ? parsed.bike_weight_kg
+        typeof (parsed as any).bike_weight_kg === "number"
+          ? (parsed as any).bike_weight_kg
           : undefined;
 
       const out: ProfileOverride = {};
@@ -422,13 +422,13 @@ const RealSessionView: React.FC = () => {
       if (typeof rider === "number") out.rider_weight_kg = rider;
       if (typeof bike === "number") out.bike_weight_kg = bike;
 
-      if (typeof parsed.cda === "number") out.cda = parsed.cda;
-      if (typeof parsed.crr === "number") out.crr = parsed.crr;
+      if (typeof (parsed as any).cda === "number") out.cda = (parsed as any).cda;
+      if (typeof (parsed as any).crr === "number") out.crr = (parsed as any).crr;
 
-      if (typeof parsed.crank_efficiency === "number")
-        out.crank_efficiency = parsed.crank_efficiency;
-      if (typeof parsed.crank_eff_pct === "number")
-        out.crank_eff_pct = parsed.crank_eff_pct;
+      if (typeof (parsed as any).crank_efficiency === "number")
+        out.crank_efficiency = (parsed as any).crank_efficiency;
+      if (typeof (parsed as any).crank_eff_pct === "number")
+        out.crank_eff_pct = (parsed as any).crank_eff_pct;
 
       return out;
     } catch {
@@ -436,10 +436,16 @@ const RealSessionView: React.FC = () => {
     }
   }
 
-  const [reAnalyzing, setReAnalyzing] = React.useState(false);
+  const [reAnalyzing, setReAnalyzing] = useState(false);
+
+  // ✅ PATCH 2: UI state for Strava 429 detail
+  const [rateLimitDetail, setRateLimitDetail] = useState<any | null>(null);
 
   async function reAnalyzeNow() {
     if (!id) return;
+
+    // ✅ PATCH 2: reset banner first
+    setRateLimitDetail(null);
 
     const override = readLocalProfileOverride();
     if (!override) {
@@ -447,13 +453,65 @@ const RealSessionView: React.FC = () => {
       return;
     }
 
-    setReAnalyzing(true);
     try {
-      const loadWithOpts = loadSession as unknown as (
-        sid: string,
-        opts: LoadSessionOptions
-      ) => Promise<void>;
-      await loadWithOpts(id, { forceRecompute: true, profileOverride: override });
+      setReAnalyzing(true);
+
+      // ✅ Use existing store loader as the canonical way to (re)fetch analyze.
+      // It will POST /api/sessions/:id/analyze and refresh currentSession.
+      // If your store supports options, pass them; otherwise it will just re-run analyze.
+      const result: any = await (async () => {
+        try {
+          // Try: loadSession(id, options) if implemented
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const maybe: any = loadSession as any;
+          if (typeof maybe === "function" && maybe.length >= 2) {
+            return await maybe(id, {
+              forceRecompute: true,
+              profileOverride: override,
+            } as LoadSessionOptions);
+          }
+          // fallback: call without options (still re-analyzes)
+          return await maybe(id);
+        } catch (e) {
+          throw e;
+        }
+      })();
+
+      // ✅ PATCH 2: if analyze returns structured rate-limit error (from api.ts)
+      if (
+        result &&
+        result.ok === false &&
+        result.source === "live" &&
+        result.error === "STRAVA_RATE_LIMITED"
+      ) {
+        setRateLimitDetail((result as any).detail ?? {});
+        return;
+      }
+
+      // If loadSession doesn't return anything, that's fine — state updates via store.
+      // Banner remains null on success.
+    } catch (e: any) {
+      const msg = String(e?.message ?? "");
+
+      // if caller throws a structured object
+      if (e?.error === "STRAVA_RATE_LIMITED") {
+        setRateLimitDetail(e?.detail ?? {});
+        return;
+      }
+
+      // heuristics fallback
+      if (
+        e?.status === 429 ||
+        msg.includes("429") ||
+        msg.includes("STRAVA_RATE_LIMITED") ||
+        msg.includes("strava_rate_limited")
+      ) {
+        const d = e?.detail ?? e?.response?.detail ?? {};
+        setRateLimitDetail(d);
+        return;
+      }
+
+      console.log("[SessionView] reAnalyzeNow error:", e);
     } finally {
       setReAnalyzing(false);
     }
@@ -554,16 +612,18 @@ const RealSessionView: React.FC = () => {
   const hasProfile = isRecord(profileUsed);
 
   const profileVersionStr = hasProfile
-    ? fmtNode(profileUsed.profile_version, "ukjent")
+    ? fmtNode((profileUsed as any).profile_version, "ukjent")
     : "ukjent";
 
   const totalWeight = hasProfile
-    ? (profileUsed.total_weight_kg ?? profileUsed.weight_kg)
+    ? ((profileUsed as any).total_weight_kg ?? (profileUsed as any).weight_kg)
     : undefined;
 
-  const cdaStr = hasProfile ? fmtNode(profileUsed.cda) : "—";
-  const crrStr = hasProfile ? fmtNode(profileUsed.crr) : "—";
-  const deviceStr = hasProfile ? fmtNode(profileUsed.device, "ukjent") : "ukjent";
+  const cdaStr = hasProfile ? fmtNode((profileUsed as any).cda) : "—";
+  const crrStr = hasProfile ? fmtNode((profileUsed as any).crr) : "—";
+  const deviceStr = hasProfile
+    ? fmtNode((profileUsed as any).device, "ukjent")
+    : "ukjent";
 
   const calibrated = getNested(metrics, ["calibrated"]) === true;
 
@@ -577,7 +637,7 @@ const RealSessionView: React.FC = () => {
 
           {location.state &&
             isRecord(location.state) &&
-            location.state.from === "sessions" && (
+            (location.state as any).from === "sessions" && (
               <p className="text-xs text-slate-400 mt-1">
                 Navigert hit fra øktlisten.
               </p>
@@ -585,6 +645,25 @@ const RealSessionView: React.FC = () => {
         </div>
 
         <div className="text-right">
+          {/* ✅ PATCH 2: Banner for Strava 429 */}
+          {rateLimitDetail && (
+            <div className="mb-3 rounded-xl border border-neutral-300 bg-white p-3 text-left">
+              <div className="font-semibold">Strava er midlertidig låst</div>
+              <div className="text-sm">
+                Prøv igjen om{" "}
+                <b>{String(rateLimitDetail.retry_after_seconds ?? 60)}s</b>
+                {rateLimitDetail.locked_until_utc ? (
+                  <> (locked until: {String(rateLimitDetail.locked_until_utc)})</>
+                ) : null}
+              </div>
+              {rateLimitDetail.reason ? (
+                <div className="text-xs opacity-70">
+                  Reason: {String(rateLimitDetail.reason)}
+                </div>
+              ) : null}
+            </div>
+          )}
+
           <div className="flex items-center justify-end">
             <Link
               to={ROUTES.RIDES}
@@ -661,7 +740,9 @@ const RealSessionView: React.FC = () => {
                 <dd className="font-medium">
                   {calibrated ? "Ja" : "Nei"}
                   {num(getNested(metrics, ["calibration_mae"])) !== null
-                    ? ` (MAE ≈ ${num(getNested(metrics, ["calibration_mae"]))!.toFixed(1)} W)`
+                    ? ` (MAE ≈ ${num(getNested(metrics, ["calibration_mae"]))!.toFixed(
+                        1
+                      )} W)`
                     : ""}
                 </dd>
               </div>
@@ -680,9 +761,7 @@ const RealSessionView: React.FC = () => {
 
             <p className="text-slate-500">
               Versjon:{" "}
-              <span className="font-mono">
-                {String(profileVersionStr ?? "")}
-              </span>
+              <span className="font-mono">{String(profileVersionStr ?? "")}</span>
             </p>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
@@ -719,7 +798,9 @@ const RealSessionView: React.FC = () => {
                 <dd className="font-medium">
                   {fmtMs(getNested(weatherUsed, ["wind_ms"]))}{" "}
                   {num(getNested(weatherUsed, ["wind_dir_deg"])) !== null
-                    ? `fra ${num(getNested(weatherUsed, ["wind_dir_deg"]))!.toFixed(0)}°`
+                    ? `fra ${num(getNested(weatherUsed, ["wind_dir_deg"]))!.toFixed(
+                        0
+                      )}°`
                     : ""}
                 </dd>
               </div>

@@ -5,11 +5,19 @@ import { safeParseSession, ensureSemver } from "./schema";
 
 /** Result-typer beholdt som hos deg */
 type Ok = { ok: true; data: SessionReport; source: "mock" | "live" };
-type Err = { ok: false; error: string; source?: "mock" | "live" };
+
+// ✅ PATCH: støtte strukturert detail (f.eks. 429 Strava rate limit)
+type Err = {
+  ok: false;
+  error: string;
+  source?: "mock" | "live";
+  detail?: any;
+};
+
 export type FetchSessionResult = Ok | Err;
 
 // Hent Vite-variabler (.env.local).
-const BASE = import.meta.env.PROD 
+const BASE = import.meta.env.PROD
   ? "https://api.cyclegraph.app"
   : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
 
@@ -366,6 +374,38 @@ export async function fetchSession(
       timeoutMs: 20_000,
     });
 
+    // --- PATCH: Strava rate-limit detail (429) ---
+    if (res.status === 429) {
+      let payload: any = null;
+      try {
+        payload = await res.json();
+      } catch {
+        payload = null;
+      }
+
+      const d = payload?.detail ?? payload ?? {};
+      const retry_after_seconds =
+        Number(d.retry_after_seconds ?? d.retry_after_s ?? 60) || 60;
+
+      return {
+        ok: false as const,
+        source: "live" as const,
+        error: "STRAVA_RATE_LIMITED",
+        detail: {
+          error: d.error ?? "strava_rate_limited",
+          reason: d.reason,
+          retry_after_seconds,
+          locked_until_utc: d.locked_until_utc,
+          endpoint: d.endpoint,
+          x_ratelimit_usage: d.x_ratelimit_usage,
+          x_ratelimit_limit: d.x_ratelimit_limit,
+          x_readratelimit_usage: d.x_readratelimit_usage,
+          x_readratelimit_limit: d.x_readratelimit_limit,
+        },
+      };
+    }
+    // --- END PATCH ---
+
     if (!res.ok) {
       const text = await safeReadText(res);
       console.error("[API] fetchSession LIVE feilet:", res.status, res.statusText, text);
@@ -446,10 +486,10 @@ export type SessionListItem = {
 // PATCH: Replace fetchSessionsList() komplett
 export async function fetchSessionsList(): Promise<SessionListItem[]> {
   // ✅ FIX: Bruk samme URL-building pattern som cgApi.ts
-  const base = import.meta.env.PROD 
+  const base = import.meta.env.PROD
     ? "https://api.cyclegraph.app"
     : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
-  
+
   const url = base + "/api/sessions/list/all";
 
   console.log("[API] fetchSessionsList →", url);
