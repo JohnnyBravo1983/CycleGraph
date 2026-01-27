@@ -14,11 +14,11 @@ print(f"[CG] cwd={os.getcwd()}", file=sys.stderr)
 
 # ==================== PATCH: IMPORT FOR SELF-HEALING ====================
 try:
-    from server.routes.strava_import_router_for_commit import _import_one as _strava_import_one
+    from server.routes.strava_import_router import _import_one as _strava_import_one
 except ImportError as e:
-    _strava_import_one = None
-    print(f"[SVR] Could not import _strava_import_one: {e}", file=sys.stderr)
-# ==================== END PATCH ====================
+    print(f"[SVR] Could not import _import_one from server.routes.strava_import_router: {e}", file=sys.stderr)
+    raise
+# ==================== END PATCH ===================
 
 def _fallback_compute_estimated_error_and_hint(profile_used, weather_used):
     """
