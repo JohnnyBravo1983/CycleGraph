@@ -279,6 +279,40 @@ def _bear_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # PATCH 1: Observability + FAIL-FAST on 429 (no sleep / no retries)
 # ----------------------------
 def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
+    # --- Strava lock (per user) ---
+    # token_path peker på /app/state/users/<uid>/strava_tokens.json i prod
+    user_dir = token_path.parent
+    lock_path = user_dir / ".strava_lock.json"
+
+    now = dt.datetime.now(dt.timezone.utc)
+
+    # Pre-check lock: hvis vi allerede vet vi er låst i dag, ikke ring Strava
+    if lock_path.exists():
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            locked_until = lock.get("locked_until_utc")
+            if locked_until:
+                until_dt = dt.datetime.fromisoformat(locked_until.replace("Z", "+00:00"))
+                if now < until_dt:
+                    retry_after_s = max(1, int((until_dt - now).total_seconds()))
+                    print(
+                        f"[STRAVA] LOCKED (skip request) endpoint={path} "
+                        f"retry_after={retry_after_s}s reason={lock.get('reason')}"
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "error": "strava_rate_limited",
+                            "reason": lock.get("reason") or "locked",
+                            "retry_after_seconds": retry_after_s,
+                            "endpoint": path,
+                            "locked_until_utc": locked_until,
+                        },
+                    )
+        except Exception:
+            # Hvis lock-fila er korrupt el.l., ignorer og fortsett (fail-open)
+            pass
+
     tokens = _maybe_refresh_and_save(uid, tokens, token_path)
 
     access = tokens.get("access_token")
@@ -294,38 +328,68 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
     # Always log rate-limit headers (no tokens)
     usage = r.headers.get("x-ratelimit-usage") or r.headers.get("X-RateLimit-Usage")
     limit = r.headers.get("x-ratelimit-limit") or r.headers.get("X-RateLimit-Limit")
+    read_usage = r.headers.get("x-readratelimit-usage") or r.headers.get("X-ReadRateLimit-Usage")
+    read_limit = r.headers.get("x-readratelimit-limit") or r.headers.get("X-ReadRateLimit-Limit")
     ra = r.headers.get("Retry-After")
+    reset = r.headers.get("x-ratelimit-reset") or r.headers.get("X-RateLimit-Reset")
+
     print(
         f"[STRAVA] resp status={r.status_code} endpoint={path} "
-        f"usage={usage} limit={limit} retry_after={ra}"
+        f"usage={usage} limit={limit} read_usage={read_usage} read_limit={read_limit} "
+        f"retry_after={ra} reset={reset}"
     )
+
+    # If we can detect daily read limit exceeded, write lock until next UTC midnight
+    try:
+        if isinstance(read_usage, str) and isinstance(read_limit, str):
+            read_used_today = int(read_usage.split(",")[1].strip())
+            read_limit_today = int(read_limit.split(",")[1].strip())
+            if read_used_today >= read_limit_today:
+                tomorrow = now + dt.timedelta(days=1)
+                next_midnight = dt.datetime(
+                    year=tomorrow.year,
+                    month=tomorrow.month,
+                    day=tomorrow.day,
+                    tzinfo=dt.timezone.utc,
+                )
+                lock_payload = {
+                    "locked": True,
+                    "reason": "read_daily_limit_exceeded",
+                    "locked_at_utc": now.isoformat().replace("+00:00", "Z"),
+                    "locked_until_utc": next_midnight.isoformat().replace("+00:00", "Z"),
+                    "read_usage": read_usage,
+                    "read_limit": read_limit,
+                }
+                try:
+                    lock_path.write_text(json.dumps(lock_payload, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     # 429: rate limited (FAIL-FAST)
     if r.status_code == 429:
-        # Strava sender ofte Retry-After i sekunder (men ikke alltid)
         try:
             retry_after_s = int(ra) if ra is not None else 60
         except Exception:
             retry_after_s = 60
 
-        usage2 = usage
-        limit2 = limit
-
-        # LOGG: endpoint + headers (uten tokens)
         print(
             f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
-            f"retry_after={retry_after_s}s usage={usage2} limit={limit2}"
+            f"retry_after={retry_after_s}s usage={usage} limit={limit} "
+            f"read_usage={read_usage} read_limit={read_limit}"
         )
 
-        # Returner strukturert detail så frontend kan vise "prøv igjen om X sek"
         raise HTTPException(
             status_code=429,
             detail={
                 "error": "strava_rate_limited",
                 "retry_after_seconds": retry_after_s,
                 "endpoint": path,
-                "x_ratelimit_usage": usage2,
-                "x_ratelimit_limit": limit2,
+                "x_ratelimit_usage": usage,
+                "x_ratelimit_limit": limit,
+                "x_readratelimit_usage": read_usage,
+                "x_readratelimit_limit": read_limit,
             },
         )
 
@@ -338,16 +402,19 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
         headers = {"Authorization": f"Bearer {access}"}
         r = requests.get(url, headers=headers, timeout=20)
 
-        # Log again after refresh attempt
         usage = r.headers.get("x-ratelimit-usage") or r.headers.get("X-RateLimit-Usage")
         limit = r.headers.get("x-ratelimit-limit") or r.headers.get("X-RateLimit-Limit")
+        read_usage = r.headers.get("x-readratelimit-usage") or r.headers.get("X-ReadRateLimit-Usage")
+        read_limit = r.headers.get("x-readratelimit-limit") or r.headers.get("X-ReadRateLimit-Limit")
         ra = r.headers.get("Retry-After")
+        reset = r.headers.get("x-ratelimit-reset") or r.headers.get("X-RateLimit-Reset")
+
         print(
             f"[STRAVA] resp status={r.status_code} endpoint={path} "
-            f"usage={usage} limit={limit} retry_after={ra}"
+            f"usage={usage} limit={limit} read_usage={read_usage} read_limit={read_limit} "
+            f"retry_after={ra} reset={reset}"
         )
 
-        # If still rate-limited after refresh (rare, but handle deterministically)
         if r.status_code == 429:
             try:
                 retry_after_s = int(ra) if ra is not None else 60
@@ -356,8 +423,10 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
 
             print(
                 f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
-                f"retry_after={retry_after_s}s usage={usage} limit={limit}"
+                f"retry_after={retry_after_s}s usage={usage} limit={limit} "
+                f"read_usage={read_usage} read_limit={read_limit}"
             )
+
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -366,6 +435,8 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
                     "endpoint": path,
                     "x_ratelimit_usage": usage,
                     "x_ratelimit_limit": limit,
+                    "x_readratelimit_usage": read_usage,
+                    "x_readratelimit_limit": read_limit,
                 },
             )
 
@@ -379,6 +450,8 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
         return r.json()
     except Exception:
         raise HTTPException(status_code=502, detail="strava_bad_json")
+
+
 
 
 def _fetch_activity_and_streams(
