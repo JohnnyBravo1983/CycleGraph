@@ -1,10 +1,10 @@
-## frontend/server/routes/sessions_list_router.py
 from __future__ import annotations
 
 import csv
 import json
 import os
 import re
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,6 +16,8 @@ from server.user_state import state_root
 
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+logger = logging.getLogger(__name__)
 
 
 # -------------------------------
@@ -31,22 +33,70 @@ _LAST_TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
 # NEW HELPERS (activity distance fallback)
 # -------------------------------
 def _repo_root_from_here() -> Path:
-    # .../frontend/server/routes/sessions_list_router.py -> repo root = CycleGraph
-    return Path(__file__).resolve().parents[2]
+    """
+    Robust repo-root detection.
+
+    This file lives at:
+      CycleGraph/frontend/server/routes/sessions_list_router.py
+
+    Prior bug: parents[2] returns ".../frontend" (NOT repo root),
+    which caused logs lookup to point at /app/frontend/logs/results.
+
+    We walk upwards and pick the first parent that has a "logs" dir
+    (or ".git" / "pyproject.toml" / "frontend" marker), else fallback.
+    """
+    here = Path(__file__).resolve()
+
+    # Walk up and find a plausible repo root
+    for p in here.parents:
+        try:
+            if (p / "logs").exists():
+                return p
+            if (p / ".git").exists():
+                return p
+            if (p / "pyproject.toml").exists():
+                return p
+            # common project marker(s)
+            if (p / "frontend").exists() and (p / "core").exists():
+                return p
+        except Exception:
+            continue
+
+    # Fallback: expected structure: .../frontend/server/routes/<file>
+    # parents[3] => CycleGraph repo root
+    try:
+        return here.parents[3]
+    except Exception:
+        return here.parents[0]
 
 
 def _safe_sid(sid: str) -> str:
     return re.sub(r"[^0-9A-Za-z_-]+", "", str(sid or ""))
 
 
-def _ssot_user_result_path(uid: str, sid: str) -> Path:
-    sid2 = _safe_sid(sid)
-    return state_root() / "users" / uid / "results" / f"result_{sid2}.json"
+def _logs_results_dir() -> Path:
+    """
+    SSOT for analyze output in prod container.
+
+    Prefer repo-root/logs/results (works both local + Fly if repo-root detection works),
+    else hard fallback to /app/logs/results.
+    """
+    try:
+        root = _repo_root_from_here()
+        p = root / "logs" / "results"
+        return p
+    except Exception:
+        return Path("/app/logs/results")
 
 
 def _logs_result_path(sid: str) -> Path:
     sid2 = _safe_sid(sid)
-    return _repo_root_from_here() / "logs" / "results" / f"result_{sid2}.json"
+    return _logs_results_dir() / f"result_{sid2}.json"
+
+
+def _ssot_user_result_path(uid: str, sid: str) -> Path:
+    sid2 = _safe_sid(sid)
+    return state_root() / "users" / uid / "results" / f"result_{sid2}.json"
 
 
 def _read_json_if_exists(p: Path) -> Optional[Dict[str, Any]]:
@@ -108,7 +158,6 @@ def _allowed_ids_list_from_index_doc(index_doc: Any) -> List[str]:
         out.append(s)
 
     if isinstance(index_doc, dict):
-        # vanligste: {"sessions":[...]} eller {"ride_ids":[...]} osv
         for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
             v = index_doc.get(key)
             if isinstance(v, list) and v:
@@ -392,6 +441,7 @@ def _extract_end_and_km_from_samples(samples: list) -> Tuple[Optional[str], Opti
 def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optional[float]]:
     print("[LIST/ALL][C4 ENTER] sid=", sid)
 
+    # NOTE: this call requires uid, but kept as-is (legacy debug path).
     rp = _pick_result_path(sid)
     if rp and rp.exists():
         print("[LIST/ALL][C4] using file:", str(rp))
@@ -828,54 +878,55 @@ def _strava_get_activity(uid: str, sid: str) -> dict | None:
         return None
 
 
-def _try_load_precision_watt_avg_from_results(sid: str) -> float | None:
+def _extract_precision_watt_avg(doc: dict) -> float | None:
     """
-    Load precision_watt_avg from exact result file in prod logs.
-    Safe: exact filename only (no fuzzy matching).
+    Accept both shapes:
+      - top-level precision_watt_avg
+      - metrics.precision_watt_avg
+      - metrics.precision_watt_pedal / metrics.precision_watt (legacy)
     """
-    p = Path("/app/logs/results") / f"result_{sid}.json"
-    if not p.exists() or not p.is_file():
-        return None
-
-    try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
     if not isinstance(doc, dict):
         return None
 
-    metrics = doc.get("metrics")
-    if not isinstance(metrics, dict):
-        metrics = {}
-
-    v = (
-        doc.get("precision_watt_avg")
-        or metrics.get("precision_watt_avg")
-        or metrics.get("precision_watt")
-    )
-    if v is None:
-        return None
-
-    try:
+    v = doc.get("precision_watt_avg")
+    if isinstance(v, (int, float)):
         return float(v)
-    except Exception:
+
+    m = doc.get("metrics") or {}
+    if not isinstance(m, dict):
+        m = {}
+
+    v2 = m.get("precision_watt_avg")
+    if isinstance(v2, (int, float)):
+        return float(v2)
+
+    v3 = m.get("precision_watt_pedal")
+    if isinstance(v3, (int, float)):
+        return float(v3)
+
+    v4 = m.get("precision_watt")
+    if isinstance(v4, (int, float)):
+        return float(v4)
+
+    return None
+
+
+def _safe_load_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as e:
+        logger.info(f"[LIST] result_read_failed path={path} err={e!r}")
         return None
-
-
-# ✅ Alias for patch-block (some earlier patch text referenced this name)
-def _try_load_precision_watt_avg_anywhere(sid: str) -> float | None:
-    return _try_load_precision_watt_avg_from_results(sid)
 
 
 def _build_rows_from_state(uid: str) -> list[dict]:
     """
     Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
     PATCH: Beriker precision_watt_avg fra result-filer hvis mangler i meta.
+
+    ✅ PATCH-SPEC: enrichment reads from /app/logs/results/result_<sid>.json
+    (via _logs_result_path) to match analyze output SSOT.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     udir = _user_dir(uid)
 
     idx = _load_json(udir / "sessions_index.json") or {}
@@ -894,8 +945,7 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
     changed = False
     rows: list[dict] = []
-    
-    # Stats for debugging
+
     stats = {"total": len(sessions), "missing_power": 0, "enriched": 0, "failed": 0}
 
     for sid in sessions:
@@ -935,73 +985,38 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
                 debug_src = "sessions_meta+strava"
 
-        # ✅ PATCH: Prøv å hente precision_watt_avg fra meta først
+        # precision_watt_avg from meta first
         precision_watt_avg = m.get("precision_watt_avg")
         if precision_watt_avg is not None:
             try:
                 precision_watt_avg = float(precision_watt_avg)
             except Exception:
                 precision_watt_avg = None
-        
-        # ✅ PATCH: Hvis mangler i meta, hent fra result-filer
+
+        # ✅ PATCH-SPEC (1B): if missing, read from /logs/results/result_<sid>.json
         if precision_watt_avg is None:
             stats["missing_power"] += 1
-            
-            try:
-                # Bruk eksisterende _ssot_user_result_path helper
-                ssot_path = _ssot_user_result_path(uid, sid)
-                logs_path = _logs_result_path(sid)
-                
-                result_doc = None
-                source = None
-                
-                # 1) SSOT først: state/users/<uid>/results/
-                if ssot_path.exists():
-                    result_doc = _read_json_if_exists(ssot_path)
-                    source = "ssot_result"
-                
-                # 2) Fallback: logs/results/
-                if result_doc is None and logs_path.exists():
-                    result_doc = _read_json_if_exists(logs_path)
-                    source = "logs_result"
-                
-                # 3) Ekstraher power fra result-fil
-                if isinstance(result_doc, dict):
-                    metrics = result_doc.get("metrics", {})
-                    if not isinstance(metrics, dict):
-                        metrics = {}
-                    
-                    power = (
-                        result_doc.get("precision_watt_avg")
-                        or metrics.get("precision_watt_avg")
-                        or metrics.get("precision_watt")
-                        or metrics.get("precision_watt_pedal")
-                    )
-                    
-                    if power is not None:
-                        try:
-                            precision_watt_avg = float(power)
-                            
-                            # Cache tilbake til meta
-                            m["precision_watt_avg"] = precision_watt_avg
-                            changed = True
-                            stats["enriched"] += 1
-                            
-                            debug_src = f"sessions_meta+{source}"
-                            
-                            logger.info(f"Enriched session {sid} with power {precision_watt_avg}W from {source}")
-                        except Exception:
-                            pass
-                    else:
-                        logger.warning(f"Result file for {sid} exists but no power metric found")
-                        stats["failed"] += 1
+
+            p = _logs_result_path(sid)
+            if p.exists() and p.is_file():
+                doc = _safe_load_json(p)
+                watt = _extract_precision_watt_avg(doc) if doc else None
+                if watt is not None:
+                    precision_watt_avg = float(watt)
+
+                    # cache back to sessions_meta.json (safe: only for sessions already in user list)
+                    m["precision_watt_avg"] = precision_watt_avg
+                    changed = True
+
+                    stats["enriched"] += 1
+                    debug_src = "sessions_meta+logs_results"
+                    logger.info(f"[LIST] enriched sid={sid} watt={precision_watt_avg} path={str(p)}")
                 else:
-                    logger.debug(f"No result file found for session {sid}")
                     stats["failed"] += 1
-                    
-            except Exception as e:
-                logger.error(f"Failed to enrich session {sid}: {e}")
+                    logger.info(f"[LIST] result_has_no_watt sid={sid} path={str(p)}")
+            else:
                 stats["failed"] += 1
+                logger.info(f"[LIST] result_missing sid={sid} path={str(p)}")
 
         rows.append(
             {
@@ -1018,20 +1033,17 @@ def _build_rows_from_state(uid: str) -> list[dict]:
             }
         )
 
-    # Skriv tilbake til meta hvis noe ble endret
+    # write back meta if changed
     if changed:
         try:
             _save_json(udir / "sessions_meta.json", meta)
-            if stats["enriched"] > 0:
-                logger.info(f"Updated sessions_meta for user {uid}: enriched {stats['enriched']} sessions")
         except Exception as e:
             logger.error(f"Failed to save sessions_meta for {uid}: {e}")
-    
-    # Log stats hvis vi beriket noe
-    if stats["missing_power"] > 0:
-        logger.info(f"List enrichment stats for {uid}: {stats}")
+
+    logger.info(f"List enrichment stats for {uid}: {stats}")
 
     return rows
+
 
 # -----------------------------------
 # Routes
@@ -1078,6 +1090,7 @@ async def list_sessions(
             item["debug"] = {
                 "has_ssot_result": ssot_p.exists(),
                 "has_logs_result": logs_p.exists(),
+                "logs_results_dir": str(_logs_results_dir()).replace("\\", "/"),
             }
 
         try:
@@ -1106,7 +1119,7 @@ async def list_all(
     - Returnerer kun sessions som ligger i state/users/<user_id>/sessions_index.json
     - PATCH: Bruk sessions_meta.json som cache for start_time + distance_km,
       og fallback til Strava activity én gang per session hvis mangler.
-    - PATCH: precision_watt_avg berikes fra result-filer hvis mangler i meta ✅
+    - PATCH: precision_watt_avg berikes fra /logs/results/result_<sid>.json ✅
     """
     uid = str(user_id)
     rows = _build_rows_from_state(uid)
@@ -1115,10 +1128,9 @@ async def list_all(
 
     if debug:
         udir = _user_dir(uid)
-        
-        # ✅ PATCH: Legg til null_power_count
+
         null_power_count = sum(1 for r in rows if r.get("precision_watt_avg") is None)
-        
+
         out["debug"] = {
             "uid": uid,
             "index_path": str((udir / "sessions_index.json")).replace("\\", "/"),
@@ -1126,7 +1138,9 @@ async def list_all(
             "index_exists": (udir / "sessions_index.json").exists(),
             "meta_exists": (udir / "sessions_meta.json").exists(),
             "rows_returned": len(rows),
-            "null_power_count": null_power_count,  # ✅ NY
+            "null_power_count": null_power_count,
+            "logs_results_dir": str(_logs_results_dir()).replace("\\", "/"),
+            "repo_root": str(_repo_root_from_here()).replace("\\", "/"),
         }
 
     return out
