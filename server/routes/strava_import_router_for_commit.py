@@ -4,7 +4,7 @@ import os
 import json
 import math
 import time
-import datetime as dt
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -279,6 +279,40 @@ def _bear_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # PATCH: Observability + FAIL-FAST on 429 (no sleep / no retries)
 # ----------------------------
 def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
+    # --- Strava lock (per user) ---
+    # token_path peker på /app/state/users/<uid>/strava_tokens.json
+    user_dir = token_path.parent
+    lock_path = user_dir / ".strava_lock.json"
+
+    now = datetime.now(timezone.utc)
+
+    # Pre-check lock: hvis vi allerede vet vi er låst i dag, ikke ring Strava
+    if lock_path.exists():
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            locked_until = lock.get("locked_until_utc")
+            if locked_until:
+                until_dt = datetime.fromisoformat(locked_until.replace("Z", "+00:00"))
+                if now < until_dt:
+                    retry_after_s = max(1, int((until_dt - now).total_seconds()))
+                    print(
+                        f"[STRAVA] LOCKED (skip request) endpoint={path} "
+                        f"retry_after={retry_after_s}s reason={lock.get('reason')}"
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "error": "strava_rate_limited",
+                            "reason": lock.get("reason") or "locked",
+                            "retry_after_seconds": retry_after_s,
+                            "endpoint": path,
+                            "locked_until_utc": locked_until,
+                        },
+                    )
+        except Exception:
+            # Hvis lock-fila er korrupt el.l., ignorer og fortsett (fail-open)
+            pass
+
     tokens = _maybe_refresh_and_save(uid, tokens, token_path)
 
     access = tokens.get("access_token")
@@ -304,6 +338,35 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
         f"usage={usage} limit={limit} read_usage={read_usage} read_limit={read_limit} "
         f"retry_after={ra} reset={reset}"
     )
+
+    # If we can detect daily read limit exceeded, write lock until next UTC midnight
+    # (Strava daily limit resets by day; we pick UTC midnight as a safe simple boundary)
+    try:
+        if isinstance(read_usage, str) and isinstance(read_limit, str):
+            # expected formats like "1,1290" and "100,1000"
+            read_used_today = int(read_usage.split(",")[1].strip())
+            read_limit_today = int(read_limit.split(",")[1].strip())
+            if read_used_today >= read_limit_today:
+                next_midnight = datetime(
+                    year=(now + timedelta(days=1)).year,
+                    month=(now + timedelta(days=1)).month,
+                    day=(now + timedelta(days=1)).day,
+                    tzinfo=timezone.utc,
+                )
+                lock_payload = {
+                    "locked": True,
+                    "reason": "read_daily_limit_exceeded",
+                    "locked_at_utc": now.isoformat().replace("+00:00", "Z"),
+                    "locked_until_utc": next_midnight.isoformat().replace("+00:00", "Z"),
+                    "read_usage": read_usage,
+                    "read_limit": read_limit,
+                }
+                try:
+                    lock_path.write_text(json.dumps(lock_payload, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     # 429: rate limited (FAIL-FAST)
     if r.status_code == 429:
@@ -389,31 +452,6 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
     except Exception:
         raise HTTPException(status_code=502, detail="strava_bad_json")
 
-
-def _fetch_activity_and_streams(
-    rid: str, uid: str, tokens: Dict[str, Any], token_path: Path
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    meta = _strava_get(f"/activities/{rid}", uid, tokens, token_path)
-
-    stream_keys = [
-        "time",
-        "distance",
-        "heartrate",
-        "cadence",
-        "watts",
-        "latlng",
-        "altitude",
-        "velocity_smooth",
-        "grade_smooth",
-        "moving",
-    ]
-    streams = _strava_get(
-        f"/activities/{rid}/streams?keys={','.join(stream_keys)}&key_by_type=true",
-        uid,
-        tokens,
-        token_path,
-    )
-    return meta, streams
 
 
 # ----------------------------
