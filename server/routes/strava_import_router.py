@@ -495,7 +495,7 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 # ----------------------------
 def _trigger_analyze_local(rid: str, cg_auth: Optional[str]) -> Dict[str, Any]:
     base = os.getenv("CG_API_BASE") or "http://localhost:5175"
-    url = f"{base}/api/sessions/{rid}/analyze?force_recompute=1&debug=1"
+    url = f"{base}/api/sessions/{rid}/analyze?debug=1"
 
     cookies: Dict[str, str] = {}
     if cg_auth:

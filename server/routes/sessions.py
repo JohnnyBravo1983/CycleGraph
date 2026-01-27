@@ -101,6 +101,17 @@ def _canonical_user_session_path(uid: str, sid: str) -> Path:
 def _canonical_user_result_path(uid: str, sid: str) -> Path:
     return state_root() / "users" / uid / "results" / f"result_{sid}.json"
 
+
+def _persist_user_result(uid: str, sid: str, doc: dict) -> None:
+    """
+    SSOT: Persist result to user-scoped state so /rides can backfill without re-analyze.
+    This must be multi-user safe.
+    """
+    p = _canonical_user_result_path(uid, sid)
+    _write_json_atomic(p, doc)
+
+
+
 def _copy2(src: Path | None, dst: Path) -> bool:
     try:
         if src is None:
@@ -2064,18 +2075,27 @@ async def analyze_session(
 
     # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
     def _RET(x: Dict[str, Any]):
-        try:
-            x = _final_ui_override(x)
-        except Exception:
-            pass
-        # ==================== PATCH 3D: cache precision_watt_avg into sessions_meta ====================
-        try:
-            watt = _extract_precision_watt_avg(x)
-            _meta_set_precision_watt(user_id, str(sid), watt)
-        except Exception as e:
-            print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
-        # ==================== END PATCH 3D ====================
-        return x
+    try:
+        x = _final_ui_override(x)
+    except Exception:
+        pass
+
+    # Cache precision_watt_avg into sessions_meta
+    try:
+        watt = _extract_precision_watt_avg(x)
+        _meta_set_precision_watt(user_id, str(sid), watt)
+    except Exception as e:
+        print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
+
+    # ✅ NEW: Persist full result doc to user-scoped SSOT results dir
+    try:
+        if isinstance(x, dict) and _is_full_result_doc(x):
+            _persist_user_result(str(user_id), str(sid), x)
+    except Exception as e:
+        print(f"[SVR] persist_user_result failed sid={sid} err={e!r}", file=sys.stderr)
+
+    return x
+
     # ===========================================================================================
 
     # ==================== PATCH 1A: ensure want_debug is always defined ====================
