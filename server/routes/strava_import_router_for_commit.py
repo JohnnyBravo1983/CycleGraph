@@ -669,35 +669,16 @@ def sync_strava_activities(
     # ✅ PATCH: wrap _strava_get and convert 429 into resumable 200 payload
     try:
         acts = _strava_get(url_path, uid, tokens, tp)
+
     except HTTPException as he:
+        # IMPORTANT: never swallow 429 here.
+        # This code path is shared / can affect analyze/self-heal indirectly.
+        # If we are rate limited (or locked), propagate immediately.
         if he.status_code == 429:
-            retry_after_s = 15
-            # If we get structured detail, pass it through
-            if isinstance(he.detail, dict):
-                retry_after_s = int(he.detail.get("retry_after_seconds") or retry_after_s)
-            return {
-                "ok": True,
-                "uid": uid,
-                "after": after_ts,
-                "before": before_ts,
-                "days": days if after is None else None,
-                "page": page,
-                "per_page": per_page,
-                "batch_limit": batch_limit,
-                "max_activities": max_activities,
-                "imported_count": len(imported),
-                "imported": imported,
-                "errors_count": len(errors),
-                "errors": errors[:50],
-                "skipped_count": len(skipped),
-                "skipped": skipped[:50],
-                "next_page": page,  # samme page igjen
-                "done": False,
-                "rate_limited": True,
-                "retry_after_s": retry_after_s,
-                "rate_limit_detail": he.detail if isinstance(he.detail, dict) else None,
-            }
-        raise
+            raise
+
+    
+
 
     if not isinstance(acts, list):
         raise HTTPException(status_code=502, detail="strava_bad_payload")

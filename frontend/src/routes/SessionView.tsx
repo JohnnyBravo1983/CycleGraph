@@ -12,6 +12,9 @@ import { cgApi } from "../lib/cgApi";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides } from "../demo/demoRides";
 
+// ✅ PATCH 2: hard 429 UX path (banner + disable)
+import { analyzeSession, isStravaRateLimited } from "../lib/api";
+
 // ─────────────────────────────────────────────────────────────
 // Helpers: safe object access (unknown → typed)
 // ─────────────────────────────────────────────────────────────
@@ -75,6 +78,26 @@ function fmtMs(x: unknown): string {
 function fmtC(x: unknown): string {
   const n = num(x);
   return n === null ? "—" : `${n.toFixed(1)} °C`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// ✅ PATCH 2: Rate-limit helpers
+// ─────────────────────────────────────────────────────────────
+function computeRetryAt(detail: any): Date | null {
+  const s = detail?.retry_after_seconds;
+  if (typeof s === "number" && Number.isFinite(s) && s > 0) {
+    return new Date(Date.now() + s * 1000);
+  }
+  const iso = detail?.locked_until_utc;
+  if (typeof iso === "string") {
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+function fmtHHMM(d: Date) {
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -436,16 +459,22 @@ const RealSessionView: React.FC = () => {
     }
   }
 
-  const [reAnalyzing, setReAnalyzing] = useState(false);
+  // ✅ PATCH 2: rate-limit state + disable Analyze til retry
+  const [rateLimitDetail, setRateLimitDetail] = useState<any>(null);
+  const [retryAt, setRetryAt] = useState<Date | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
 
-  // ✅ PATCH 2: UI state for Strava 429 detail
-  const [rateLimitDetail, setRateLimitDetail] = useState<any | null>(null);
+  const locked = retryAt ? Date.now() < retryAt.getTime() : false;
 
-  async function reAnalyzeNow() {
+  async function handleAnalyze() {
     if (!id) return;
 
-    // ✅ PATCH 2: reset banner first
+    // ✅ Patch 3 (valgfri, men anbefalt): stop dobbeltklikk/spam
+    if (analyzing || locked) return;
+
+    // reset UI før nytt forsøk
     setRateLimitDetail(null);
+    setRetryAt(null);
 
     const override = readLocalProfileOverride();
     if (!override) {
@@ -453,67 +482,34 @@ const RealSessionView: React.FC = () => {
       return;
     }
 
+    setAnalyzing(true);
     try {
-      setReAnalyzing(true);
+      // 1) Call API directly to get a single, unambiguous 429 path
+      await analyzeSession(String(id));
 
-      // ✅ Use existing store loader as the canonical way to (re)fetch analyze.
-      // It will POST /api/sessions/:id/analyze and refresh currentSession.
-      // If your store supports options, pass them; otherwise it will just re-run analyze.
-      const result: any = await (async () => {
-        try {
-          // Try: loadSession(id, options) if implemented
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const maybe: any = loadSession as any;
-          if (typeof maybe === "function" && maybe.length >= 2) {
-            return await maybe(id, {
-              forceRecompute: true,
-              profileOverride: override,
-            } as LoadSessionOptions);
-          }
-          // fallback: call without options (still re-analyzes)
-          return await maybe(id);
-        } catch (e) {
-          throw e;
-        }
-      })();
-
-      // ✅ PATCH 2: if analyze returns structured rate-limit error (from api.ts)
-      if (
-        result &&
-        result.ok === false &&
-        result.source === "live" &&
-        result.error === "STRAVA_RATE_LIMITED"
-      ) {
-        setRateLimitDetail((result as any).detail ?? {});
-        return;
+      // 2) Refresh store state (reuse existing canonical loader)
+      // Try: loadSession(id, options) if implemented; else fallback.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const maybe: any = loadSession as any;
+      if (typeof maybe === "function" && maybe.length >= 2) {
+        await maybe(String(id), {
+          forceRecompute: true,
+          profileOverride: override,
+        } as LoadSessionOptions);
+      } else if (typeof maybe === "function") {
+        await maybe(String(id));
       }
-
-      // If loadSession doesn't return anything, that's fine — state updates via store.
-      // Banner remains null on success.
     } catch (e: any) {
-      const msg = String(e?.message ?? "");
-
-      // if caller throws a structured object
-      if (e?.error === "STRAVA_RATE_LIMITED") {
-        setRateLimitDetail(e?.detail ?? {});
-        return;
+      if (isStravaRateLimited(e)) {
+        setRateLimitDetail(e.detail);
+        setRetryAt(computeRetryAt(e.detail));
+        return; // 🔥 fail-fast
       }
 
-      // heuristics fallback
-      if (
-        e?.status === 429 ||
-        msg.includes("429") ||
-        msg.includes("STRAVA_RATE_LIMITED") ||
-        msg.includes("strava_rate_limited")
-      ) {
-        const d = e?.detail ?? e?.response?.detail ?? {};
-        setRateLimitDetail(d);
-        return;
-      }
-
-      console.log("[SessionView] reAnalyzeNow error:", e);
+      console.log("[SessionView] handleAnalyze error:", e);
+      // Fallback: la resten av UI sin error-path håndtere det (eller bare logg)
     } finally {
-      setReAnalyzing(false);
+      setAnalyzing(false);
     }
   }
 
@@ -647,20 +643,16 @@ const RealSessionView: React.FC = () => {
         <div className="text-right">
           {/* ✅ PATCH 2: Banner for Strava 429 */}
           {rateLimitDetail && (
-            <div className="mb-3 rounded-xl border border-neutral-300 bg-white p-3 text-left">
-              <div className="font-semibold">Strava er midlertidig låst</div>
-              <div className="text-sm">
-                Prøv igjen om{" "}
-                <b>{String(rateLimitDetail.retry_after_seconds ?? 60)}s</b>
-                {rateLimitDetail.locked_until_utc ? (
-                  <> (locked until: {String(rateLimitDetail.locked_until_utc)})</>
-                ) : null}
+            <div className="mb-3 rounded-xl border p-3 text-left">
+              <div className="font-semibold">Strava rate limit nådd</div>
+              <div className="text-sm opacity-80">
+                {retryAt
+                  ? `Prøv igjen kl ${fmtHHMM(retryAt)}`
+                  : "Prøv igjen litt senere."}
+                {rateLimitDetail?.endpoint
+                  ? ` (endpoint: ${String(rateLimitDetail.endpoint)})`
+                  : ""}
               </div>
-              {rateLimitDetail.reason ? (
-                <div className="text-xs opacity-70">
-                  Reason: {String(rateLimitDetail.reason)}
-                </div>
-              ) : null}
             </div>
           )}
 
@@ -675,18 +667,22 @@ const RealSessionView: React.FC = () => {
             <button
               onClick={() => {
                 const override = readLocalProfileOverride();
-                console.log("[SessionView] reAnalyzeNow override =", override);
+                console.log("[SessionView] handleAnalyze override =", override);
                 console.log(
-                  "[SessionView] reAnalyzeNow rider_weight_kg =",
+                  "[SessionView] handleAnalyze rider_weight_kg =",
                   override?.rider_weight_kg
                 );
-                void reAnalyzeNow();
+                void handleAnalyze();
               }}
-              disabled={reAnalyzing}
+              disabled={analyzing || locked}
               className="ml-2 inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
-              title="Re-analyser øta med rider_weight_kg fra localStorage (cg.profile.v1)"
+              title="Analyser på nytt. Ved Strava-lock blir knappen deaktivert til retry-tid."
             >
-              {reAnalyzing ? "Re-analyserer…" : "Re-analyser med ny vekt"}
+              {locked && retryAt
+                ? `Låst til ${fmtHHMM(retryAt)}`
+                : analyzing
+                  ? "Analyserer..."
+                  : "Analyze"}
             </button>
           </div>
         </div>

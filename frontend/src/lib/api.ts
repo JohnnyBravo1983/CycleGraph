@@ -292,6 +292,64 @@ export function formatStartTimeForUi(start_time: string | null | undefined): str
 }
 
 /**
+ * -----------------------------
+ * ✅ Patch 1: apiFetchJSON + ApiError
+ * Mål: Alle kall som gir 429 skal bli throw { status, detail }, så SessionView.tsx kan gjøre én tydelig UX path.
+ * -----------------------------
+ */
+
+export type ApiError = {
+  status: number;
+  detail?: any;
+  message: string;
+};
+
+async function readJsonSafe(res: Response) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return { raw: text };
+  }
+}
+
+export async function apiFetchJSON<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    credentials: "include",
+    headers: {
+      ...(init.headers || {}),
+      "Content-Type": "application/json",
+    },
+  });
+
+  const data: any = await readJsonSafe(res);
+
+  if (!res.ok) {
+    const detail = data?.detail ?? data;
+    throw {
+      status: res.status,
+      detail,
+      message: detail?.reason || detail?.error || data?.message || `HTTP ${res.status}`,
+    } satisfies ApiError;
+  }
+
+  return data as T;
+}
+
+export function analyzeSession(sid: string) {
+  return apiFetchJSON(`/api/sessions/${encodeURIComponent(sid)}/analyze`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function isStravaRateLimited(e: any) {
+  const d = e?.detail;
+  return e?.status === 429 && d?.error === "strava_rate_limited";
+}
+
+/**
  * Hent en session:
  * - hvis id === "mock" → bruk mockSession (kilde: "mock")
  * - ellers krever vi VITE_BACKEND_URL og kaller POST {BASE}/api/sessions/{id}/analyze (kilde: "live")
@@ -374,37 +432,16 @@ export async function fetchSession(
       timeoutMs: 20_000,
     });
 
-    // --- PATCH: Strava rate-limit detail (429) ---
+    // ✅ Patch 1: hard throw på 429 med detail (ApiError-shape)
     if (res.status === 429) {
-      let payload: any = null;
-      try {
-        payload = await res.json();
-      } catch {
-        payload = null;
-      }
-
-      const d = payload?.detail ?? payload ?? {};
-      const retry_after_seconds =
-        Number(d.retry_after_seconds ?? d.retry_after_s ?? 60) || 60;
-
-      return {
-        ok: false as const,
-        source: "live" as const,
-        error: "STRAVA_RATE_LIMITED",
-        detail: {
-          error: d.error ?? "strava_rate_limited",
-          reason: d.reason,
-          retry_after_seconds,
-          locked_until_utc: d.locked_until_utc,
-          endpoint: d.endpoint,
-          x_ratelimit_usage: d.x_ratelimit_usage,
-          x_ratelimit_limit: d.x_ratelimit_limit,
-          x_readratelimit_usage: d.x_readratelimit_usage,
-          x_readratelimit_limit: d.x_readratelimit_limit,
-        },
-      };
+      const data: any = await readJsonSafe(res);
+      const detail = data?.detail ?? data;
+      throw {
+        status: 429,
+        detail,
+        message: detail?.reason || detail?.error || data?.message || "HTTP 429",
+      } satisfies ApiError;
     }
-    // --- END PATCH ---
 
     if (!res.ok) {
       const text = await safeReadText(res);
@@ -458,7 +495,17 @@ export async function fetchSession(
     }
 
     return { ok: true, data: session, source: "live" };
-  } catch (err) {
+  } catch (err: any) {
+    // ✅ Patch 1: pass-through ApiError (f.eks. 429) som strukturert detail
+    if (err && typeof err === "object" && typeof err.status === "number") {
+      return {
+        ok: false,
+        source: "live",
+        error: String(err.message || `HTTP ${err.status}`),
+        detail: err.detail,
+      };
+    }
+
     console.error("[API] fetchSession LIVE → nettverks-/runtime-feil:", err);
     return {
       ok: false,
@@ -501,8 +548,14 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
 
   console.log("[API] fetchSessionsList status:", res.status, res.statusText);
   if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`fetchSessionsList failed ${res.status}: ${txt.slice(0, 200)}`);
+    // ✅ Patch 1: hard throw på feil (inkl 429) med detail
+    const data: any = await readJsonSafe(res);
+    const detail = data?.detail ?? data;
+    throw {
+      status: res.status,
+      detail,
+      message: detail?.reason || detail?.error || data?.message || `HTTP ${res.status}`,
+    } satisfies ApiError;
   }
 
   const json: unknown = await res.json();
