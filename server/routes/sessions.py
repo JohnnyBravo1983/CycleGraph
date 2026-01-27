@@ -2074,27 +2074,33 @@ async def analyze_session(
     # ============================================================================
 
     # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
+        # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
+        # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
     def _RET(x: Dict[str, Any]):
-    try:
-        x = _final_ui_override(x)
-    except Exception:
-        pass
+        try:
+            x = _final_ui_override(x)
+        except Exception:
+            pass
 
-    # Cache precision_watt_avg into sessions_meta
-    try:
-        watt = _extract_precision_watt_avg(x)
-        _meta_set_precision_watt(user_id, str(sid), watt)
-    except Exception as e:
-        print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
+        # Cache precision_watt_avg into sessions_meta
+        try:
+            watt = _extract_precision_watt_avg(x)
+            _meta_set_precision_watt(user_id, str(sid), watt)
+        except Exception as e:
+            print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
 
-    # ✅ NEW: Persist full result doc to user-scoped SSOT results dir
-    try:
-        if isinstance(x, dict) and _is_full_result_doc(x):
-            _persist_user_result(str(user_id), str(sid), x)
-    except Exception as e:
-        print(f"[SVR] persist_user_result failed sid={sid} err={e!r}", file=sys.stderr)
+        # Persist full result doc to user-scoped results dir (SSOT)
+        try:
+            if isinstance(x, dict) and _is_full_result_doc(x):
+                _persist_user_result(str(user_id), str(sid), x)
+        except Exception as e:
+            print(f"[SVR] persist_user_result failed sid={sid} err={e!r}", file=sys.stderr)
 
-    return x
+        return x
+    # ===========================================================================================
+
+    # ===========================================================================================
+
 
     # ===========================================================================================
 
