@@ -294,10 +294,15 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
     # Always log rate-limit headers (no tokens)
     usage = r.headers.get("x-ratelimit-usage") or r.headers.get("X-RateLimit-Usage")
     limit = r.headers.get("x-ratelimit-limit") or r.headers.get("X-RateLimit-Limit")
+    read_usage = r.headers.get("x-readratelimit-usage") or r.headers.get("X-ReadRateLimit-Usage")
+    read_limit = r.headers.get("x-readratelimit-limit") or r.headers.get("X-ReadRateLimit-Limit")
     ra = r.headers.get("Retry-After")
+    reset = r.headers.get("x-ratelimit-reset") or r.headers.get("X-RateLimit-Reset")
+
     print(
         f"[STRAVA] resp status={r.status_code} endpoint={path} "
-        f"usage={usage} limit={limit} retry_after={ra}"
+        f"usage={usage} limit={limit} read_usage={read_usage} read_limit={read_limit} "
+        f"retry_after={ra} reset={reset}"
     )
 
     # 429: rate limited (FAIL-FAST)
@@ -309,7 +314,8 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
 
         print(
             f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
-            f"retry_after={retry_after_s}s usage={usage} limit={limit}"
+            f"retry_after={retry_after_s}s usage={usage} limit={limit} "
+            f"read_usage={read_usage} read_limit={read_limit}"
         )
 
         raise HTTPException(
@@ -320,6 +326,8 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
                 "endpoint": path,
                 "x_ratelimit_usage": usage,
                 "x_ratelimit_limit": limit,
+                "x_readratelimit_usage": read_usage,
+                "x_readratelimit_limit": read_limit,
             },
         )
 
@@ -334,10 +342,15 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
 
         usage = r.headers.get("x-ratelimit-usage") or r.headers.get("X-RateLimit-Usage")
         limit = r.headers.get("x-ratelimit-limit") or r.headers.get("X-RateLimit-Limit")
+        read_usage = r.headers.get("x-readratelimit-usage") or r.headers.get("X-ReadRateLimit-Usage")
+        read_limit = r.headers.get("x-readratelimit-limit") or r.headers.get("X-ReadRateLimit-Limit")
         ra = r.headers.get("Retry-After")
+        reset = r.headers.get("x-ratelimit-reset") or r.headers.get("X-RateLimit-Reset")
+
         print(
             f"[STRAVA] resp status={r.status_code} endpoint={path} "
-            f"usage={usage} limit={limit} retry_after={ra}"
+            f"usage={usage} limit={limit} read_usage={read_usage} read_limit={read_limit} "
+            f"retry_after={ra} reset={reset}"
         )
 
         if r.status_code == 429:
@@ -348,7 +361,8 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
 
             print(
                 f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
-                f"retry_after={retry_after_s}s usage={usage} limit={limit}"
+                f"retry_after={retry_after_s}s usage={usage} limit={limit} "
+                f"read_usage={read_usage} read_limit={read_limit}"
             )
 
             raise HTTPException(
@@ -359,6 +373,8 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
                     "endpoint": path,
                     "x_ratelimit_usage": usage,
                     "x_ratelimit_limit": limit,
+                    "x_readratelimit_usage": read_usage,
+                    "x_readratelimit_limit": read_limit,
                 },
             )
 
