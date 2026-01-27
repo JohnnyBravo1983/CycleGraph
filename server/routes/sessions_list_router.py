@@ -89,9 +89,11 @@ def _logs_results_dir() -> Path:
         return Path("/app/logs/results")
 
 
+
 def _logs_result_path(sid: str) -> Path:
+    # Fly: uvicorn starter fra /app → CWD == /app
     sid2 = _safe_sid(sid)
-    return _logs_results_dir() / f"result_{sid2}.json"
+    return Path(os.getcwd()) / "logs" / "results" / f"result_{sid2}.json"
 
 
 def _ssot_user_result_path(uid: str, sid: str) -> Path:
@@ -998,6 +1000,7 @@ def _build_rows_from_state(uid: str) -> list[dict]:
             stats["missing_power"] += 1
 
             p = _logs_result_path(sid)
+            logger.info(f"[LIST] check_result_path sid={sid} path={p} exists={p.exists()}")
             if p.exists() and p.is_file():
                 doc = _safe_load_json(p)
                 watt = _extract_precision_watt_avg(doc) if doc else None
