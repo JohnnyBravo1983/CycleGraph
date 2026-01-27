@@ -1,3 +1,4 @@
+# server/routes/strava_import_router.py
 from __future__ import annotations
 
 import os
@@ -275,43 +276,72 @@ def _bear_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 # ----------------------------
+# Strava lock helpers (SSOT)
+# ----------------------------
+def _lock_paths(uid: str) -> Tuple[Path, Path]:
+    user_dir = state_root() / "users" / uid
+    return (user_dir / ".strava_lock.json", user_dir / ".strava_lock")  # json SSOT, legacy fallback
+
+
+def _read_strava_lock(uid: str) -> Optional[Dict[str, Any]]:
+    p_json, p_legacy = _lock_paths(uid)
+    p = p_json if p_json.exists() else (p_legacy if p_legacy.exists() else None)
+    if not p:
+        return None
+    try:
+        return _read_json_utf8_sig(p)
+    except Exception:
+        return None
+
+
+def _write_strava_lock(uid: str, lock: Dict[str, Any]) -> None:
+    p_json, _ = _lock_paths(uid)
+    try:
+        p_json.parent.mkdir(parents=True, exist_ok=True)
+        p_json.write_text(json.dumps(lock, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+# ----------------------------
 # strava api (med auto-refresh + retry + 429 handling)
 # PATCH 1: Observability + FAIL-FAST on 429 (no sleep / no retries)
 # ----------------------------
 def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
-    # --- Strava lock (per user) ---
-    # token_path peker på /app/state/users/<uid>/strava_tokens.json i prod
-    user_dir = token_path.parent
-    lock_path = user_dir / ".strava_lock.json"
-
     now = dt.datetime.now(dt.timezone.utc)
 
-    # Pre-check lock: hvis vi allerede vet vi er låst i dag, ikke ring Strava
-    if lock_path.exists():
+    # 0) Lock gate (do NOT call Strava when locked)
+    lock = _read_strava_lock(uid)
+    if isinstance(lock, dict) and lock.get("locked") is True:
+        locked_until = lock.get("locked_until_utc")
+
+        # beregn retry_after_seconds
+        retry_after_s = 60
         try:
-            lock = json.loads(lock_path.read_text(encoding="utf-8"))
-            locked_until = lock.get("locked_until_utc")
-            if locked_until:
-                until_dt = dt.datetime.fromisoformat(locked_until.replace("Z", "+00:00"))
-                if now < until_dt:
-                    retry_after_s = max(1, int((until_dt - now).total_seconds()))
-                    print(
-                        f"[STRAVA] LOCKED (skip request) endpoint={path} "
-                        f"retry_after={retry_after_s}s reason={lock.get('reason')}"
-                    )
-                    raise HTTPException(
-                        status_code=429,
-                        detail={
-                            "error": "strava_rate_limited",
-                            "reason": lock.get("reason") or "locked",
-                            "retry_after_seconds": retry_after_s,
-                            "endpoint": path,
-                            "locked_until_utc": locked_until,
-                        },
-                    )
+            if isinstance(locked_until, str) and locked_until.endswith("Z"):
+                dt_until = dt.datetime.strptime(
+                    locked_until, "%Y-%m-%dT%H:%M:%SZ"
+                ).replace(tzinfo=dt.timezone.utc)
+                now2 = dt.datetime.now(tz=dt.timezone.utc)
+                retry_after_s = max(1, int((dt_until - now2).total_seconds()))
         except Exception:
-            # Hvis lock-fila er korrupt el.l., ignorer og fortsett (fail-open)
-            pass
+            retry_after_s = 60
+
+        reason = lock.get("reason") or "locked"
+        print(
+            f"[STRAVA] LOCKED (skip request) endpoint={path} "
+            f"retry_after={retry_after_s}s reason={reason}"
+        )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "strava_rate_limited",
+                "reason": reason,
+                "retry_after_seconds": retry_after_s,
+                "endpoint": path,
+                "locked_until_utc": locked_until,
+            },
+        )
 
     tokens = _maybe_refresh_and_save(uid, tokens, token_path)
 
@@ -360,10 +390,7 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
                     "read_usage": read_usage,
                     "read_limit": read_limit,
                 }
-                try:
-                    lock_path.write_text(json.dumps(lock_payload, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
+                _write_strava_lock(uid, lock_payload)
     except Exception:
         pass
 
@@ -450,8 +477,6 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
         return r.json()
     except Exception:
         raise HTTPException(status_code=502, detail="strava_bad_json")
-
-
 
 
 def _fetch_activity_and_streams(
