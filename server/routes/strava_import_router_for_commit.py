@@ -99,13 +99,13 @@ def _debug_fs(where: str, uid: Optional[str] = None) -> None:
 
 from server.user_state import state_root
 
+
 def _user_dir(uid: str) -> Path:
     return state_root() / "users" / uid
 
 
 def _tokens_path(uid: str) -> Path:
     return _user_dir(uid) / "strava_tokens.json"
-
 
 
 # ----------------------------
@@ -275,63 +275,103 @@ def _bear_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 # ----------------------------
-# strava api (med auto-refresh + retry + 429 handling)
+# strava api (med auto-refresh + 429 handling)
+# PATCH: Observability + FAIL-FAST on 429 (no sleep / no retries)
 # ----------------------------
-def _strava_get(url_path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
+def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
     tokens = _maybe_refresh_and_save(uid, tokens, token_path)
 
     access = tokens.get("access_token")
     if not access:
         raise HTTPException(status_code=401, detail="missing_access_token")
 
-    url = f"{STRAVA_AUTH_BASE}{url_path}"
+    url = f"{STRAVA_AUTH_BASE}{path}"
     headers = {"Authorization": f"Bearer {access}"}
 
-    max_attempts = 3
-    attempt = 0
+    # Single request (no retry loop)
+    r = requests.get(url, headers=headers, timeout=20)
 
-    while attempt < max_attempts:
-        attempt += 1
+    # Always log rate-limit headers (no tokens)
+    usage = r.headers.get("x-ratelimit-usage") or r.headers.get("X-RateLimit-Usage")
+    limit = r.headers.get("x-ratelimit-limit") or r.headers.get("X-RateLimit-Limit")
+    ra = r.headers.get("Retry-After")
+    print(
+        f"[STRAVA] resp status={r.status_code} endpoint={path} "
+        f"usage={usage} limit={limit} retry_after={ra}"
+    )
+
+    # 429: rate limited (FAIL-FAST)
+    if r.status_code == 429:
+        try:
+            retry_after_s = int(ra) if ra is not None else 60
+        except Exception:
+            retry_after_s = 60
+
+        print(
+            f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
+            f"retry_after={retry_after_s}s usage={usage} limit={limit}"
+        )
+
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "strava_rate_limited",
+                "retry_after_seconds": retry_after_s,
+                "endpoint": path,
+                "x_ratelimit_usage": usage,
+                "x_ratelimit_limit": limit,
+            },
+        )
+
+    # refresh + retry once on auth failure (kept, but no loops)
+    if r.status_code in (401, 403):
+        tokens = _maybe_refresh_and_save(uid, tokens, token_path)
+        access = tokens.get("access_token")
+        if not access:
+            raise HTTPException(status_code=401, detail="missing_access_token_after_refresh")
+        headers = {"Authorization": f"Bearer {access}"}
         r = requests.get(url, headers=headers, timeout=20)
 
-        # 429: rate limited
+        usage = r.headers.get("x-ratelimit-usage") or r.headers.get("X-RateLimit-Usage")
+        limit = r.headers.get("x-ratelimit-limit") or r.headers.get("X-RateLimit-Limit")
+        ra = r.headers.get("Retry-After")
+        print(
+            f"[STRAVA] resp status={r.status_code} endpoint={path} "
+            f"usage={usage} limit={limit} retry_after={ra}"
+        )
+
         if r.status_code == 429:
-            retry_after = r.headers.get("Retry-After")
             try:
-                wait_s = int(retry_after) if retry_after else 15
+                retry_after_s = int(ra) if ra is not None else 60
             except Exception:
-                wait_s = 15
+                retry_after_s = 60
 
-            wait_s = max(10, min(wait_s, 60))
-            print(f"[STRAVA] 429 rate limit (attempt {attempt}/{max_attempts}). Sleeping {wait_s}s…")
-            time.sleep(wait_s)
-            continue  # retry
+            print(
+                f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
+                f"retry_after={retry_after_s}s usage={usage} limit={limit}"
+            )
 
-        # refresh + retry once on auth failure
-        if r.status_code in (401, 403):
-            tokens = _maybe_refresh_and_save(uid, tokens, token_path)
-            access = tokens.get("access_token")
-            if not access:
-                raise HTTPException(status_code=401, detail="missing_access_token_after_refresh")
-            headers = {"Authorization": f"Bearer {access}"}
-            r = requests.get(url, headers=headers, timeout=20)
-
-        if r.status_code == 429:
-            raise HTTPException(status_code=429, detail="strava_rate_limited_429")
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "strava_rate_limited",
+                    "retry_after_seconds": retry_after_s,
+                    "endpoint": path,
+                    "x_ratelimit_usage": usage,
+                    "x_ratelimit_limit": limit,
+                },
+            )
 
         if r.status_code in (401, 403):
             raise HTTPException(status_code=401, detail=f"strava_auth_failed_{r.status_code}")
 
-        if not r.ok:
-            raise HTTPException(status_code=502, detail=f"strava_error_{r.status_code}")
+    if not r.ok:
+        raise HTTPException(status_code=502, detail=f"strava_error_{r.status_code}")
 
-        try:
-            return r.json()
-        except Exception:
-            raise HTTPException(status_code=502, detail="strava_bad_json")
-
-    # exhausted retries
-    raise HTTPException(status_code=429, detail="strava_rate_limited_retry_exhausted")
+    try:
+        return r.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="strava_bad_json")
 
 
 def _fetch_activity_and_streams(
@@ -578,6 +618,9 @@ def sync_strava_activities(
     except HTTPException as he:
         if he.status_code == 429:
             retry_after_s = 15
+            # If we get structured detail, pass it through
+            if isinstance(he.detail, dict):
+                retry_after_s = int(he.detail.get("retry_after_seconds") or retry_after_s)
             return {
                 "ok": True,
                 "uid": uid,
@@ -598,6 +641,7 @@ def sync_strava_activities(
                 "done": False,
                 "rate_limited": True,
                 "retry_after_s": retry_after_s,
+                "rate_limit_detail": he.detail if isinstance(he.detail, dict) else None,
             }
         raise
 
