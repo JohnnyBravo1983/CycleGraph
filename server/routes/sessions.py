@@ -2450,7 +2450,6 @@ async def analyze_session(
     }
     
     # ==================== PATCH: BYGG INPUT KANDIDATER DYNAMISK ====================
-    # Bygg liste over kandidater for input, uten debug_session hvis ikke tillatt
     input_candidates = []
 
     # SSOT først: canonical session_<sid>.json
@@ -2460,9 +2459,9 @@ async def analyze_session(
 
     # Debug inputs kun hvis eksplisitt tillatt
     if _allow_debug_inputs():
-          ds = avail["paths"].get("debug_session")
-          if ds:
-              input_candidates.append(ds)
+        ds = avail["paths"].get("debug_session")
+        if ds:
+            input_candidates.append(ds)
 
     input_candidates.extend([
         avail["paths"].get("inline_samples"),
@@ -2474,6 +2473,9 @@ async def analyze_session(
 
     # Fjern None/False så os.path.exists ikke crasher
     input_candidates = [c for c in input_candidates if c]
+
+    input_used = None
+
     # Sjekk om vi bruker request body samples
     if isinstance(samples, list) and len(samples) > 0:
         input_used = "request_body"
@@ -2484,39 +2486,48 @@ async def analyze_session(
             if os.path.exists(candidate):
                 input_used = candidate
                 break
-    
-    # === PATCH A: load samples from persisted session_<sid>.json if request omitted them ===
-    if not isinstance(samples, list) or len(samples) == 0:
-        sess_path = _pick_best_session_path(sid)
-        if sess_path is not None:
-            try:
-                loaded = _load_samples_from_session_file(sess_path)
-                body["samples"] = loaded
-                samples = loaded  # <-- KRITISK: oppdater også lokal variabel
-                if not input_used:  # Bare sett hvis vi ikke allerede har en input
-                    input_used = str(sess_path)
-                input_debug_info["samples_len"] = len(samples)
-                
-                # ==================== PATCH B2.1: Alltid sett debug info ====================
-                # sørg for at vi har dbg-dict (både i body og senere i resp)
-                dbg = body.get("debug") or {}
-                if not isinstance(dbg, dict):
-                    dbg = {}
 
-                dbg["session_path"] = str(sess_path)
-                dbg["samples_loaded"] = len(samples)
-                body["debug"] = dbg
-                # ==================== END PATCH B2.1 ====================
+    # ==================== PATCH: LOAD SAMPLES FROM INPUT_USED (SSOT-FIRST) ====================
+    if (not isinstance(samples, list) or len(samples) == 0) and input_used:
+        try:
+            loaded = None
+
+            # Hvis input_used peker på en session_*.json, last samples fra den
+            if isinstance(input_used, str) and input_used.endswith(".json") and "session_" in input_used:
+                loaded = _load_samples_from_session_file(Path(input_used))
+
+            if isinstance(loaded, list) and len(loaded) > 0:
+                samples = loaded
+                body["samples"] = loaded
+                input_debug_info["samples_len"] = len(loaded)
+        except Exception as e:
+            input_debug_info["load_samples_error"] = repr(e)
+    # ==================== END PATCH ====================
+
                 
-                print(
-                    f"[SVR] loaded_session_samples sid={sid} n={len(samples)} path={sess_path}",
-                    file=sys.stderr,
-                )
-            except Exception as e:
-                print(
-                    f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
-                    file=sys.stderr,
-                )
+    # ==================== PATCH B2.1: Alltid sett debug info ====================
+    # sørg for at vi har dbg-dict (både i body og senere i resp)
+    dbg = body.get("debug") or {}
+    if not isinstance(dbg, dict):
+        dbg = {}
+
+    dbg["session_path"] = str(sess_path)
+    dbg["samples_loaded"] = len(samples)
+    body["debug"] = dbg
+    # ==================== END PATCH B2.1 ====================
+    
+    try:            
+        print(
+            f"[SVR] loaded_session_samples sid={sid} n={len(samples)} path={sess_path}",
+            file=sys.stderr,
+              
+       )
+            
+    except Exception as e:
+        print(
+            f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
+            file=sys.stderr,
+        )
     
     # Oppdater input debug info
     input_debug_info["input_used"] = input_used
