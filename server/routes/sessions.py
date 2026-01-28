@@ -2251,7 +2251,7 @@ async def analyze_session(
                                 
                             except Exception as e:
                                 print(
-                                    f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
+                                    f"[SVR] failed_load_session_samples sid={sid} path={input_used} err={e}",
                                     file=sys.stderr,
                                 )
                         
@@ -2511,21 +2511,21 @@ async def analyze_session(
     if not isinstance(dbg, dict):
         dbg = {}
 
-    dbg["session_path"] = str(sess_path)
+    dbg["session_path"] = str(input_used)
     dbg["samples_loaded"] = len(samples)
     body["debug"] = dbg
     # ==================== END PATCH B2.1 ====================
     
     try:            
         print(
-            f"[SVR] loaded_session_samples sid={sid} n={len(samples)} path={sess_path}",
+            f"[SVR] loaded_session_samples sid={sid} n={len(samples)} path={input_used}",
             file=sys.stderr,
               
        )
             
     except Exception as e:
         print(
-            f"[SVR] failed_load_session_samples sid={sid} path={sess_path} err={e}",
+            f"[SVR] failed_load_session_samples sid={sid} path={input_used} err={e}",
             file=sys.stderr,
         )
     
