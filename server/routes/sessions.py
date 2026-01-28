@@ -2452,19 +2452,28 @@ async def analyze_session(
     # ==================== PATCH: BYGG INPUT KANDIDATER DYNAMISK ====================
     # Bygg liste over kandidater for input, uten debug_session hvis ikke tillatt
     input_candidates = []
+
+    # SSOT først: canonical session_<sid>.json
+    ssot = avail["paths"].get("ssot_session")
+    if ssot:
+        input_candidates.append(ssot)
+
+    # Debug inputs kun hvis eksplisitt tillatt
     if _allow_debug_inputs():
-        input_candidates.append(avail["paths"]["debug_session"])
-    
+          ds = avail["paths"].get("debug_session")
+          if ds:
+              input_candidates.append(ds)
+
     input_candidates.extend([
-        avail["paths"]["inline_samples"],
-        avail["paths"]["actual10_latest_session"],
-        avail["paths"]["raw_streams"],
-        avail["paths"]["raw_activity"],
-        avail["paths"]["gpx"],
+        avail["paths"].get("inline_samples"),
+        avail["paths"].get("actual10_latest_session"),
+        avail["paths"].get("raw_streams"),
+        avail["paths"].get("raw_activity"),
+        avail["paths"].get("gpx"),
     ])
-    # ==================== END PATCH ====================
-    
-    input_used = None
+
+    # Fjern None/False så os.path.exists ikke crasher
+    input_candidates = [c for c in input_candidates if c]
     # Sjekk om vi bruker request body samples
     if isinstance(samples, list) and len(samples) > 0:
         input_used = "request_body"
