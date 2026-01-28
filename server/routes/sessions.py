@@ -600,10 +600,20 @@ def _allow_debug_inputs() -> bool:
     return os.getenv("CG_ALLOW_DEBUG_INPUTS", "").lower() in ("1", "true", "yes")
 # ==================== END PATCH ====================
 
-def _input_availability(sid: str) -> dict:
+def _input_availability(sid: str, uid: Optional[str] = None) -> dict:
     p = _paths_for_sid(sid)
+
+    # ==================== PATCH SSOT: canonical session path ====================
+    # Prefer canonical per-user session in /state/users/<uid>/sessions/session_<sid>.json
+    try:
+        if uid:
+            p["ssot_session"] = str(state_root() / "users" / str(uid) / "sessions" / f"session_{sid}.json")
+    except Exception:
+        pass
+    # ==================== END PATCH SSOT ====================
+
     exists = {k: os.path.exists(v) for k, v in p.items()}
-    
+
     # ==================== PATCH 3B: alias actual10/latest session into debug_session candidate ====================
     try:
         if exists.get("actual10_latest_session") and not exists.get("debug_session"):
@@ -612,30 +622,33 @@ def _input_availability(sid: str) -> dict:
     except Exception:
         pass
     # ==================== END PATCH 3B ====================
-    
+
     # "input" betyr at vi kan bygge samples på nytt
     # ==================== PATCH: Ekskluder debug_session hvis ikke tillatt ====================
-    # Bygg en liste over kandidater for input, uten debug_session hvis ikke tillatt
     input_candidates_for_check = []
+
+    # SSOT session er alltid lov (ikke debug)
+    try:
+        input_candidates_for_check.append(exists.get("ssot_session", False))
+    except Exception:
+        pass
+
     if _allow_debug_inputs():
         input_candidates_for_check.append(exists.get("debug_session", False))
-    
-    # Legg til andre kandidater
+
     other_candidates = [
-        exists["inline_samples"],
+        exists.get("inline_samples", False),
         exists.get("actual10_latest_session", False),
-        exists["raw_streams"],
-        exists["gpx"]
+        exists.get("raw_streams", False),
+        exists.get("gpx", False),
     ]
     input_candidates_for_check.extend(other_candidates)
 
-    # has_any_input er sant hvis minst en av disse er True
     has_any_input = any(input_candidates_for_check)
     # ==================== END PATCH ====================
-    
+
     return {"paths": p, "exists": exists, "has_any_input": bool(has_any_input)}
 
-# --- STREAMS PROBE HELPER ---------------------------------------------------
 
 def _probe_streams_file(path: str) -> dict:
     """
@@ -2028,7 +2041,7 @@ async def analyze_session(
     start_time_from_samples = None
     # ==================== END PATCH D1 ====================
 
-    avail = _input_availability(sid)
+    avail = _input_availability(sid, uid=user_id)
 
     # ==================== PATCH 1: HARD INPUT GATE ====================
     # Hvis force_recompute=true men vi mangler all input, så skal vi gi 409 (ikke prøve Strava).
@@ -2059,8 +2072,8 @@ async def analyze_session(
         dbg["missing_input"] = True
         dbg["input_exists"] = avail["exists"]
         dbg["input_paths"] = avail["paths"]
-        _http409_missing_input(sid, dbg)
-# ==================================================================
+        return _http409_missing_input(sid, dbg)
+    # ==================================================================
     # ==================== PATCH 3b: SELF-HEALING ANALYZE (EXPLICIT ONLY) ====================
     # Kun når self_heal=true: Hvis analyze mangler input, fetch fra Strava via import-pipeline
     # og skriv session til persistent state før vi fortsetter analyse.
@@ -2074,7 +2087,7 @@ async def analyze_session(
             out = _strava_import_one(uid=user_id, rid=str(sid), cg_auth=cg_auth, analyze=False)
 
             # Etter import, oppdater availability slik at resten av analyze finner session
-            avail = _input_availability(sid)
+            avail = _input_availability(sid, uid=user_id)
 
             print(
                 f"[SELF_HEAL] sid={sid} uid={user_id} imported={out.get('ok')} samples_len={out.get('samples_len')}",
