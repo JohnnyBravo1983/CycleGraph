@@ -104,6 +104,10 @@ from server.user_state import state_root
 def _user_dir(uid: str) -> Path:
     return state_root() / "users" / uid
 
+def _ssot_user_session_path(uid: str, rid: str) -> Path:
+    rid2 = str(rid)
+    return state_root() / "users" / uid / "sessions" / f"session_{rid2}.json"
+
 
 def _tokens_path(uid: str) -> Path:
     return _user_dir(uid) / "strava_tokens.json"
@@ -185,6 +189,14 @@ def _write_json(p: Path, obj: Dict[str, Any]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
+
+def _write_json_atomic(p: Path, obj: Dict[str, Any]) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
 
 
 def _now_ts_dirname() -> str:
@@ -608,6 +620,14 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 
     _write_json(p1, doc)
     _write_json(p2, doc)
+    
+     # NEW (SSOT): write canonical session for this user
+    try:
+        ssot_p = _ssot_user_session_path(uid, rid)
+        _write_json_atomic(ssot_p, doc)
+    except Exception as e:
+        print(f"[SSOT] session write failed rid={rid} uid={uid} err={e!r}", file=sys.stderr)
+    
 
     # --- Patch 3C: write debug_session mirror for analyze input ---
     debug_session_written = False
