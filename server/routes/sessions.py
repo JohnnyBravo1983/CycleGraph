@@ -2008,6 +2008,7 @@ async def analyze_session(
     no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
     debug: int = Query(0),
+    self_heal: bool = Query(False),
 ):
     
     want_debug = bool(debug)
@@ -2027,8 +2028,10 @@ async def analyze_session(
     start_time_from_samples = None
     # ==================== END PATCH D1 ====================
 
+     avail = _input_availability(sid)
+
     # ==================== PATCH 1: HARD INPUT GATE ====================
-    avail = _input_availability(sid)
+    # Hvis force_recompute=true men vi mangler all input, så skal vi gi 409 (ikke prøve Strava).
     if force_recompute and not avail["has_any_input"]:
         dbg = _base_debug(force_recompute=True, used_fallback=False)
         dbg["reason"] = "missing_input_data"
@@ -2038,15 +2041,27 @@ async def analyze_session(
         _http409_missing_input(sid, dbg)
     # ==================================================================
 
-    # ==================== PATCH 3b: SELF-HEALING ANALYZE ====================
-    # Hvis analyze mangler input (ingen session/result/streams/activity), fetch fra Strava
+    # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
+    # Analyze skal være "ren" som default:
+    # - Hvis vi mangler input (ingen session/result/streams/activity), skal vi STOPPE med 409
+    #   med mindre self_heal=1 er eksplisitt satt.
+    if (not avail.get("has_any_input")) and (not self_heal) and (not force_recompute):
+        dbg = _base_debug(force_recompute=False, used_fallback=False)
+        dbg["reason"] = "missing_input_data"
+        dbg["missing_input"] = True
+        dbg["input_exists"] = avail.get("exists")
+        dbg["input_paths"] = avail.get("paths")
+        dbg["hint"] = "Run explicit import/backfill to create session_<sid>.json, or call analyze with ?self_heal=1 (not default)."
+        _http409_missing_input(sid, dbg)
+    # =============================================================================================
+
+    # ==================== PATCH 3b: SELF-HEALING ANALYZE (EXPLICIT ONLY) ====================
+    # Kun når self_heal=true: Hvis analyze mangler input, fetch fra Strava via import-pipeline
     # og skriv session til persistent state før vi fortsetter analyse.
     if self_heal and (not avail.get("has_any_input")) and (not force_recompute):
         try:
             cg_auth = request.cookies.get("cg_auth")
             if not cg_auth:
-                # Strava import trenger cg_auth for intern analyze-trigger i noen flows,
-                # men her bruker vi analyze=False. Likevel: uten auth-cookie er dette hard fail.
                 raise HTTPException(status_code=401, detail="Not authenticated (missing cg_auth cookie)")
 
             # Reuse existing Strava import pipeline (tokens refresh + fetch + build samples + write session)
@@ -2064,6 +2079,8 @@ async def analyze_session(
         except Exception as e:
             print(f"[SELF_HEAL] FAIL sid={sid} uid={user_id} err={repr(e)}", file=sys.stderr)
             raise HTTPException(status_code=500, detail=f"Self-heal failed: {repr(e)}")
+    # ==================== END PATCH 3b ====================
+    
     # ==================== END PATCH 3b ====================
 
     # ==================== PATCH 1: logg force_recompute tidlig ====================
@@ -3453,7 +3470,9 @@ async def analyze_session_sessionspy(
     no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
     debug: int = Query(0),
-    self_heal: bool = Query(False),
+    if self_heal and (not avail.get("has_any_input")) and (not force_recompute):
+    ...
+
 ):
     """
     🚫 Deprecated endpoint. Keep for compatibility but do not execute analysis.
