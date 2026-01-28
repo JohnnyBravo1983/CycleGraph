@@ -2041,7 +2041,7 @@ async def analyze_session(
     # ==================== PATCH 3b: SELF-HEALING ANALYZE ====================
     # Hvis analyze mangler input (ingen session/result/streams/activity), fetch fra Strava
     # og skriv session til persistent state før vi fortsetter analyse.
-    if (not avail.get("has_any_input")) and (not force_recompute):
+    if self_heal and (not avail.get("has_any_input")) and (not force_recompute):
         try:
             cg_auth = request.cookies.get("cg_auth")
             if not cg_auth:
@@ -3453,6 +3453,7 @@ async def analyze_session_sessionspy(
     no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
     debug: int = Query(0),
+    self_heal: bool = Query(False),
 ):
     """
     🚫 Deprecated endpoint. Keep for compatibility but do not execute analysis.

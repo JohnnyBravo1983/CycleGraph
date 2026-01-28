@@ -34,26 +34,25 @@ interface SessionState {
 function isRateLimitedFromThrown(err: any): boolean {
   const status = err?.status;
   const detail = err?.detail;
+
   if (status === 429) {
     const d = detail ?? {};
     const e = d?.error;
     const r = d?.reason;
     if (e === "strava_rate_limited" || r === "read_daily_limit_exceeded") return true;
 
-    // fallback string check
     const s = JSON.stringify(d).toLowerCase();
     if (s.includes("strava_rate_limited") || s.includes("read_daily_limit_exceeded")) return true;
   }
 
-  // extra fallback: sometimes status is nested or string contains 429
   const s = String(err?.message ?? err ?? "").toLowerCase();
   return s.includes("429") && (s.includes("rate") || s.includes("strava"));
 }
 
 function isRateLimitedFromResult(result: any): boolean {
-  // 1) status/detail shape (if present)
   const status = result?.status;
   const detail = result?.detail;
+
   if (
     status === 429 &&
     (detail?.error === "strava_rate_limited" ||
@@ -62,7 +61,6 @@ function isRateLimitedFromResult(result: any): boolean {
     return true;
   }
 
-  // 2) FetchSessionResult typical: ok:false + error string
   const errStr = String(result?.error ?? "").toLowerCase();
   return (
     errStr.includes("strava_rate_limited") ||
@@ -88,13 +86,17 @@ export const useSessionStore = create<SessionState>((set, get) => {
     try {
       result = await (apiFetchSession as any)(id, opts);
     } catch (err: any) {
-      // ✅ HOTFIX: Strava 429 er forventet – ikke sett fatal error i store.
+      // ✅ HOTFIX: Strava 429 er forventet – gi UI et "state-signal", ikke fatal feil
       if (isRateLimitedFromThrown(err)) {
-        console.warn("[sessionStore.loadSession] rate-limited (thrown):", err?.detail ?? err);
+        console.warn(
+          "[sessionStore.loadSession] rate-limited (thrown):",
+          err?.detail ?? err
+        );
         set({
           loadingSession: false,
           loading: false,
-          // IKKE sett errorSession/error her
+          errorSession: "STRAVA_RATE_LIMITED",
+          error: "STRAVA_RATE_LIMITED",
         });
         return;
       }
@@ -120,12 +122,13 @@ export const useSessionStore = create<SessionState>((set, get) => {
         (result as any)?.source
       );
 
-      // ✅ HOTFIX: Ikke trigge errorSession ved Strava rate limit
+      // ✅ HOTFIX: Ikke trigge "Noe gikk galt" ved Strava rate limit
       if (isRateLimitedFromResult(result)) {
         set({
           loadingSession: false,
           loading: false,
-          // IKKE sett errorSession/error her
+          errorSession: "STRAVA_RATE_LIMITED",
+          error: "STRAVA_RATE_LIMITED",
         });
         return;
       }
