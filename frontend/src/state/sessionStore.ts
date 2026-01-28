@@ -214,17 +214,11 @@ export const useSessionStore = create<SessionState>((set, get) => {
       });
     },
 
-    loadSession: async (
-      id: string,
-      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> }
-    ): Promise<void> => {
+    loadSession: async (id: string, opts?: LoadSessionOpts): Promise<void> => {
       await runLoadSession(id, opts);
     },
 
-    fetchSession: async (
-      id: string,
-      opts?: { forceRecompute?: boolean; profileOverride?: Record<string, any> }
-    ): Promise<void> => {
+    fetchSession: async (id: string, opts?: LoadSessionOpts): Promise<void> => {
       await runLoadSession(id, opts);
     },
   };
