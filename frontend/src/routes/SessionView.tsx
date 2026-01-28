@@ -582,17 +582,44 @@ const RealSessionView: React.FC = () => {
   }
 
   if (!currentSession) {
-    return (
-      <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-4">
+  const isRateLimited = errorSession === "STRAVA_RATE_LIMITED";
+
+  const retryText = retryAt
+    ? `Prøv igjen kl ${retryAt.toLocaleTimeString("nb-NO", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`
+    : "Prøv igjen litt senere.";
+
+  return (
+    <div className="session-view max-w-4xl mx-auto px-4 py-6 space-y-4">
+      {isRateLimited ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <div className="font-semibold">Strava rate limit nådd</div>
+          <div className="text-sm opacity-80">{retryText}</div>
+        </div>
+      ) : (
         <div className="text-sm text-slate-500">
           Ingen øktdata tilgjengelig ennå.
         </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => loadSession(String(id))}
+          className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+        >
+          Last på nytt
+        </button>
+
         <Link className="underline" to={ROUTES.RIDES}>
           ← Tilbake til økter
         </Link>
       </div>
-    );
-  }
+    </div>
+  );
+}
+
 
   // Analyze-SSOT
   const session: SessionReport = currentSession;
