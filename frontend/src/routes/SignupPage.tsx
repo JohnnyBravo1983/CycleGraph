@@ -37,8 +37,6 @@ export default function SignupPage() {
 
   function mapSignupError(err: unknown): string {
     const anyErr = err as any;
-
-    // ApiError from cgApi (has .status)
     const status = typeof anyErr?.status === "number" ? (anyErr.status as number) : null;
 
     if (status === 409) return "E-post er allerede i bruk. Prøv å logge inn.";
@@ -47,7 +45,6 @@ export default function SignupPage() {
     const msg = String(anyErr?.message ?? err ?? "");
     if (!msg) return "Ukjent feil ved registrering";
 
-    // Slightly nicer network message
     if (msg.toLowerCase().includes("failed to fetch")) {
       return "Kunne ikke kontakte server. Sjekk at backend kjører.";
     }
@@ -66,13 +63,8 @@ export default function SignupPage() {
 
     setSubmitting(true);
     try {
-      // 1) Create account in backend
       await cgApi.authSignup(email.trim(), password);
-
-      // 2) Verify session is established (DoD: /api/auth/me -> 200)
       await cgApi.authMe();
-
-      // 3) Redirect explicitly to onboarding (Task 1.6 scope)
       window.location.assign("/onboarding");
       return;
     } catch (err) {
@@ -83,102 +75,179 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto">
-      <h1 className="text-2xl font-semibold tracking-tight mb-2">Opprett konto</h1>
-      <p className="text-sm text-slate-600 mb-6">
-        Lag en konto for å lagre profil og analysere økter.
-      </p>
+    <div 
+      className="min-h-screen flex items-center justify-center px-4 py-12 relative overflow-hidden"
+      style={{
+        backgroundImage:
+          "linear-gradient(135deg, rgba(99, 102, 241, 0.92) 0%, rgba(168, 85, 247, 0.88) 100%), url('https://images.unsplash.com/photo-1541625602330-2277a4c46182?auto=format&fit=crop&w=1920&q=80')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      {/* Overlay for bedre lesbarhet */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
 
-      {error && (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Fullt navn</label>
-          <input
-            className="w-full rounded-xl border px-3 py-2"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="Johnny Strømøe"
-            autoComplete="name"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Sykkelnavn</label>
-          <input
-            className="w-full rounded-xl border px-3 py-2"
-            value={bikeName}
-            onChange={(e) => setBikeName(e.target.value)}
-            placeholder="Tarmac SL7"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">E-post</label>
-          <input
-            className="w-full rounded-xl border px-3 py-2"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="deg@epost.no"
-            autoComplete="email"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Passord (minst 8 tegn)
-          </label>
-          <input
-            className="w-full rounded-xl border px-3 py-2"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            autoComplete="new-password"
-          />
-        </div>
-
-        <label className="flex items-start gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-          />
-          <span>
-            Jeg samtykker til at CycleGraph kan bruke mine Strava-aktiviteter for å analysere trening.
-          </span>
-        </label>
-
-        <button
-          type="submit"
-          disabled={!canContinue}
-          className={`w-full rounded-xl px-4 py-2 text-sm font-semibold ${
-            canContinue
-              ? "bg-slate-900 text-white hover:bg-slate-800"
-              : "bg-slate-200 text-slate-500 cursor-not-allowed"
-          }`}
-        >
-          {submitting ? "Oppretter..." : "Bekreft og gå videre"}
-        </button>
-
-        <div className="text-sm text-slate-600 flex items-center justify-between">
-          <span>Har du konto allerede?</span>
-          <Link className="text-slate-900 font-medium" to="/login">
-            Logg inn
+      {/* Form Container */}
+      <div className="relative z-10 w-full max-w-md">
+        {/* Logo */}
+        <div className="mb-8 flex justify-center">
+          <Link to="/" className="relative group">
+            <div className="absolute -inset-4 rounded-2xl bg-white/10 blur-2xl transition-all duration-300 group-hover:bg-white/15" />
+            <div className="relative rounded-2xl border-2 border-white/30 bg-white/10 px-6 py-4 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] ring-2 ring-white/20 transition-all duration-300 group-hover:border-white/40">
+              <img
+                src="/CycleGraph_Logo.png"
+                alt="CycleGraph"
+                className="h-16 w-auto object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.5)]"
+              />
+            </div>
           </Link>
         </div>
 
-        {/* Dev helper */}
+        {/* Glass Card */}
+        <div className="rounded-3xl border-2 border-white/25 bg-white/95 backdrop-blur-2xl shadow-[0_25px_80px_rgba(0,0,0,0.5)] ring-2 ring-white/30 p-8">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">
+              Opprett konto
+            </h1>
+            <p className="text-sm text-slate-600 font-medium">
+              Lag en konto for å lagre profil og analysere økter
+            </p>
+          </div>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="mb-6 rounded-2xl border-2 border-red-300 bg-gradient-to-br from-red-50 to-red-100 px-4 py-3.5 text-sm text-red-800 font-medium shadow-lg">
+              {error}
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Fullt navn
+              </label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Johnny Strømøe"
+                autoComplete="name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Sykkelnavn
+              </label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={bikeName}
+                onChange={(e) => setBikeName(e.target.value)}
+                placeholder="Tarmac SL7"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                E-post
+              </label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="deg@epost.no"
+                autoComplete="email"
+                type="email"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Passord <span className="text-slate-500 font-medium">(minst 8 tegn)</span>
+              </label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type="password"
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
+            </div>
+
+            {/* Consent Checkbox */}
+            <label className="flex items-start gap-3 p-4 rounded-xl bg-slate-50 border-2 border-slate-200 cursor-pointer transition-all duration-200 hover:bg-slate-100 hover:border-indigo-300">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 rounded border-2 border-slate-300 text-indigo-600 focus:ring-2 focus:ring-indigo-200 cursor-pointer"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+              />
+              <span className="text-sm text-slate-700 font-medium leading-relaxed">
+                Jeg samtykker til at CycleGraph kan bruke mine Strava-aktiviteter for å analysere trening
+              </span>
+            </label>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={!canContinue}
+              className={`w-full rounded-xl px-6 py-4 text-base font-black tracking-tight transition-all duration-300 ${
+                canContinue
+                  ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-[0_10px_40px_rgba(99,102,241,0.4)] hover:-translate-y-1 hover:shadow-[0_15px_50px_rgba(99,102,241,0.5)] active:translate-y-0"
+                  : "bg-slate-200 text-slate-400 cursor-not-allowed"
+              }`}
+            >
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Oppretter...
+                </span>
+              ) : (
+                "Bekreft og gå videre"
+              )}
+            </button>
+          </form>
+
+          {/* Login Link */}
+          <div className="mt-6 pt-6 border-t-2 border-slate-200 text-center">
+            <span className="text-sm text-slate-600 font-medium">
+              Har du konto allerede?{" "}
+              <Link 
+                className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors" 
+                to="/login"
+              >
+                Logg inn
+              </Link>
+            </span>
+          </div>
+        </div>
+
+        {/* Back to Home Link */}
+        <div className="mt-6 text-center">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 text-sm font-bold text-white/90 hover:text-white transition-colors group"
+          >
+            <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Tilbake til forsiden
+          </Link>
+        </div>
+
+        {/* Dev Helper */}
         {import.meta.env.DEV && (
-          <pre className="mt-4 text-xs text-slate-500 whitespace-pre-wrap">
+          <pre className="mt-4 rounded-xl bg-black/50 backdrop-blur-xl px-4 py-3 text-xs text-white/80 font-mono overflow-auto">
             {JSON.stringify(reasons, null, 2)}
           </pre>
         )}
-      </form>
+      </div>
     </div>
   );
 }
