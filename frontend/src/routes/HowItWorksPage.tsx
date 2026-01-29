@@ -27,7 +27,7 @@ function Card({
 }
 
 export const HowItWorksPage: React.FC = () => {
-  const demo = isDemoMode();
+  const demo = isDemoMode(); // beholdes hvis brukt andre steder
 
   const tuningParams = [
     "Drag (CdA) – rider positions: drops, hoods, climbing",
@@ -54,35 +54,21 @@ export const HowItWorksPage: React.FC = () => {
       <div className="mx-auto max-w-5xl">
         {/* HERO */}
         <div className="mb-8">
-          {/* Badge */}
-          <div className="inline-flex items-center rounded-full border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50 px-4 py-2 shadow-sm">
-            <span className="text-sm font-bold text-indigo-700">What this demo shows</span>
-          </div>
-
-          {/* Title */}
-          <h1 className="mt-6 text-5xl font-black tracking-tight text-slate-900 max-md:text-4xl">
+          <h1 className="mt-2 text-5xl font-black tracking-tight text-slate-900 max-md:text-4xl">
             🎯 Physics-based Precision
-            <span className="block mt-2 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-              (Beta)
-            </span>
           </h1>
 
-          {/* Subtitle */}
           <p className="mt-4 max-w-3xl text-lg leading-relaxed text-slate-700 font-medium">
             CycleGraph targets power estimation accuracy approaching – or exceeding – real power
             meters (typically <span className="font-black text-indigo-600">10 000+ NOK</span>)
             without the hardware cost.
           </p>
 
-          {/* Back Button */}
           <div className="mt-6">
             <Link
               to="/dashboard"
               className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
               Back to dashboard
             </Link>
           </div>
@@ -95,7 +81,7 @@ export const HowItWorksPage: React.FC = () => {
           </div>
 
           <div className="mt-3 text-base italic text-slate-700 font-medium">
-            Strong hypothesis based on extensive physics modeling and sanity testing. Awaiting
+            Strong hypothesis based on extensive physics modeling and testing. Awaiting
             benchmark validation against real power meter data.
           </div>
 
@@ -107,9 +93,12 @@ export const HowItWorksPage: React.FC = () => {
 
           <div className="mt-6 rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200 p-4 text-sm text-slate-700 font-medium">
             <span className="font-black text-slate-900">Note:</span> Accuracy depends on data quality (GPS,
-            elevation, weather, device streams). {demo && "This demo is offline and reproducible."}
+            elevation, weather, device streams).
           </div>
         </div>
+
+   
+
 
         {/* DEPTH + RESULT */}
         <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
