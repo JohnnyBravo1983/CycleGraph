@@ -5,10 +5,12 @@ import { Link, useNavigate } from "react-router-dom";
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
 
-  function goToLiveDemo() {
-    localStorage.setItem("cg_demo", "1");
-    navigate("/dashboard");
-  }
+  // Tidligere demo-navigasjon. Ikke i bruk etter opprydding.
+  // Beholdes midlertidig for å unngå å "glemme" demo-flyten helt.
+  // function goToLiveDemo() {
+  //   localStorage.setItem("cg_demo", "1");
+  //   navigate("/dashboard");
+  // }
 
   const fullBleed =
     "relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen";
@@ -28,22 +30,22 @@ export const LandingPage: React.FC = () => {
         <div className="absolute inset-0 bg-black/30" />
 
         <div className="relative z-10 mx-auto max-w-4xl px-6 text-center text-white">
-          {/* LOGO */}
-          <div className="mx-auto mb-5 flex items-center justify-center">
-            <div className="rounded-2xl border border-white/25 bg-white/10 px-4 py-3 backdrop-blur-md shadow-[0_10px_40px_rgba(0,0,0,0.25)]">
-              <img
-                src="/CycleGraph_Logo.png"
-                alt="CycleGraph"
-                className="h-14 w-auto object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.35)] max-md:h-12"
-              />
+          {/* LOGO (fattere/premium) */}
+          <div className="mx-auto mb-6 flex items-center justify-center">
+            <div className="relative">
+              {/* soft glow */}
+              <div className="absolute -inset-6 rounded-[2rem] bg-white/10 blur-2xl" />
+              <div className="relative rounded-[2rem] border border-white/25 bg-white/10 px-6 py-5 backdrop-blur-md shadow-[0_18px_70px_rgba(0,0,0,0.35)] ring-1 ring-white/15">
+                <img
+                  src="/CycleGraph_Logo.png"
+                  alt="CycleGraph"
+                  className="h-20 w-auto object-contain drop-shadow-[0_10px_30px_rgba(0,0,0,0.45)] max-md:h-16"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/20 px-5 py-2 text-sm font-semibold backdrop-blur-md">
-            🚀 Live Demo Preview
-          </div>
-
-          <h1 className="mt-6 text-5xl font-extrabold leading-[1.05] tracking-tight drop-shadow-[0_4px_20px_rgba(0,0,0,0.35)] max-md:text-4xl">
+          <h1 className="mt-2 text-5xl font-extrabold leading-[1.05] tracking-tight drop-shadow-[0_4px_20px_rgba(0,0,0,0.35)] max-md:text-4xl">
             Know your power.
             <br />
             Without the power meter.
@@ -57,23 +59,31 @@ export const LandingPage: React.FC = () => {
             using physics modeling — no expensive hardware required.
           </p>
 
-          <div className="mt-10">
+          {/* CTA (ikke demo-språk) */}
+          <div className="mt-10 flex flex-col items-center gap-3">
             <button
               type="button"
-              onClick={goToLiveDemo}
-              className="inline-flex items-center justify-center rounded-full bg-white px-10 py-4 text-lg font-extrabold text-[#667eea] shadow-[0_10px_40px_rgba(0,0,0,0.35)] transition-all hover:-translate-y-1 hover:bg-[#ffd700] hover:text-slate-900 hover:shadow-[0_15px_50px_rgba(0,0,0,0.45)] active:translate-y-0"
+              onClick={() => navigate("/signup")}
+              className="inline-flex items-center justify-center rounded-full bg-white px-10 py-4 text-lg font-extrabold text-slate-900 shadow-[0_10px_40px_rgba(0,0,0,0.35)] transition-all hover:-translate-y-1 hover:bg-[#ffd700] hover:text-slate-900 hover:shadow-[0_15px_50px_rgba(0,0,0,0.45)] active:translate-y-0"
             >
-              ⚡ View Live Demo
+              Get started
             </button>
 
-            <p className="mt-4 text-sm text-white/85">
-              Explore real training data • No signup required
+            <div className="text-sm text-white/90">
+              Already have an account?{" "}
+              <Link to="/login" className="font-semibold underline hover:text-white">
+                Log in
+              </Link>
+            </div>
+
+            <p className="mt-2 text-xs text-white/80">
+              No power meter required • Built for cyclists who love data
             </p>
           </div>
         </div>
       </section>
 
-      {/* LAUNCH INFO */}
+      {/* LAUNCH INFO (renset – fjerner demo-ordlyd) */}
       <section className="border-y-2 border-amber-500 bg-gradient-to-r from-amber-100 to-amber-200 px-6 py-7 text-center">
         <div className="mx-auto max-w-3xl">
           <p className="text-lg font-extrabold text-amber-900">
@@ -81,9 +91,8 @@ export const LandingPage: React.FC = () => {
           </p>
 
           <p className="mt-2 text-sm text-amber-900/90">
-            This is a live demo preview showcasing real training data. Stay tuned
-            for goal tracking, leaderboards, and precision analysis for your own
-            rides.
+            Shipping goal tracking, leaderboards, and precision analysis for your
+            own rides. Follow the journey on LinkedIn and GitHub.
           </p>
         </div>
       </section>
@@ -144,7 +153,7 @@ export const LandingPage: React.FC = () => {
             <span className="text-slate-500">·</span>
 
             <a
-              href="https://mail.google.com/mail/?view=cm&fs=1&to=johnny@cyclegraph.app&su=CycleGraph%20Live%20Demo%20Feedback"
+              href="https://mail.google.com/mail/?view=cm&fs=1&to=johnny@cyclegraph.app&su=CycleGraph%20Feedback"
               target="_blank"
               rel="noopener noreferrer"
               className="text-slate-300 hover:text-white hover:underline"
