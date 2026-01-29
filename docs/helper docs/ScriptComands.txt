@@ -42,7 +42,8 @@ og eventuelle tiltak. Pass på å snevre inn søk så output ikke blir for ekstr
  gjennom steg for steg sammen helt til vi er ferdige. Kjør på.
 
 
-
+export CG_AUTH='eyJ1aWQiOiJ1X0s2a1JZak9WS1BPTk1CWnpLZkRjaGciLCJleHAiOjE3NzAyNDQ2NDB9.Xs2dCvNk5Z86AMA4KgRwR2kXzxmOEAffArjUiQxZNdk'
+export CG_UID='u_K6kRYjOVKPONMBZzKfDchg'
 
 
 
