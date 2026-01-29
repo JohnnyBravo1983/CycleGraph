@@ -50,12 +50,13 @@ export const LandingPage: React.FC = () => {
 
           {/* SUBHEADING - Kortere & Sexier */}
           <p className="mt-8 mx-auto max-w-2xl text-xl leading-relaxed text-white/95 font-medium max-md:text-lg">
-            First-ever physics modeling that turns your rides into precise watt data.
+            First-ever physics modeling that turns your rides into precise watt
+            data.
             <br />
             <strong className="font-extrabold text-[#fbbf24] drop-shadow-[0_3px_10px_rgba(0,0,0,0.3)]">
               ~3–5% accuracy
-            </strong>
-            {" "}• Zero hardware. The future is here.
+            </strong>{" "}
+            • Zero hardware. The future is here.
           </p>
 
           {/* CTA - Fetere styling */}
@@ -71,8 +72,8 @@ export const LandingPage: React.FC = () => {
 
             <div className="text-base text-white/95 font-medium">
               Already have an account?{" "}
-              <Link 
-                to="/login" 
+              <Link
+                to="/login"
                 className="font-bold underline decoration-2 underline-offset-4 hover:text-[#fbbf24] transition-colors"
               >
                 Log in
@@ -101,23 +102,24 @@ export const LandingPage: React.FC = () => {
             Goal tracking, leaderboards, and precision analysis coming soon.
             <br className="max-md:hidden" />
             Follow the journey on{" "}
-            <a 
-              href="https://www.linkedin.com/in/johnny-str%C3%B8m%C3%B8-86b21881/" 
+            <a
+              href="https://www.linkedin.com/in/johnny-str%C3%B8m%C3%B8-86b21881/"
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold underline hover:text-amber-700"
             >
               LinkedIn
-            </a>
-            {" "}and{" "}
-            <a 
+            </a>{" "}
+            and{" "}
+            <a
               href="https://github.com/JohnnyBravo1983/CycleGraph"
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold underline hover:text-amber-700"
             >
               GitHub
-            </a>.
+            </a>
+            .
           </p>
         </div>
       </section>
@@ -127,7 +129,9 @@ export const LandingPage: React.FC = () => {
         <div className="mx-auto max-w-6xl">
           <div className="grid gap-8 md:grid-cols-3">
             <div className="group rounded-3xl border-2 border-slate-200 bg-white p-10 text-center transition-all duration-300 hover:-translate-y-2 hover:border-indigo-400 hover:shadow-[0_20px_60px_rgba(99,102,241,0.25)]">
-              <div className="text-6xl mb-2 transition-transform duration-300 group-hover:scale-110">🎯</div>
+              <div className="text-6xl mb-2 transition-transform duration-300 group-hover:scale-110">
+                🎯
+              </div>
               <h3 className="mt-5 text-2xl font-black text-slate-900">
                 ~3–5% Accuracy
               </h3>
@@ -137,7 +141,9 @@ export const LandingPage: React.FC = () => {
             </div>
 
             <div className="group rounded-3xl border-2 border-slate-200 bg-white p-10 text-center transition-all duration-300 hover:-translate-y-2 hover:border-indigo-400 hover:shadow-[0_20px_60px_rgba(99,102,241,0.25)]">
-              <div className="text-6xl mb-2 transition-transform duration-300 group-hover:scale-110">📊</div>
+              <div className="text-6xl mb-2 transition-transform duration-300 group-hover:scale-110">
+                📊
+              </div>
               <h3 className="mt-5 text-2xl font-black text-slate-900">
                 Track Progress
               </h3>
@@ -147,9 +153,11 @@ export const LandingPage: React.FC = () => {
             </div>
 
             <div className="group rounded-3xl border-2 border-slate-200 bg-white p-10 text-center transition-all duration-300 hover:-translate-y-2 hover:border-indigo-400 hover:shadow-[0_20px_60px_rgba(99,102,241,0.25)]">
-              <div className="text-6xl mb-2 transition-transform duration-300 group-hover:scale-110">🏆</div>
+              <div className="text-6xl mb-2 transition-transform duration-300 group-hover:scale-110">
+                🏆
+              </div>
               <h3 className="mt-5 text-2xl font-black text-slate-900">
-                Compare & Compete
+                Compare &amp; Compete
               </h3>
               <p className="mt-3 text-base text-slate-600 leading-relaxed font-medium">
                 Leaderboards built on precision metrics (coming at launch)
@@ -180,7 +188,7 @@ export const LandingPage: React.FC = () => {
 
             <span className="text-slate-700">·</span>
 
-            
+            <a
               href="https://mail.google.com/mail/?view=cm&fs=1&to=johnny@cyclegraph.app&su=CycleGraph%20Feedback"
               target="_blank"
               rel="noopener noreferrer"
@@ -191,7 +199,7 @@ export const LandingPage: React.FC = () => {
 
             <span className="text-slate-700">·</span>
 
-            
+            <a
               href="https://github.com/JohnnyBravo1983/CycleGraph"
               target="_blank"
               rel="noopener noreferrer"
@@ -202,7 +210,7 @@ export const LandingPage: React.FC = () => {
 
             <span className="text-slate-700">·</span>
 
-            
+            <a
               href="https://www.linkedin.com/in/johnny-str%C3%B8m%C3%B8-86b21881/"
               target="_blank"
               rel="noopener noreferrer"
