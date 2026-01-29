@@ -14,7 +14,6 @@ function parseTime(v?: string | null): number {
   const t = Date.parse(v);
   if (Number.isFinite(t)) return t;
 
-  // fallback for YYYY-MM-DD (should parse fine, but be safe)
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
   if (!m) return -1;
   const y = Number(m[1]);
@@ -38,7 +37,6 @@ function weatherBadge(
   return { label: s, tone: "neutral" };
 }
 
-// ✅ PATCH: varighet i minutter
 function minutesBetween(start?: string | null, end?: string | null): number | null {
   if (!start || !end) return null;
   const a = Date.parse(start);
@@ -48,7 +46,6 @@ function minutesBetween(start?: string | null, end?: string | null): number | nu
   return mins >= 0 ? mins : null;
 }
 
-// ✅ PATCH: "Strava-ish" formatters
 function formatStartDateTime(start?: string | null): string {
   if (!start) return "Ukjent";
   const t = Date.parse(start);
@@ -78,125 +75,131 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
 }) => {
   const cls =
     tone === "good"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      ? "border-emerald-300 bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-800 font-bold"
       : tone === "warn"
-      ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-slate-200 bg-slate-50 text-slate-700";
+      ? "border-amber-300 bg-gradient-to-r from-amber-50 to-amber-100 text-amber-800 font-bold"
+      : "border-slate-300 bg-gradient-to-r from-slate-50 to-slate-100 text-slate-700 font-medium";
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${cls}`}>
+    <span className={`inline-flex items-center rounded-full border-2 px-3 py-1 text-xs shadow-sm ${cls}`}>
       {children}
     </span>
   );
 };
 
 // -------------------------------
-// DEMO PAGE (uses demoRides SSOT)
+// DEMO PAGE
 // -------------------------------
 const DemoRidesPage: React.FC = () => {
-  // newest first
   const rows = useMemo(() => {
     return [...demoRides].sort((a, b) => b.date.localeCompare(a.date));
   }, []);
 
   return (
-    <div className="flex flex-col gap-6">
-      <section>
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">Rides</h1>
-        <p className="text-slate-600 max-w-xl">
-          Demo-visning av dine økter (hardcoded data). Viser {rows.length} økt(er).
-        </p>
-        <div className="mt-2 text-xs text-slate-500">
-          Kilde: <span className="font-mono">demoRides.ts</span>
-        </div>
-      </section>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 px-4 py-8">
+      <div className="mx-auto max-w-5xl">
+        {/* Header */}
+        <section className="mb-8">
+          <h1 className="text-4xl font-black tracking-tight text-slate-900 mb-3">
+            Your Rides
+          </h1>
+          <p className="text-lg text-slate-600 font-medium max-w-2xl">
+            Demo-visning av dine økter (hardcoded data). Viser {rows.length} økt(er).
+          </p>
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50 px-4 py-1.5 shadow-sm">
+            <span className="text-xs font-bold text-indigo-700">
+              Kilde: <span className="font-mono">demoRides.ts</span>
+            </span>
+          </div>
+        </section>
 
-      <section className="flex flex-col gap-2">
-        {rows.map((r) => {
-          const durationMin = r.duration > 0 ? Math.round(r.duration / 60) : 0;
-          const km = r.distance > 0 ? r.distance / 1000 : 0;
+        {/* Rides List */}
+        <section className="space-y-4">
+          {rows.map((r) => {
+            const durationMin = r.duration > 0 ? Math.round(r.duration / 60) : 0;
+            const km = r.distance > 0 ? r.distance / 1000 : 0;
 
-          return (
-            <Link
-              key={String(r.id)}
-              to={`/session/${r.id}`}
-              className={[
-                "group w-full rounded-xl border border-slate-200 bg-white",
-                "px-5 py-4 shadow-sm",
-                "transition-all duration-200 ease-out",
-                // ✅ PATCH B2: stronger hover shadow (Stripe/Linear-ish)
-                "hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.12)] hover:border-emerald-400",
-                "focus:outline-none focus:ring-2 focus:ring-emerald-200",
-              ].join(" ")}
-              aria-label={`Open ride ${r.name}`}
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                {/* Left */}
-                <div className="min-w-0">
-                  <div className="text-[16px] font-semibold text-slate-800 truncate">{r.name}</div>
+            return (
+              <Link
+                key={String(r.id)}
+                to={`/session/${r.id}`}
+                className="group block w-full rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-indigo-100"
+                aria-label={`Open ride ${r.name}`}
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  {/* Left */}
+                  <div className="min-w-0 space-y-2">
+                    <div className="text-xl font-black text-slate-900 truncate">{r.name}</div>
 
-                  <div className="mt-1 text-[14px] text-slate-500">
-                    {new Date(`${r.date}T12:00:00`).toLocaleDateString("nb-NO")} ·{" "}
-                    <span className="capitalize">{r.rideType.replace("-", " ")}</span>
+                    <div className="flex flex-wrap items-center gap-3 text-sm">
+                      <span className="text-slate-600 font-medium">
+                        📅 {new Date(`${r.date}T12:00:00`).toLocaleDateString("nb-NO")}
+                      </span>
+                      <span className="text-slate-400">•</span>
+                      <span className="capitalize text-indigo-600 font-bold">
+                        {r.rideType.replace("-", " ")}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-4 text-base">
+                      <span className="text-slate-700 font-semibold">
+                        🚴 {km.toFixed(1)} km
+                      </span>
+                      <span className="text-slate-400">•</span>
+                      <span className="text-slate-700 font-semibold">
+                        ⏱️ {durationMin} min
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="mt-1 text-[14px] text-slate-500">
-                    {km.toFixed(1)} km · {durationMin} min
+                  {/* Right */}
+                  <div className="flex shrink-0 flex-row items-center justify-between gap-4 sm:flex-col sm:items-end sm:justify-start">
+                    <div className="text-3xl font-black text-indigo-600 leading-none tracking-tight">
+                      {Math.round(r.precisionWatt)} W
+                    </div>
+
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 px-4 py-2 text-xs font-bold text-indigo-700 shadow-sm"
+                      title="Precision Watt (beta) · Target accuracy ~3–5% in good conditions"
+                    >
+                      <span className="text-base">⚡</span> Precision
+                    </div>
                   </div>
                 </div>
 
-                {/* Right */}
-                <div className="flex shrink-0 flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:justify-start">
-                  {/* ✅ PATCH B1: 22px + tracking-tight */}
-                  <div className="text-[22px] font-bold text-emerald-500 leading-none tracking-tight">
-                    {Math.round(r.precisionWatt)} W
-                  </div>
-
-                  {/* ✅ PATCH B3: title tooltip */}
-                  <div
-                    className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-600"
-                    title="Precision Watt (beta) · Target accuracy ~3–5% in good conditions"
-                  >
-                    <span aria-hidden>⚡</span> Precision
-                  </div>
+                <div className="mt-4 flex items-center gap-2 text-sm font-bold text-indigo-600 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                  <span>Open ride details</span>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
                 </div>
-              </div>
-
-              <div className="mt-3 text-[12px] text-slate-400 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                Open ride details →
-              </div>
-            </Link>
-          );
-        })}
-      </section>
+              </Link>
+            );
+          })}
+        </section>
+      </div>
     </div>
   );
 };
 
 // -------------------------------
-// REAL PAGE (unchanged)
+// REAL PAGE
 // -------------------------------
 const RealRidesPage: React.FC = () => {
   const navigate = useNavigate();
   const { sessionsList, loadingList, errorList, loadSessionsList } = useSessionStore();
 
-  // Track ui profile_version + reload list når den endres
   const [uiProfileVersion, setUiProfileVersion] = useState<string>("");
-
-  // DEV toggle (for console/debug)
   const [showDev, setShowDev] = useState<boolean>(false);
 
-  // Guards
   const lastReloadKeyRef = useRef<string>("");
   const didInitRef = useRef<boolean>(false);
 
-  // 1) Initial load
   useEffect(() => {
     loadSessionsList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2) Refresh ui profile_version
   useEffect(() => {
     let cancelled = false;
 
@@ -224,7 +227,6 @@ const RealRidesPage: React.FC = () => {
     };
   }, []);
 
-  // 3) Når profile_version endrer seg -> reload sessions list
   useEffect(() => {
     const pv = uiProfileVersion.trim();
     if (!pv) return;
@@ -247,176 +249,175 @@ const RealRidesPage: React.FC = () => {
 
   const rows = useMemo(() => {
     const raw = (sessionsList ?? []) as SessionListItem[];
-    // Sort newest first
     return [...raw].sort((a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null));
   }, [sessionsList]);
 
   if (loadingList) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <div className="text-sm text-slate-500">Laster økter…</div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 px-4 py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-2xl border-2 border-indigo-200 bg-white p-6 text-center shadow-lg">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-indigo-600 border-r-transparent"></div>
+            <p className="mt-4 text-lg font-bold text-slate-700">Laster økter…</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (errorList) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-3">
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm">{errorList}</div>
-        <button
-          type="button"
-          onClick={() => loadSessionsList()}
-          className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
-        >
-          Prøv igjen
-        </button>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 px-4 py-8">
+        <div className="mx-auto max-w-5xl space-y-4">
+          <div className="rounded-2xl border-2 border-red-300 bg-gradient-to-br from-red-50 to-red-100 p-6 shadow-lg">
+            <p className="text-base font-bold text-red-800">{errorList}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadSessionsList()}
+            className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-6 py-3 text-base font-bold text-slate-700 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg"
+          >
+            Prøv igjen
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
-      <header className="flex items-end justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Økter</h1>
-          <p className="text-sm text-slate-500">Viser {rows.length} økt(er)</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 px-4 py-8">
+      <div className="mx-auto max-w-5xl">
+        {/* Header */}
+        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-4xl font-black tracking-tight text-slate-900">Økter</h1>
+            <p className="text-lg text-slate-600 font-medium">Viser {rows.length} økt(er)</p>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs text-slate-400">
-              ui profile_version: <span className="font-mono">{uiProfileVersion || "n/a"}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowDev((v) => !v)}
-              className="text-xs text-slate-500 underline hover:text-slate-700"
-            >
-              {showDev ? "Skjul DEV" : "Vis DEV"}
-            </button>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => loadSessionsList()}
-          className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50"
-        >
-          Oppdater
-        </button>
-      </header>
-
-      {rows.length === 0 ? (
-        <div className="rounded-lg border bg-white p-4 text-sm text-slate-500">Ingen økter funnet.</div>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((s) => {
-            const sid = String(s.session_id ?? s.ride_id ?? "");
-            const wx = weatherBadge(s.weather_source ?? null);
-
-            const distOk = typeof s.distance_km === "number" && Number.isFinite(s.distance_km);
-            const wattOk =
-              typeof s.precision_watt_avg === "number" && Number.isFinite(s.precision_watt_avg);
-
-            const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
-
-            // ✅ PATCH: time range + mins + km
-            const mins = minutesBetween(s.start_time ?? null, (s as any).end_time ?? null);
-            const startTxt = formatStartDateTime(s.start_time ?? null);
-            const endTxt = formatEndTime((s as any).end_time ?? null);
-
-            const timeRange =
-              endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
-
-            const kmTxt = distOk ? `${(s.distance_km as number).toFixed(1)} km` : "—";
-
-            return (
-              <div
-                key={sid}
-                role="button"
-                tabIndex={0}
-                onClick={open}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") open();
-                }}
-                className="group rounded-xl border bg-white p-4 hover:bg-slate-50/60 cursor-pointer"
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="inline-flex items-center gap-2 rounded-full border-2 border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm">
+                ui profile_version: <span className="font-mono font-bold">{uiProfileVersion || "n/a"}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDev((v) => !v)}
+                className="text-xs font-bold text-indigo-600 underline hover:text-indigo-700"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 space-y-2">
-                    {/* Headline */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-sm font-semibold text-slate-900">{timeRange}</div>
+                {showDev ? "Skjul DEV" : "Vis DEV"}
+              </button>
+            </div>
+          </div>
 
-                      <Badge tone={wx.tone}>Vær: {wx.label}</Badge>
-                      <Badge tone="neutral">Profil: {s.profile_label ?? "ukjent"}</Badge>
+          <button
+            type="button"
+            onClick={() => loadSessionsList()}
+            className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Oppdater
+          </button>
+        </header>
+
+        {rows.length === 0 ? (
+          <div className="rounded-2xl border-2 border-slate-200 bg-white p-8 text-center shadow-lg">
+            <p className="text-lg font-medium text-slate-600">Ingen økter funnet.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {rows.map((s) => {
+              const sid = String(s.session_id ?? s.ride_id ?? "");
+              const wx = weatherBadge(s.weather_source ?? null);
+
+              const distOk = typeof s.distance_km === "number" && Number.isFinite(s.distance_km);
+              const wattOk =
+                typeof s.precision_watt_avg === "number" && Number.isFinite(s.precision_watt_avg);
+
+              const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
+
+              const mins = minutesBetween(s.start_time ?? null, (s as any).end_time ?? null);
+              const startTxt = formatStartDateTime(s.start_time ?? null);
+              const endTxt = formatEndTime((s as any).end_time ?? null);
+
+              const timeRange =
+                endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+
+              const kmTxt = distOk ? `${(s.distance_km as number).toFixed(1)} km` : "—";
+
+              return (
+                <div
+                  key={sid}
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") open();
+                  }}
+                  className="group rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-xl cursor-pointer"
+                >
+                  <div className="flex items-start justify-between gap-6">
+                    <div className="min-w-0 space-y-3">
+                      {/* Headline */}
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="text-base font-black text-slate-900">{timeRange}</div>
+                        <Badge tone={wx.tone}>Vær: {wx.label}</Badge>
+                        <Badge tone="neutral">Profil: {s.profile_label ?? "ukjent"}</Badge>
+                      </div>
+
+                      {/* Metrics */}
+                      <div className="flex flex-wrap gap-x-8 gap-y-2 text-base">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 font-medium">🚴 Km:</span>
+                          <span className="font-black text-slate-900">{kmTxt}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 font-medium">⚡ Precision Watt:</span>
+                          <span className="font-black text-indigo-600">
+                            {wattOk ? `${fmtNum(s.precision_watt_avg, 0)} W` : "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* DEV details */}
+                      {showDev && (
+                        <div className="mt-3 rounded-xl border-2 border-slate-200 bg-slate-50 p-4 text-xs space-y-1 font-mono text-slate-600">
+                          <div><span className="font-bold">session_id:</span> {sid}</div>
+                          <div><span className="font-bold">ride_id:</span> {String(s.ride_id ?? "")}</div>
+                          <div><span className="font-bold">weather_source:</span> {String(s.weather_source ?? "")}</div>
+                          <div><span className="font-bold">start_time:</span> {String(s.start_time ?? "")}</div>
+                          <div><span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}</div>
+                          <div><span className="font-bold">mins:</span> {mins == null ? "—" : String(mins)}</div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Metrics */}
-                    <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-700">
-                      <div>
-                        <span className="text-slate-500">Km:</span>{" "}
-                        <span className="font-medium text-slate-900">{kmTxt}</span>
+                    {/* CTA */}
+                    <div className="flex flex-col items-end gap-3 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          open();
+                        }}
+                        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-3 text-sm font-black text-white shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                      >
+                        Åpne
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                      <div className="text-xs text-slate-400 font-medium group-hover:text-slate-600 transition-colors">
+                        ID: <span className="font-mono font-bold">{sid}</span>
                       </div>
-
-                      <div>
-                        <span className="text-slate-500">Precision Watt:</span>{" "}
-                        <span className="font-medium text-slate-900">
-                          {wattOk ? `${fmtNum(s.precision_watt_avg, 0)} W` : "—"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* DEV details */}
-                    {showDev ? (
-                      <div className="mt-2 rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
-                        <div>
-                          <span className="text-slate-500">session_id:</span>{" "}
-                          <span className="font-mono">{sid}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">ride_id:</span>{" "}
-                          <span className="font-mono">{String(s.ride_id ?? "")}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">weather_source:</span>{" "}
-                          <span className="font-mono">{String(s.weather_source ?? "")}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">start_time(raw):</span>{" "}
-                          <span className="font-mono">{String(s.start_time ?? "")}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">end_time(raw):</span>{" "}
-                          <span className="font-mono">{String((s as any).end_time ?? "")}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">mins:</span>{" "}
-                          <span className="font-mono">{mins == null ? "—" : String(mins)}</span>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {/* CTA */}
-                  <div className="flex flex-col items-end gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        open();
-                      }}
-                      className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-white"
-                    >
-                      Åpne →
-                    </button>
-                    <div className="text-xs text-slate-400 group-hover:text-slate-500">
-                      ID: <span className="font-mono">{sid}</span>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

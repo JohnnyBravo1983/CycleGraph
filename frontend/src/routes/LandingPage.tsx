@@ -40,7 +40,7 @@ export const LandingPage: React.FC = () => {
             Revolutionary Power Analysis.
             <br />
             <span className="bg-gradient-to-r from-white via-blue-100 to-white bg-clip-text text-transparent">
-              No €800 Meter Required.
+              No expensive power meter required.
             </span>
           </h1>
 
