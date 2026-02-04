@@ -26,6 +26,10 @@ viktige comands fly
 fly machine start 286ed97be1d938 -a cyclegraph-api
 ## start fly terminal 
 fly ssh console -a cyclegraph-api
+## start fly backend 
+fly logs -a cyclegraph-api
+
+
 
 https://api.cyclegraph.app/api/sessions/list/all?debug=1
 

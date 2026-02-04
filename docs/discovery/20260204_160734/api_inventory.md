@@ -1,0 +1,169 @@
+﻿# API Inventory
+Generated: 2026-02-04T16:08:33
+
+
+## Server: APIRouter routes (top 120 hits)
+
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:18  router = APIRouter(prefix="/api/auth", tags=["auth"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:59  @router.post("/signup")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:111  @router.post("/login")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:146  @router.post("/logout")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:185  @router.get("/me")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:21  router = APIRouter()
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:244  @router.get("/status")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:275  @router.get("/login")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:315  @router.get("/callback")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:387  @router.get("/api/auth/strava/login")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:408  @router.get("/api/auth/strava/callback")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\profile_router.py:10  router = APIRouter(prefix="/api/profile", tags=["profile"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\profile_router.py:13  @router.get("/get")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\profile_router.py:24  @router.put("/save")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:749  router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1121  @router.get("/list")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1122  @router.get("")  # ✅ ALIAS: /api/sessions (same handler as /api/sessions/list)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1722  @router.post("/debug/rb")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2016  @router.post("/{sid}/analyze")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3504  @router.post("/{sid}/analyze_sessionspy")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3540  @router.get("/{session_id}")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:18  router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1121  @router.get("")        # ✅ ALIAS: /api/sessions
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1122  @router.get("/list")   # ✅ Original: /api/sessions/list
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1177  @router.get("/list/all")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1217  @router.get("/list/_debug_paths")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:17  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:700  @router.post("/sync")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:1015  @router.post("/import/{rid}")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:16  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:629  @router.post("/sync")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:925  @router.post("/import/{rid}")
+
+## Server: explicit '/api' strings (top 120)
+
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:64  Prøv API-liste først (/api/sessions/list). Fallback: glob av session_*.json.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:68  url1 = f"{server_base}/api/sessions/list"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:104  Kaller /api/sessions/{sid}/analyze. Vi sender minimal payload – server har robust body-coercion.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:112  url = f"{server_base}/api/sessions/{sid}/analyze"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:76  r = httpx.get(f"{url_base}/api/profile/get", timeout=10)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:262  url = f"{url_base}/api/sessions/{ride_id}/analyze"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:18  router = APIRouter(prefix="/api/auth", tags=["auth"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:204  return f"http://{host}:5175/api/auth/strava/callback"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:387  @router.get("/api/auth/strava/login")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:408  @router.get("/api/auth/strava/callback")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\profile_router.py:10  router = APIRouter(prefix="/api/profile", tags=["profile"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:526  Bruk samme SSOT som /api/profile/get (profile_router).
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:749  router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1122  @router.get("")  # ✅ ALIAS: /api/sessions (same handler as /api/sessions/list)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3524  "message": "This endpoint is deprecated. Use POST /api/sessions/{sid}/analyze.",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3525  "recommended_endpoint": f"/api/sessions/{sid}/analyze",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:18  router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:870  url = f"https://www.strava.com/api/v3/activities/{sid}"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1121  @router.get("")        # ✅ ALIAS: /api/sessions
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1122  @router.get("/list")   # ✅ Original: /api/sessions/list
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:17  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:19  STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:663  url = f"{base}/api/sessions/{rid}/analyze?debug=1"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:16  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:18  STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:592  url = f"{base}/api/sessions/{rid}/analyze?debug=1"
+
+## Server: explicit '/api' strings (top 120)
+
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:64  Prøv API-liste først (/api/sessions/list). Fallback: glob av session_*.json.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:68  url1 = f"{server_base}/api/sessions/list"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:104  Kaller /api/sessions/{sid}/analyze. Vi sender minimal payload – server har robust body-coercion.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:112  url = f"{server_base}/api/sessions/{sid}/analyze"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:76  r = httpx.get(f"{url_base}/api/profile/get", timeout=10)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:262  url = f"{url_base}/api/sessions/{ride_id}/analyze"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_local.py:18  router = APIRouter(prefix="/api/auth", tags=["auth"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:204  return f"http://{host}:5175/api/auth/strava/callback"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:387  @router.get("/api/auth/strava/login")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:408  @router.get("/api/auth/strava/callback")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\profile_router.py:10  router = APIRouter(prefix="/api/profile", tags=["profile"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:526  Bruk samme SSOT som /api/profile/get (profile_router).
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:749  router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1122  @router.get("")  # ✅ ALIAS: /api/sessions (same handler as /api/sessions/list)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3524  "message": "This endpoint is deprecated. Use POST /api/sessions/{sid}/analyze.",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3525  "recommended_endpoint": f"/api/sessions/{sid}/analyze",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:18  router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:870  url = f"https://www.strava.com/api/v3/activities/{sid}"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1121  @router.get("")        # ✅ ALIAS: /api/sessions
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1122  @router.get("/list")   # ✅ Original: /api/sessions/list
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:17  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:19  STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:663  url = f"{base}/api/sessions/{rid}/analyze?debug=1"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:16  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:18  STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:592  url = f"{base}/api/sessions/{rid}/analyze?debug=1"
+
+## Server: 'strava' (top 150)
+
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\export13.py:136  device = profile_used.get("device") or result_obj.get("device") or "strava"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\trend9.py:120  # device: toppnivå -> profile_used.device -> default "strava"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\trend9.py:125  device = "strava"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:35  STRAVA_AUTH_URL = "https://www.strava.com/oauth/authorize"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:36  STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:204  return f"http://{host}:5175/api/auth/strava/callback"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:232  detail=f"Strava token exchange failed: HTTP {r.status_code}: {r.text[:400]}",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:237  raise HTTPException(status_code=502, detail=f"Strava response missing {k}")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:281  Starter Strava OAuth for INNLOGGET bruker.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:324  Strava redirect callback.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:332  raise HTTPException(status_code=400, detail=f"Strava OAuth error: {error}")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:335  raise HTTPException(status_code=400, detail="Missing ?code from Strava")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:374  "next": "Strava tokens saved for this authenticated user.",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:386  # --- ALIASES for legacy Strava redirect paths ---
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:387  @router.get("/api/auth/strava/login")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:408  @router.get("/api/auth/strava/callback")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:947  senere kan vi hente fra Strava activity summary når OAuth er live.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1253  if (device or "").lower() != "strava": return samples
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1269  DEFAULT_DEVICE = "strava"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1272  """Normaliser profil og lås device til 'strava' hvis mangler (ikke overstyr eksplisitt input)."""
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2047  # Hvis force_recompute=true men vi mangler all input, så skal vi gi 409 (ikke prøve Strava).
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2057  # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2063  # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2078  # Kun når self_heal=true: Hvis analyze mangler input, fetch fra Strava via import-pipeline
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2086  # Reuse existing Strava import pipeline (tokens refresh + fetch + build samples + write session)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:180  Strava activity JSON har vanligvis 'distance' i meter.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:724  strava = doc.get("strava") or {}
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:737  sd = _to_float(strava.get("distance"))
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:772  st2 = (strava.get("start_date") or doc.get("start_date"))
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:835  # PATCH: sessions_meta.json + Strava activity fallback + cache
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:870  url = f"https://www.strava.com/api/v3/activities/{sid}"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:968  # If missing, fetch from Strava once + cache
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:987  debug_src = "sessions_meta+strava"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1189  og fallback til Strava activity én gang per session hvis mangler.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:17  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:19  STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:20  STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:26  # common cycling sports in Strava
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:37  # Strava can return both "sport_type" and "type" depending on endpoint
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:291  # Strava lock helpers (SSOT)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:319  # strava api (med auto-refresh + retry + 429 handling)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:325  # 0) Lock gate (do NOT call Strava when locked)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:344  f"[STRAVA] LOCKED (skip request) endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:379  f"[STRAVA] resp status={r.status_code} endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:417  f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:452  f"[STRAVA] resp status={r.status_code} endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:464  f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:709  page: int = Query(1, ge=1, le=200, description="Strava paging (1..). One page per call."),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:710  per_page: int = Query(50, ge=1, le=200, description="Strava per_page."),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:734  # One Strava page per call (resumable)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:977  "strava": {
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:16  router = APIRouter(prefix="/api/strava", tags=["strava-import"])
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:18  STRAVA_AUTH_BASE = "https://www.strava.com/api/v3"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:19  STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:25  # common cycling sports in Strava
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:36  # Strava can return both "sport_type" and "type" depending on endpoint
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:278  # strava api (med auto-refresh + 429 handling)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:282  # --- Strava lock (per user) ---
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:289  # Pre-check lock: hvis vi allerede vet vi er låst i dag, ikke ring Strava
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:299  f"[STRAVA] LOCKED (skip request) endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:337  f"[STRAVA] resp status={r.status_code} endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:343  # (Strava daily limit resets by day; we pick UTC midnight as a safe simple boundary)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:379  f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:414  f"[STRAVA] resp status={r.status_code} endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:426  f"[STRAVA] 429 rate limit FAIL-FAST endpoint={path} "
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:638  page: int = Query(1, ge=1, le=200, description="Strava paging (1..). One page per call."),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:639  per_page: int = Query(50, ge=1, le=200, description="Strava per_page."),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:663  # One Strava page per call (resumable)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router_for_commit.py:887  "strava": {
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\utils\versioning.py:17  "device": "strava",

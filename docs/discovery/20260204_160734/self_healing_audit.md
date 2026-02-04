@@ -1,0 +1,166 @@
+﻿# Self-healing Audit
+Generated: 2026-02-04T16:09:02
+
+
+## 'analy' + http/requests/strava keywords (top 160)
+
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\analyzer.py:1  # server/analysis/analyzer.py
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\analyzer.py:63  print("[ANALYZER-DEBUG] metrics keys before return:", list(m.keys()))
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\analyzer.py:67  def analyze_series(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\analyzer.py:86  "analyzer_mode": "series",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\export13.py:1  # server/analysis/export13.py
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:1  # server/analysis/final14.py
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:70  with httpx.Client(follow_redirects=True, timeout=30.0) as cx:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:100  # Analyze sweep
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:102  def analyze_one(server_base: str, sid: str, frozen_weather: bool, force_recompute: bool) -> Optional[Dict[str, Any]]:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:104  Kaller /api/sessions/{sid}/analyze. Vi sender minimal payload – server har robust body-coercion.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:112  url = f"{server_base}/api/sessions/{sid}/analyze"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:116  with httpx.Client(follow_redirects=True, timeout=300.0) as cx:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:129  _log(f"Analyze {i}/{len(sids)} sid={sid} ...")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:130  res = analyze_one(server_base, sid, frozen_weather, force_recompute)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\final14.py:245  ap.add_argument("--force", action="store_true", help="force_recompute analyzer=true")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:1  # server/analysis/t11_matrix.py
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:61  resp = httpx.get(health_url, timeout=2.0)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:76  r = httpx.get(f"{url_base}/api/profile/get", timeout=10)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:261  def _analyze_one(url_base: str, ride_id: str, profile: dict, frozen: bool) -> dict | None:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:262  url = f"{url_base}/api/sessions/{ride_id}/analyze"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:284  with httpx.Client(timeout=30.0) as client:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:289  print(f"[T11] analyze failed ride={ride_id}: {e}", file=sys.stderr)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\t11_matrix.py:344  resp = _analyze_one(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\trend9.py:7  # Obligatoriske metrikker vi ønsker inn i analysen
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\analysis\trend9.py:224  if "manual_sanity" in lname or "analyze" in lname or "session" in lname:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\models\schemas.py:22  analyzer_mode: Literal["series","single","unknown"] = "series"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\models\schemas.py:27  class AnalyzeResponse(BaseModel):
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:188  explicit = os.getenv("STRAVA_REDIRECT_URI") or os.getenv("CG_STRAVA_REDIRECT_URI")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\auth_strava.py:228  r = requests.post(STRAVA_TOKEN_URL, data=payload, timeout=30)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:17  from server.routes.strava_import_router import _import_one as _strava_import_one
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:107  SSOT: Persist result to user-scoped state so /rides can backfill without re-analyze.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:535  # Sørg for at analyze får core-feltene den forventer
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:592  "raw_streams":   os.path.join(root, "data", "raw", f"streams_{sid}.json"),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:642  exists.get("raw_streams", False),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:653  def _probe_streams_file(path: str) -> dict:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:655  Les streams.json og returner diagnostisk informasjon om innholdet.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:665  streams_top_keys = list(data.keys())
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:666  streams_has_data_keys = []
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:673  streams_has_data_keys.append(key)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:684  "streams_top_keys": streams_top_keys,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:685  "streams_has_data_keys": streams_has_data_keys,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:699  # ==================== END STREAMS PROBE HELPER ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1037  Laster analysert resultat for en gitt session_id, men kun hvis session_id tilhører user_id
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1158  # Bruk samme logikk som /sessions/{id} for å hente analysert resultat
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1609  Missing input guard for analyze. Must raise 409 with a machine-readable payload.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:1732  "message": "This endpoint is disabled. Use supported analyze endpoints.",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2015  # ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2016  @router.post("/{sid}/analyze")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2017  async def analyze_session(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2029  print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}", file=sys.stderr)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2030  print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2031  print(f"[SVR] HIT /sessions/{sid}/analyze force_recompute={force_recompute} debug={debug}", file=sys.stderr)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2057  # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2058  # Analyze skal være "ren" som default:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2059  # - Hvis vi mangler input (ingen session/result/streams/activity), skal vi STOPPE med 409
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2063  # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2064  # Analyze skal være "ren" som default:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2065  # - Hvis vi mangler input (ingen session/result/streams/activity), skal vi STOPPE med 409
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2077  # ==================== PATCH 3b: SELF-HEALING ANALYZE (EXPLICIT ONLY) ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2078  # Kun når self_heal=true: Hvis analyze mangler input, fetch fra Strava via import-pipeline
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2079  # og skriv session til persistent state før vi fortsetter analyse.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2087  out = _strava_import_one(uid=user_id, rid=str(sid), cg_auth=cg_auth, analyze=False)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2089  # Etter import, oppdater availability slik at resten av analyze finner session
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2107  f"[SVR] >>> ANALYZE ENTER sid={sid} force_recompute={force_recompute}",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2347  # ==================== ORIGINAL ANALYZE LOGIC ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2449  "streams_probe": None,  # Nytt felt for streams probe
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2469  avail["paths"].get("raw_streams"),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2537  # ==================== PATCH A: STREAMS PROBE NÅR SAMPLES_LEN == 0 ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2538  # Kjør streams probe bare når samples_len == 0 og vi er i debug-modus eller har streams-fil
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2540  # Sjekk om input_used er en streams.json fil
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2541  if input_used and isinstance(input_used, str) and "streams_" in input_used and input_used.endswith(".json"):
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2543  streams_probe = _probe_streams_file(input_used)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2544  input_debug_info["streams_probe"] = streams_probe
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2545  print(f"[SVR][PROBE] streams probe for {sid}: {streams_probe}", file=sys.stderr)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2547  input_debug_info["streams_probe_error"] = str(e)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2548  print(f"[SVR][PROBE] streams probe failed for {sid}: {e}", file=sys.stderr)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2549  # Sjekk også om body har streams (for request body case)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2550  elif isinstance(body, dict) and "streams" in body and isinstance(body["streams"], dict):
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2551  # Analyser streams direkte fra body
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2552  streams_data = body["streams"]
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2553  streams_top_keys = list(streams_data.keys())
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2554  streams_has_data_keys = []
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2558  for key, value in streams_data.items():
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2560  streams_has_data_keys.append(key)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2569  input_debug_info["streams_probe"] = {
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2571  "streams_top_keys": streams_top_keys,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2572  "streams_has_data_keys": streams_has_data_keys,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2575  "has_velocity_smooth": "velocity_smooth" in streams_data,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2576  "has_latlng": "latlng" in streams_data,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2577  "has_time": "time" in streams_data,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2578  "has_altitude": "altitude" in streams_data,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2579  "has_distance": "distance" in streams_data,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2582  # Legg til streams_keys hvis body har streams
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2583  if isinstance(body, dict) and "streams" in body and isinstance(body["streams"], dict):
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2584  input_debug_info["streams_keys"] = list(body["streams"].keys())
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2667  # print("[ANALYZE] cookies keys=", list(request.cookies.keys()))
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2668  # print("[ANALYZE] cg_uid=", request.cookies.get("cg_uid"))
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2769  # HVIS wx_err er satt, deaktiver vær og fortsett analyse, ikke returner feil.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2771  # Weather canonicalization errors must NOT stop analyze.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:2772  # Fallback: run analyze without weather.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3499  # ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3504  @router.post("/{sid}/analyze_sessionspy")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3505  async def analyze_session_sessionspy(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3517  🚫 Deprecated endpoint. Keep for compatibility but do not execute analysis.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3524  "message": "This endpoint is deprecated. Use POST /api/sessions/{sid}/analyze.",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3525  "recommended_endpoint": f"/api/sessions/{sid}/analyze",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions.py:3643  "analysis_source": source,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:79  SSOT for analyze output in prod container.
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:621  for k in ("result", "analysis", "data", "doc"):
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:767  "analyzed": True,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:855  def _load_user_strava_tokens(uid: str) -> dict | None:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:862  def _strava_get_activity(uid: str, sid: str) -> dict | None:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:863  tokens = _load_user_strava_tokens(uid)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:870  url = f"https://www.strava.com/api/v3/activities/{sid}"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:872  r = requests.get(url, headers={"Authorization": f"Bearer {access}"}, timeout=15)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:970  act = _strava_get_activity(uid, sid)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\sessions_list_router.py:1097  "analyzed": True,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:209  def _require_strava_client() -> tuple[str, str]:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:213  or os.getenv("CG_STRAVA_CLIENT_ID")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:219  or os.getenv("CG_STRAVA_CLIENT_SECRET")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:224  raise HTTPException(status_code=500, detail="missing_strava_client_env")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:229  cid, csec = _require_strava_client()
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:236  r = requests.post(STRAVA_TOKEN_URL, data=payload, timeout=15)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:298  def _read_strava_lock(uid: str) -> Optional[Dict[str, Any]]:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:309  def _write_strava_lock(uid: str, lock: Dict[str, Any]) -> None:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:322  def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -> Any:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:326  lock = _read_strava_lock(uid)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:368  r = requests.get(url, headers=headers, timeout=20)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:405  _write_strava_lock(uid, lock_payload)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:442  r = requests.get(url, headers=headers, timeout=20)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:494  def _fetch_activity_and_streams(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:497  meta = _strava_get(f"/activities/{rid}", uid, tokens, token_path)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:511  streams = _strava_get(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:512  f"/activities/{rid}/streams?keys={','.join(stream_keys)}&key_by_type=true",
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:517  return meta, streams
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:523  def _data_of(streams: Dict[str, Any], key: str) -> List[Any]:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:524  return (streams.get(key) or {}).get("data", []) if isinstance(streams, dict) else []
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:533  def _build_samples_v1(meta: Dict[str, Any], streams: Dict[str, Any]) -> List[Dict[str, Any]]:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:545  T = _data_of(streams, "time")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:546  LL = _data_of(streams, "latlng")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:547  ALT = _data_of(streams, "altitude")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:548  V = _data_of(streams, "velocity_smooth")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:549  G = _data_of(streams, "grade_smooth")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:550  HR = _data_of(streams, "heartrate")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:551  MOV = _data_of(streams, "moving")
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:632  # --- Patch 3C: write debug_session mirror for analyze input ---
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:659  # Patch 3D: internal analyze call MUST forward cg_auth (not cg_uid)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:661  def _trigger_analyze_local(rid: str, cg_auth: Optional[str]) -> Dict[str, Any]:
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:663  url = f"{base}/api/sessions/{rid}/analyze?debug=1"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:670  r = requests.post(url, json={}, cookies=cookies, timeout=60)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:701  def sync_strava_activities(
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:712  max_activities: int = Query(150, ge=1, le=150, description="Early onboarding cap (MVP)."),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:713  analyze: bool = Query(True, description="Run local analyze step for each ride."),
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:727  # Forward auth cookie into analyze call (same as /import/{rid})
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:736  f"/athlete/activities?after={after_ts}&before={before_ts}"
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:740  # ✅ PATCH: wrap _strava_get and convert 429 into resumable 200 payload
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:742  acts = _strava_get(url_path, uid, tokens, tp)
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:758  "max_activities": max_activities,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:787  "max_activities": max_activities,
+- C:\Users\easy2\OneDrive\Skrivebord\Archieve\Karriere\CycleGraph\server\routes\strava_import_router.py:798  # Enkelt "early onboarding cap": stopp etter max_activities basert på page/per_page
