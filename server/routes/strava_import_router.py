@@ -922,50 +922,7 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
             "reason": "non_cycling_activity",
         }
 
-    # Now it's safe to add to SSOT index
-    rides_now = _add_ride_to_sessions_index(uid, rid)
-
-    # Canonicalize sessions_index.json (keep your existing behavior)
-    try:
-        p = _sessions_index_path(uid)
-        raw_obj: Any = {}
-        try:
-            raw_obj = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-        except Exception:
-            raw_obj = {}
-
-        if isinstance(raw_obj, dict):
-            cand = None
-            for key in ("sessions", "rides", "ride_ids", "session_ids", "ids", "value"):
-                v = raw_obj.get(key)
-                if isinstance(v, list):
-                    cand = v
-                    break
-            items = cand or []
-        elif isinstance(raw_obj, list):
-            items = raw_obj
-        else:
-            items = []
-
-        cleaned: list[str] = []
-        for x in items:
-            s = str(x).strip()
-            if s.isdigit() and len(s) <= 20:
-                cleaned.append(s)
-        if rid.isdigit() and len(rid) <= 20 and rid not in cleaned:
-            cleaned.insert(0, rid)
-
-        seen = set()
-        uniq: list[str] = []
-        for s in cleaned:
-            if s not in seen:
-                uniq.append(s)
-                seen.add(s)
-
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"sessions": uniq}, indent=2), encoding="utf-8")
-    except Exception as e:
-        print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
+  
 
     profile: Dict[str, Any] = {}
     samples = _build_samples_v1(meta, streams)
@@ -992,7 +949,27 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
     analyze_out = None
     if analyze:
+      try:
         analyze_out = _trigger_analyze_local(rid, cg_auth)
+      except Exception:
+        # best-effort rollback: remove SSOT session so index never points to partial state
+        try:
+            ssot_p = _ssot_user_session_path(uid, rid)
+            if ssot_p.exists():
+                ssot_p.unlink()
+        except Exception as e2:
+            print("[STRAVA_IMPORT] rollback_ssot_session_err:", repr(e2))
+        raise
+
+        # 3) Update index LAST (atomic commit point)
+        rides_now = _add_ride_to_sessions_index(uid, rid)
+
+        # Canonicalize sessions_index.json (keep your existing behavior)
+        try:
+            p = _sessions_index_path(uid)
+    ...
+        except Exception as e:
+            print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
 
     return {
         "ok": True,
