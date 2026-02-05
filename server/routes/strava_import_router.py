@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import json
 import math
 import time
@@ -13,6 +14,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
 from server.auth_guard import require_auth
+from server.user_state import state_root
 
 router = APIRouter(prefix="/api/strava", tags=["strava-import"])
 
@@ -98,11 +100,9 @@ def _debug_fs(where: str, uid: Optional[str] = None) -> None:
         print(f"[FSDBG] ERROR where={where}: {type(e).__name__}: {e}")
 
 
-from server.user_state import state_root
-
-
 def _user_dir(uid: str) -> Path:
     return state_root() / "users" / uid
+
 
 def _ssot_user_session_path(uid: str, rid: str) -> Path:
     rid2 = str(rid)
@@ -177,6 +177,30 @@ def _add_ride_to_sessions_index(uid: str, rid: str) -> list[str]:
     return rides
 
 
+def _rebuild_sessions_index_from_sessions_dir(uid: str) -> List[str]:
+    """
+    PATCH 4B: batch-commit "belt and suspenders".
+    Rebuild sessions_index.json strictly from users/<uid>/sessions/session_*.json
+    """
+    udir = _user_dir(uid)
+    sdir = udir / "sessions"
+    sdir.mkdir(parents=True, exist_ok=True)
+
+    ids: List[str] = []
+    for p in sdir.glob("session_*.json"):
+        sid = p.stem.replace("session_", "")
+        if sid.isdigit():
+            ids.append(sid)
+
+    uniq = sorted(set(ids), key=lambda x: int(x), reverse=True)
+    payload = {"sessions": uniq}
+    idxp = _sessions_index_path(uid)
+    tmp = idxp.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, idxp)
+    return uniq
+
+
 def _read_json_utf8_sig(p: Path) -> Dict[str, Any]:
     try:
         with open(p, "r", encoding="utf-8-sig") as f:
@@ -190,13 +214,12 @@ def _write_json(p: Path, obj: Dict[str, Any]) -> None:
     with open(p, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
+
 def _write_json_atomic(p: Path, obj: Dict[str, Any]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
-
-
 
 
 def _now_ts_dirname() -> str:
@@ -331,9 +354,9 @@ def _strava_get(path: str, uid: str, tokens: Dict[str, Any], token_path: Path) -
         retry_after_s = 60
         try:
             if isinstance(locked_until, str) and locked_until.endswith("Z"):
-                dt_until = dt.datetime.strptime(
-                    locked_until, "%Y-%m-%dT%H:%M:%SZ"
-                ).replace(tzinfo=dt.timezone.utc)
+                dt_until = dt.datetime.strptime(locked_until, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=dt.timezone.utc
+                )
                 now2 = dt.datetime.now(tz=dt.timezone.utc)
                 retry_after_s = max(1, int((dt_until - now2).total_seconds()))
         except Exception:
@@ -620,14 +643,13 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 
     _write_json(p1, doc)
     _write_json(p2, doc)
-    
-     # NEW (SSOT): write canonical session for this user
+
+    # NEW (SSOT): write canonical session for this user
     try:
         ssot_p = _ssot_user_session_path(uid, rid)
         _write_json_atomic(ssot_p, doc)
     except Exception as e:
         print(f"[SSOT] session write failed rid={rid} uid={uid} err={e!r}", file=sys.stderr)
-    
 
     # --- Patch 3C: write debug_session mirror for analyze input ---
     debug_session_written = False
@@ -871,6 +893,9 @@ def sync_strava_activities(
 
     next_page = None if done else (page + 1)
 
+    # PATCH 4B: SSOT batch-commit: ensure index matches sessions/ after this call
+    canonical = _rebuild_sessions_index_from_sessions_dir(uid)
+
     return {
         "ok": True,
         "uid": uid,
@@ -883,6 +908,7 @@ def sync_strava_activities(
         "max_activities": max_activities,
         "imported_count": len(imported),
         "imported": imported,
+        "index_count": len(canonical),
         "errors_count": len(errors),
         "errors": errors[:50],
         "skipped_count": len(skipped),
@@ -922,8 +948,6 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
             "reason": "non_cycling_activity",
         }
 
-  
-
     profile: Dict[str, Any] = {}
     samples = _build_samples_v1(meta, streams)
 
@@ -947,29 +971,36 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
     debug_session_written = paths.get("debug_session_written", debug_session_written)
     debug_session_path = paths.get("debug_session_path", debug_session_path)
 
+    # PATCH 4A: index commit skal skje etter analyze (eller uten analyze)
     analyze_out = None
+    rides_now: List[str] = []
+
     if analyze:
-      try:
-        analyze_out = _trigger_analyze_local(rid, cg_auth)
-      except Exception:
-        # best-effort rollback: remove SSOT session so index never points to partial state
         try:
-            ssot_p = _ssot_user_session_path(uid, rid)
-            if ssot_p.exists():
-                ssot_p.unlink()
-        except Exception as e2:
-            print("[STRAVA_IMPORT] rollback_ssot_session_err:", repr(e2))
-        raise
+            analyze_out = _trigger_analyze_local(rid, cg_auth)
+        except Exception:
+            # best-effort rollback: remove SSOT session so index never points to partial state
+            try:
+                ssot_p = _ssot_user_session_path(uid, rid)
+                if ssot_p.exists():
+                    ssot_p.unlink()
+            except Exception as e2:
+                print("[STRAVA_IMPORT] rollback_ssot_session_err:", repr(e2))
+            raise
 
-        # 3) Update index LAST (atomic commit point)
-        rides_now = _add_ride_to_sessions_index(uid, rid)
+    # 3) Update index LAST (atomic commit point)
+    # (runs both when analyze=True succeeds and when analyze=False)
+    rides_now = _add_ride_to_sessions_index(uid, rid)
 
-        # Canonicalize sessions_index.json (keep your existing behavior)
-        try:
-            p = _sessions_index_path(uid)
-    ...
-        except Exception as e:
-            print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
+    # Canonicalize sessions_index.json (keep your existing behavior)
+    try:
+        _ = _sessions_index_path(uid)
+        # Optional canonicalization can happen here if you want:
+        # payload = _read_json_utf8_sig(_) or {}
+        # uniq = sorted(set(payload.get("sessions", [])), key=lambda x: int(x), reverse=True)
+        # _.write_text(json.dumps({"sessions": uniq}, indent=2), encoding="utf-8")
+    except Exception as e:
+        print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
 
     return {
         "ok": True,
