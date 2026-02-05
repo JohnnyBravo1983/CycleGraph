@@ -201,13 +201,16 @@ def _rebuild_sessions_index_from_sessions_dir(uid: str) -> List[str]:
     return uniq
 
 
-# --- sessions_meta.json (list view cache) ---
-def _sessions_meta_path(uid: str) -> Path:
+# ----------------------------
+# Sprint 4: sessions_meta.json helpers (list-view cache)
+# Dict format: { "<sid>": { ...fields... } }
+# ----------------------------
+def _sessions_meta_path_v1(uid: str) -> Path:
     return _user_dir(uid) / "sessions_meta.json"
 
 
-def _load_sessions_meta(uid: str) -> Dict[str, Any]:
-    p = _sessions_meta_path(uid)
+def _load_sessions_meta_v1(uid: str) -> Dict[str, Any]:
+    p = _sessions_meta_path_v1(uid)
     if not p.exists():
         return {}
     try:
@@ -217,31 +220,24 @@ def _load_sessions_meta(uid: str) -> Dict[str, Any]:
         return {}
 
 
-def _save_sessions_meta(uid: str, obj: Dict[str, Any]) -> None:
-    p = _sessions_meta_path(uid)
+def _save_sessions_meta_v1(uid: str, obj: Dict[str, Any]) -> None:
+    p = _sessions_meta_path_v1(uid)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, p)
 
 
-def _meta_upsert(uid: str, sid: str, patch: Dict[str, Any]) -> None:
-    """
-    sessions_meta.json is deterministic list-view metadata.
-    Dict format: { "<sid>": { ...fields... }, ... }
-    """
+def _meta_upsert_v1(uid: str, sid: str, patch: Dict[str, Any]) -> None:
     sid = str(sid)
-    meta = _load_sessions_meta(uid)
+    meta = _load_sessions_meta_v1(uid)
     row = meta.get(sid)
     if not isinstance(row, dict):
         row = {}
         meta[sid] = row
-
-    # do not erase existing keys unless explicitly overwriting
     for k, v in patch.items():
         row[k] = v
-
-    _save_sessions_meta(uid, meta)
+    _save_sessions_meta_v1(uid, meta)
 
 
 def _read_json_utf8_sig(p: Path) -> Dict[str, Any]:
@@ -1011,7 +1007,7 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
     paths = _write_session_v1(uid, rid, session_doc)
 
-    # ✅ Ensure deterministic list metadata (no heavy analysis required)
+    # ✅ Deterministic list metadata (so Rides list can render without analyze)
     try:
         distance_m = meta.get("distance") if isinstance(meta, dict) else None
         distance_km = (float(distance_m) / 1000.0) if isinstance(distance_m, (int, float)) else None
@@ -1026,7 +1022,7 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
         start_time = meta.get("start_date") if isinstance(meta, dict) else None
 
-        _meta_upsert(
+        _meta_upsert_v1(
             uid,
             rid,
             {
@@ -1035,14 +1031,13 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
                 "sport_type": sport_type,
                 "distance_km": distance_km,
                 "elapsed_s": elapsed_s,
-                # Explicit "not enriched yet" markers:
-                "precision_watt_avg": None,
-                "address": None,
+                "precision_watt_avg": None,  # enriched after analyze
+                "address": None,  # enriched later
                 "has_result": False,
             },
         )
     except Exception as e:
-        print("[STRAVA_IMPORT] meta_upsert_err:", repr(e))
+        print("[STRAVA_IMPORT] meta_upsert_v1_err:", repr(e))
 
     debug_session_written = paths.get("debug_session_written", debug_session_written)
     debug_session_path = paths.get("debug_session_path", debug_session_path)
