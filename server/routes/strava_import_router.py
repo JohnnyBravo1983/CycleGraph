@@ -201,6 +201,49 @@ def _rebuild_sessions_index_from_sessions_dir(uid: str) -> List[str]:
     return uniq
 
 
+# --- sessions_meta.json (list view cache) ---
+def _sessions_meta_path(uid: str) -> Path:
+    return _user_dir(uid) / "sessions_meta.json"
+
+
+def _load_sessions_meta(uid: str) -> Dict[str, Any]:
+    p = _sessions_meta_path(uid)
+    if not p.exists():
+        return {}
+    try:
+        obj = _read_json_utf8_sig(p)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_sessions_meta(uid: str, obj: Dict[str, Any]) -> None:
+    p = _sessions_meta_path(uid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _meta_upsert(uid: str, sid: str, patch: Dict[str, Any]) -> None:
+    """
+    sessions_meta.json is deterministic list-view metadata.
+    Dict format: { "<sid>": { ...fields... }, ... }
+    """
+    sid = str(sid)
+    meta = _load_sessions_meta(uid)
+    row = meta.get(sid)
+    if not isinstance(row, dict):
+        row = {}
+        meta[sid] = row
+
+    # do not erase existing keys unless explicitly overwriting
+    for k, v in patch.items():
+        row[k] = v
+
+    _save_sessions_meta(uid, meta)
+
+
 def _read_json_utf8_sig(p: Path) -> Dict[str, Any]:
     try:
         with open(p, "r", encoding="utf-8-sig") as f:
@@ -968,6 +1011,39 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
     paths = _write_session_v1(uid, rid, session_doc)
 
+    # ✅ Ensure deterministic list metadata (no heavy analysis required)
+    try:
+        distance_m = meta.get("distance") if isinstance(meta, dict) else None
+        distance_km = (float(distance_m) / 1000.0) if isinstance(distance_m, (int, float)) else None
+
+        elapsed_s = None
+        if isinstance(meta, dict):
+            for k in ("elapsed_time", "moving_time"):
+                v = meta.get(k)
+                if isinstance(v, (int, float)):
+                    elapsed_s = int(v)
+                    break
+
+        start_time = meta.get("start_date") if isinstance(meta, dict) else None
+
+        _meta_upsert(
+            uid,
+            rid,
+            {
+                "session_id": str(rid),
+                "start_time": start_time,
+                "sport_type": sport_type,
+                "distance_km": distance_km,
+                "elapsed_s": elapsed_s,
+                # Explicit "not enriched yet" markers:
+                "precision_watt_avg": None,
+                "address": None,
+                "has_result": False,
+            },
+        )
+    except Exception as e:
+        print("[STRAVA_IMPORT] meta_upsert_err:", repr(e))
+
     debug_session_written = paths.get("debug_session_written", debug_session_written)
     debug_session_path = paths.get("debug_session_path", debug_session_path)
 
@@ -995,10 +1071,6 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
     # Canonicalize sessions_index.json (keep your existing behavior)
     try:
         _ = _sessions_index_path(uid)
-        # Optional canonicalization can happen here if you want:
-        # payload = _read_json_utf8_sig(_) or {}
-        # uniq = sorted(set(payload.get("sessions", [])), key=lambda x: int(x), reverse=True)
-        # _.write_text(json.dumps({"sessions": uniq}, indent=2), encoding="utf-8")
     except Exception as e:
         print("[STRAVA_IMPORT] canonicalize_index_err:", repr(e))
 
