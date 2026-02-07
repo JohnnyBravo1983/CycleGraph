@@ -929,6 +929,32 @@ def sync_strava_activities(
 
     # PATCH 4B: SSOT batch-commit: ensure index matches sessions/ after this call
     canonical = _rebuild_sessions_index_from_sessions_dir(uid)
+    
+    ensured: List[str] = []
+    ensure_errors: List[Dict[str, Any]] = []
+
+    if analyze:
+        try:
+            # Analyze ALL missing results in SSOT, not only those imported in this call
+            sids = list(canonical) if isinstance(canonical, list) else []
+            if not isinstance(sids, list):
+                sids = []
+
+            cap = 300  # juster etter smak
+            for sid in sids:
+                sid = str(sid)
+                rp = state_root() / "users" / uid / "results" / f"result_{sid}.json"
+                if not rp.exists():
+                    try:
+                        _trigger_analyze_local(sid, cg_auth)
+                        ensured.append(sid)
+                        if len(ensured) >= cap:
+                            break
+                    except Exception as e:
+                        ensure_errors.append({"sid": sid, "error": repr(e)})
+        except Exception as e:
+            ensure_errors.append({"sid": "__sync__", "error": f"ensure_failed: {e!r}"})
+
 
     return {
         "ok": True,
@@ -954,6 +980,10 @@ def sync_strava_activities(
         "capped": bool(done_cap and not done_strava),
         "stopped_mid_page": bool(stop_mid_page),
         "resume_same_page": bool(next_page == cur_page and stop_mid_page),
+        "ensure_analyze_count": len(ensured),
+        "ensure_analyze": ensured[:50],
+        "ensure_errors_count": len(ensure_errors),
+        "ensure_errors": ensure_errors[:20],
     }
 
 
