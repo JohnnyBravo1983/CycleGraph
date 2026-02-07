@@ -767,11 +767,12 @@ def sync_strava_activities(
     before: Optional[int] = Query(None, description="Epoch seconds (UTC). If omitted, uses now."),
     days: int = Query(30, ge=1, le=365, description="Used when after is omitted."),
     # chunking/paging
-    page: int = Query(1, ge=1, le=200, description="Strava paging (1..). One page per call."),
+    page: int = Query(1, ge=1, le=200, description="Strava paging (1..). Start page."),
     per_page: int = Query(50, ge=1, le=200, description="Strava per_page."),
-    batch_limit: int = Query(50, ge=1, le=200, description="Max rides imported this call."),
+    batch_limit: int = Query(150, ge=1, le=200, description="Max rides imported this call."),
     max_activities: int = Query(150, ge=1, le=150, description="Early onboarding cap (MVP)."),
     analyze: bool = Query(True, description="Run local analyze step for each ride."),
+    sweep: bool = Query(True, description="If true, auto-page until done (or caps). Signup-friendly."),
 ) -> Dict[str, Any]:
     uid = user_id
     tp = _tokens_path(uid)
@@ -792,145 +793,139 @@ def sync_strava_activities(
     errors: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
 
-    # One Strava page per call (resumable)
-    url_path = (
-        f"/athlete/activities?after={after_ts}&before={before_ts}"
-        f"&per_page={per_page}&page={page}"
-    )
+    cur_page = int(page)
+    total_seen = 0
 
-    # ✅ PATCH: wrap _strava_get and convert 429 into resumable 200 payload
-    try:
-        acts = _strava_get(url_path, uid, tokens, tp)
-    except HTTPException as he:
-        if he.status_code == 429:
-            retry_after_s = 15
-            # If we get structured detail, pass it through
-            if isinstance(he.detail, dict):
-                retry_after_s = int(he.detail.get("retry_after_seconds") or retry_after_s)
-            return {
-                "ok": True,
-                "uid": uid,
-                "after": after_ts,
-                "before": before_ts,
-                "days": days if after is None else None,
-                "page": page,
-                "per_page": per_page,
-                "batch_limit": batch_limit,
-                "max_activities": max_activities,
-                "imported_count": len(imported),
-                "imported": imported,
-                "errors_count": len(errors),
-                "errors": errors[:50],
-                "skipped_count": len(skipped),
-                "skipped": skipped[:50],
-                "next_page": page,  # samme page igjen
-                "done": False,
-                "rate_limited": True,
-                "retry_after_s": retry_after_s,
-                "rate_limit_detail": he.detail if isinstance(he.detail, dict) else None,
-            }
-        raise
+    next_page: Optional[int] = None
+    done = False
+    done_strava = False
+    done_cap = False
+    stop_mid_page = False
 
-    if not isinstance(acts, list):
-        raise HTTPException(status_code=502, detail="strava_bad_payload")
+    while True:
+        url_path = (
+            f"/athlete/activities?after={after_ts}&before={before_ts}"
+            f"&per_page={per_page}&page={cur_page}"
+        )
 
-    # If empty page -> done for this window
-    if len(acts) == 0:
-        return {
-            "ok": True,
-            "uid": uid,
-            "after": after_ts,
-            "before": before_ts,
-            "days": days if after is None else None,
-            "page": page,
-            "per_page": per_page,
-            "batch_limit": batch_limit,
-            "max_activities": max_activities,
-            "imported_count": 0,
-            "imported": [],
-            "errors_count": 0,
-            "errors": [],
-            "skipped_count": 0,
-            "skipped": [],
-            "next_page": None,
-            "done": True,
-        }
+        # ✅ PATCH: wrap _strava_get and convert 429 into resumable 200 payload
+        try:
+            acts = _strava_get(url_path, uid, tokens, tp)
+        except HTTPException as he:
+            if he.status_code == 429:
+                retry_after_s = 15
+                if isinstance(he.detail, dict):
+                    retry_after_s = int(he.detail.get("retry_after_seconds") or retry_after_s)
+                return {
+                    "ok": True,
+                    "uid": uid,
+                    "after": after_ts,
+                    "before": before_ts,
+                    "days": days if after is None else None,
+                    "page": cur_page,
+                    "per_page": per_page,
+                    "batch_limit": batch_limit,
+                    "max_activities": max_activities,
+                    "imported_count": len(imported),
+                    "imported": imported,
+                    "index_count": 0,
+                    "errors_count": len(errors),
+                    "errors": errors[:50],
+                    "skipped_count": len(skipped),
+                    "skipped": skipped[:50],
+                    "next_page": cur_page,  # samme page igjen
+                    "done": False,
+                    "rate_limited": True,
+                    "retry_after_s": retry_after_s,
+                    "rate_limit_detail": he.detail if isinstance(he.detail, dict) else None,
+                }
+            raise
 
-    # Enkelt "early onboarding cap": stopp etter max_activities basert på page/per_page
-    remaining_total = max(0, int(max_activities) - ((int(page) - 1) * int(per_page)))
-    if remaining_total <= 0:
-        return {
-            "ok": True,
-            "uid": uid,
-            "after": after_ts,
-            "before": before_ts,
-            "days": days if after is None else None,
-            "page": page,
-            "per_page": per_page,
-            "batch_limit": batch_limit,
-            "max_activities": max_activities,
-            "imported_count": 0,
-            "imported": [],
-            "errors_count": len(errors),
-            "errors": errors[:50],
-            "skipped_count": len(skipped),
-            "skipped": skipped[:50],
-            "next_page": None,
-            "done": True,
-            "capped": True,
-        }
-
-    page_cap = min(int(batch_limit), remaining_total)
-
-    # PATCH 1B — filtrer i /sync før _import_one
-    for a in acts:
-        if len(imported) >= page_cap:
+        if not isinstance(acts, list):
+            errors.append({"rid": None, "detail": "strava_activities_not_list"})
+            done = True
+            next_page = None
             break
 
-        if not isinstance(a, dict):
-            continue
+        # If empty page -> done for this window
+        if len(acts) == 0:
+            done_strava = True
+            done = True
+            next_page = None
+            break
 
-        # Skip non-cycling activities early (based on summary fields)
-        if not _is_supported_cycling_activity(a):
-            rid0 = a.get("id")
-            skipped.append(
-                {
-                    "rid": str(rid0) if rid0 is not None else None,
-                    "sport_type": _activity_sport_type(a),
-                }
-            )
-            continue
+        # Import this page (may stop mid-page due to caps)
+        for a in acts:
+            # caps (total per call + onboarding cap)
+            if len(imported) >= int(batch_limit):
+                stop_mid_page = True
+                break
+            if (len(imported) + len(skipped)) >= int(max_activities):
+                stop_mid_page = True
+                break
 
-        rid = a.get("id")
-        if rid is None:
-            errors.append({"rid": None, "detail": "missing_activity_id"})
-            continue
-
-        rid_s = str(rid)
-
-        try:
-            out = _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=analyze)
-
-            # If meta-check inside _import_one decided to skip, don't count as imported
-            if isinstance(out, dict) and out.get("skipped") is True:
-                skipped.append({"rid": rid_s, "sport_type": out.get("sport_type")})
+            if not isinstance(a, dict):
                 continue
 
-            imported.append(rid_s)
+            # Skip non-cycling activities early (based on summary fields)
+            if not _is_supported_cycling_activity(a):
+                rid0 = a.get("id")
+                skipped.append(
+                    {
+                        "rid": str(rid0) if rid0 is not None else None,
+                        "sport_type": _activity_sport_type(a),
+                    }
+                )
+                continue
 
-            # ✅ throttle (reduserer 429 dramatisk)
-            time.sleep(0.3)
+            rid = a.get("id")
+            if rid is None:
+                errors.append({"rid": None, "detail": "missing_activity_id"})
+                continue
 
-        except HTTPException as he:
-            errors.append({"rid": rid_s, "status_code": he.status_code, "detail": he.detail})
-        except Exception as e:
-            errors.append({"rid": rid_s, "status_code": 0, "detail": repr(e)})
+            rid_s = str(rid)
 
-    done_strava = len(acts) < per_page
-    done_cap = ((int(page) * int(per_page)) >= int(max_activities))
-    done = bool(done_strava or done_cap)
+            try:
+                out = _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=analyze)
 
-    next_page = None if done else (page + 1)
+                # If meta-check inside _import_one decided to skip, don't count as imported
+                if isinstance(out, dict) and out.get("skipped") is True:
+                    skipped.append({"rid": rid_s, "sport_type": out.get("sport_type")})
+                    continue
+
+                imported.append(rid_s)
+
+                # ✅ throttle (reduserer 429 dramatisk)
+                time.sleep(0.3)
+
+            except HTTPException as he:
+                errors.append({"rid": rid_s, "status_code": he.status_code, "detail": he.detail})
+            except Exception as e:
+                errors.append({"rid": rid_s, "status_code": 0, "detail": repr(e)})
+
+        total_seen += len(acts)
+
+        # Page/window done checks
+        done_strava = len(acts) < int(per_page)
+        done_cap = ((cur_page * int(per_page)) >= int(max_activities)) or ((len(imported) + len(skipped)) >= int(max_activities))
+        done_batch = len(imported) >= int(batch_limit)
+
+        done = bool(done_strava or done_cap or done_batch)
+
+        if done:
+            # If we stopped mid-page due to batch/cap, safest resume is same page.
+            if stop_mid_page and not done_strava:
+                next_page = cur_page
+            else:
+                next_page = None if (done_strava or done_cap) else (cur_page + 1)
+            break
+
+        # Auto-page only if sweep=True
+        if not sweep:
+            next_page = cur_page + 1
+            break
+
+        cur_page += 1
 
     # PATCH 4B: SSOT batch-commit: ensure index matches sessions/ after this call
     canonical = _rebuild_sessions_index_from_sessions_dir(uid)
@@ -941,10 +936,12 @@ def sync_strava_activities(
         "after": after_ts,
         "before": before_ts,
         "days": days if after is None else None,
-        "page": page,
+        "page": cur_page,
         "per_page": per_page,
         "batch_limit": batch_limit,
         "max_activities": max_activities,
+        "sweep": sweep,
+        "total_seen": total_seen,
         "imported_count": len(imported),
         "imported": imported,
         "index_count": len(canonical),
@@ -953,8 +950,10 @@ def sync_strava_activities(
         "skipped_count": len(skipped),
         "skipped": skipped[:50],
         "next_page": next_page,
-        "done": done,
+        "done": bool(next_page is None and done),
         "capped": bool(done_cap and not done_strava),
+        "stopped_mid_page": bool(stop_mid_page),
+        "resume_same_page": bool(next_page == cur_page and stop_mid_page),
     }
 
 
