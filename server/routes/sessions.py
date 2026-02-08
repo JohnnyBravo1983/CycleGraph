@@ -749,6 +749,115 @@ def _assert_session_owned(base_dir: str, user_id: str, session_id: str) -> None:
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
+# ==================== PATCH: BATCH ANALYZE + BULK META ====================
+
+def _meta_bulk_set_precision_watt(uid: str, updates: Dict[str, Optional[float]]) -> None:
+    """
+    Atomic bulk update of sessions_meta.json:
+    - precision_watt_avg
+    - has_result
+    One write (temp -> replace) via _write_sessions_meta
+    """
+    meta = _load_sessions_meta(uid)
+    if not isinstance(meta, dict):
+        meta = {}
+
+    for sid, watt in updates.items():
+        key = str(sid)
+        entry = meta.get(key)
+        if not isinstance(entry, dict):
+            entry = {}
+            meta[key] = entry
+
+        entry["precision_watt_avg"] = watt
+        entry["has_result"] = True
+
+    _write_sessions_meta(uid, meta)
+
+
+@router.post("/batch-analyze")
+async def batch_analyze_sessions(
+    user_id: str = Depends(require_auth),
+    force: bool = Query(False, description="If true, re-analyze even if SSOT result exists."),
+    debug: int = Query(0, ge=0, le=1, description="Debug mode (0/1)."),
+):
+    """
+    Analyze all sessions that are missing SSOT results:
+      /app/state/users/<uid>/results/result_<sid>.json
+
+    Pattern:
+      HTTP (auth) -> direct Python function call (analyze_session_core) -> SSOT persist -> bulk meta write
+
+    No internal HTTP calls. No self_heal.
+    """
+    base_dir = os.getcwd()
+
+    # owner protection: relies on sessions_index being the SSOT for ownership
+    from server.user_state import load_user_sessions_index
+    idx = load_user_sessions_index(base_dir, str(user_id))
+    sids = idx.get("sessions") if isinstance(idx, dict) else []
+    if not isinstance(sids, list):
+        sids = []
+
+    sids = [str(x) for x in sids if str(x)]
+
+    targets: List[str] = []
+    for sid in sids:
+        try:
+            p = _canonical_user_result_path(str(user_id), sid)
+            if force or (not p.exists()):
+                targets.append(sid)
+        except Exception:
+            # if path calculation fails, still attempt analyze
+            targets.append(sid)
+
+    analyzed: List[str] = []
+    failed: List[Dict[str, str]] = []
+    meta_updates: Dict[str, Optional[float]] = {}
+
+    # NOTE: batch should be pure; do not self-heal and do not use cg_auth
+    for sid in targets:
+        try:
+            resp = await analyze_session_core(
+                uid=str(user_id),
+                sid=str(sid),
+                raw_body=b"",
+                cg_auth=None,
+                no_weather=False,
+                force_recompute=bool(force),
+                debug=int(debug),
+                self_heal=False,
+            )
+
+            # SSOT persist
+            _persist_user_result(str(user_id), str(sid), resp)
+
+            # meta update collected (bulk write later)
+            watt = _extract_precision_watt_avg(resp)
+            meta_updates[str(sid)] = watt
+
+            analyzed.append(str(sid))
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            failed.append({"sid": str(sid), "error": str(e)})
+            continue
+
+    if meta_updates:
+        _meta_bulk_set_precision_watt(str(user_id), meta_updates)
+
+    return {
+        "count_total": len(sids),
+        "count_target": len(targets),
+        "analyzed": len(analyzed),
+        "failed": len(failed),
+        "errors": failed[:10],
+    }
+
+# ==================== END PATCH: BATCH ANALYZE + BULK META ====================
+
+
 RESULTS_DIR = os.path.join(os.getcwd(), "logs", "results")
 DEBUG_DIR = os.path.join(os.getcwd(), "_debug")
 
@@ -767,6 +876,44 @@ def _repo_root_from_here() -> Path:
             break
         p = p.parent
     return Path.cwd()
+
+# ==================== PATCH B: USER-SCOPED RESULT PATH LOOKUP ====================
+def _pick_best_user_result_path(uid: str, sid: str) -> Path | None:
+    """
+    User-scoped SSOT first:
+      /app/state/users/<uid>/results/result_<sid>.json
+    Fallback: legacy logs/results + dev paths (read-only)
+    """
+    fn = f"result_{sid}.json"
+
+    def _big_enough(p: Path) -> bool:
+        try:
+            return p.exists() and p.stat().st_size > 5_000
+        except Exception:
+            return False
+
+    # 0) SSOT canonical user result
+    try:
+        p0 = _canonical_user_result_path(uid, sid)
+        if _big_enough(p0) and _is_full_result_doc(_read_json_utf8_sig(p0) or {}):
+            return p0
+    except Exception:
+        pass
+
+    # 1) legacy global logs/results (read-only fallback)
+    try:
+        root = _repo_root_from_here()
+        p1 = root / "logs" / "results" / fn
+        if _big_enough(p1) and _is_full_result_doc(_read_json_utf8_sig(p1) or {}):
+            return p1
+    except Exception:
+        pass
+
+    # 2) existing legacy picker (actual10/latest etc.)
+    try:
+        return _pick_best_persisted_result_path(sid)
+    except Exception:
+        return None
 
 def _pick_best_persisted_result_path(sid: str) -> Path | None:
     root = _repo_root_from_here()
@@ -2011,37 +2158,59 @@ def _meta_set_precision_watt(uid: str, sid: str, watt: Optional[float]) -> None:
         print(f"[META] failed to set precision_watt_avg sid={sid}: {e}", file=sys.stderr)
 # ==================== END PATCH ====================
 
+# ==================== PATCH E: ATOMIC BULK META UPDATE ====================
+def _meta_bulk_set_precision_watt(uid: str, updates: Dict[str, Optional[float]]) -> None:
+    """
+    Atomisk bulk oppdatering av sessions_meta.json for flere sessioner.
+    """
+    try:
+        p = _sessions_meta_path(uid)
+        meta = _load_sessions_meta(uid)
+        if not isinstance(meta, dict):
+            meta = {}
 
-# ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
-@router.post("/{sid}/analyze")
-async def analyze_session(
+        for sid, watt in updates.items():
+            entry = meta.get(str(sid))
+            if not isinstance(entry, dict):
+                entry = {}
+                meta[str(sid)] = entry
+            entry["precision_watt_avg"] = watt
+            entry["has_result"] = True
+
+        _write_sessions_meta(uid, meta)
+    except Exception as e:
+        print(f"[META] failed bulk update sid={sid}: {e}", file=sys.stderr)
+# ==================== END PATCH E ====================
+
+# ==================== PATCH C: ANALYZE SESSION CORE ====================
+async def analyze_session_core(
+    *,
+    uid: str,
     sid: str,
-    request: Request,
-    user_id: str = Depends(require_auth),  # <-- NY: Bruker auth guard
-    no_weather: bool = Query(False),
-    force_recompute: bool = Query(False),
-    debug: int = Query(0),
-    self_heal: bool = Query(False),
-):
-    
+    raw_body: bytes,
+    cg_auth: Optional[str],
+    no_weather: bool,
+    force_recompute: bool,
+    debug: int,
+    self_heal: bool,
+) -> Dict[str, Any]:
+    """
+    Pure-ish business logic:
+    - no FastAPI Request
+    - no Depends
+    - no file writes (persist happens in wrapper)
+    Returns response dict.
+    """
     want_debug = bool(debug)
     
-    print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}", file=sys.stderr)
-    print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
-    print(f"[SVR] HIT /sessions/{sid}/analyze force_recompute={force_recompute} debug={debug}", file=sys.stderr)
-
-    # ==================== PATCH 4: OWNER PROTECTION ====================
-    base_dir = os.getcwd()
-    # ✅ Owner-protection (SSOT) – samme som GET /{sid}
-    _assert_session_owned(base_dir, user_id, sid)
-    # ==================== END PATCH 4 ====================
+    print(f"[SVR] >>> ANALYZE CORE ENTER uid={uid} sid={sid}", file=sys.stderr)
 
     # ==================== PATCH D1: START_TIME FROM SAMPLES ====================
     # Vi trenger å lagre start_time fra samples for senere bruk i både Rust og fallback grener
     start_time_from_samples = None
     # ==================== END PATCH D1 ====================
 
-    avail = _input_availability(sid, uid=user_id)
+    avail = _input_availability(sid, uid=uid)
 
     # ==================== PATCH 1: HARD INPUT GATE ====================
     # Hvis force_recompute=true men vi mangler all input, så skal vi gi 409 (ikke prøve Strava).
@@ -2051,122 +2220,54 @@ async def analyze_session(
         dbg["missing_input"] = True
         dbg["input_exists"] = avail["exists"]
         dbg["input_paths"] = avail["paths"]
-        return _http409_missing_input(sid, dbg)
+        raise HTTPException(status_code=409, detail={"error": "missing_input_data", "sid": sid, "debug": dbg})
     # ==================================================================
 
     # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
-    # Analyze skal være "ren" som default:
-    # - Hvis vi mangler input (ingen session/result/streams/activity), skal vi STOPPE med 409
-    #   med mindre self_heal=1 er eksplisitt satt.
-    
-    # =============================================================================================
-    # ==================== PATCH B2: ANALYZE PURITY GATE (NO STRAVA BY DEFAULT) ====================
-    # Analyze skal være "ren" som default:
-    # - Hvis vi mangler input (ingen session/result/streams/activity), skal vi STOPPE med 409
-    #   med mindre self_heal=1 er eksplisitt satt.
-    
-    # =============================================================================================
     if (not avail.get("has_any_input")) and (not self_heal):
         dbg = _base_debug(force_recompute=force_recompute, used_fallback=False)
         dbg["reason"] = "missing_input_no_self_heal"
         dbg["missing_input"] = True
         dbg["input_exists"] = avail["exists"]
         dbg["input_paths"] = avail["paths"]
-        return _http409_missing_input(sid, dbg)
+        raise HTTPException(status_code=409, detail={"error": "missing_input_no_self_heal", "sid": sid, "debug": dbg})
     # ==================================================================
+
     # ==================== PATCH 3b: SELF-HEALING ANALYZE (EXPLICIT ONLY) ====================
     # Kun når self_heal=true: Hvis analyze mangler input, fetch fra Strava via import-pipeline
     # og skriv session til persistent state før vi fortsetter analyse.
     if self_heal and (not avail.get("has_any_input")) and (not force_recompute):
         try:
-            cg_auth = request.cookies.get("cg_auth")
             if not cg_auth:
                 raise HTTPException(status_code=401, detail="Not authenticated (missing cg_auth cookie)")
 
             # Reuse existing Strava import pipeline (tokens refresh + fetch + build samples + write session)
-            out = _strava_import_one(uid=user_id, rid=str(sid), cg_auth=cg_auth, analyze=False)
+            out = _strava_import_one(uid=uid, rid=str(sid), cg_auth=cg_auth, analyze=False)
 
             # Etter import, oppdater availability slik at resten av analyze finner session
-            avail = _input_availability(sid, uid=user_id)
+            avail = _input_availability(sid, uid=uid)
 
             print(
-                f"[SELF_HEAL] sid={sid} uid={user_id} imported={out.get('ok')} samples_len={out.get('samples_len')}",
+                f"[SELF_HEAL] sid={sid} uid={uid} imported={out.get('ok')} samples_len={out.get('samples_len')}",
                 file=sys.stderr,
             )
         except HTTPException:
             raise
         except Exception as e:
-            print(f"[SELF_HEAL] FAIL sid={sid} uid={user_id} err={repr(e)}", file=sys.stderr)
+            print(f"[SELF_HEAL] FAIL sid={sid} uid={uid} err={repr(e)}", file=sys.stderr)
             raise HTTPException(status_code=500, detail=f"Self-heal failed: {repr(e)}")
-    # ==================== END PATCH 3b ====================
-    
     # ==================== END PATCH 3b ====================
 
     # ==================== PATCH 1: logg force_recompute tidlig ====================
     print(
-        f"[SVR] >>> ANALYZE ENTER sid={sid} force_recompute={force_recompute}",
+        f"[SVR] >>> ANALYZE CORE sid={sid} force_recompute={force_recompute}",
         file=sys.stderr,
     )
     # ============================================================================
 
-    # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
-        # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
-        # ==================== PATCH G: enforce _final_ui_override on ALL returns ====================
-    def _RET(x: Dict[str, Any]):
-        try:
-            x = _final_ui_override(x)
-        except Exception:
-            pass
-
-        # Cache precision_watt_avg into sessions_meta
-        try:
-            watt = _extract_precision_watt_avg(x)
-            _meta_set_precision_watt(user_id, str(sid), watt)
-        except Exception as e:
-            print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
-
-        # Persist full result doc to user-scoped results dir (SSOT)
-        # Persist full result doc to user-scoped results dir (SSOT)
-        try:
-            if isinstance(x, dict) and x.get("metrics"):
-                _persist_user_result(str(user_id), str(sid), x)
-                print(f"[PERSIST] ✅ Persisted SSOT for {sid}", file=sys.stderr)
-            else:
-                has_metrics = isinstance(x.get("metrics"), dict) if isinstance(x, dict) else False
-                print(f"[PERSIST] ⚠️  SKIP for {sid}: is_dict={isinstance(x, dict)}, has_metrics={has_metrics}", file=sys.stderr)
-        except Exception as e:
-            print(f"[PERSIST] ❌ FAILED for {sid}: {e!r}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-
-        return x
-    # ===========================================================================================
-
-    # ===========================================================================================
-
-
-    # ===========================================================================================
-
-    # ==================== PATCH 1A: ensure want_debug is always defined ====================
-    try:
-        want_debug
-    except NameError:
-        want_debug = False
-    # =====================================================================================
-
-    # ==================== PATCH S3: INITIALIZATION FOR SINGLE WEATHER SOURCE ====================
-    # Fjerner weather-lock mekanismen for å sikre én kilde
-    # Server vil nå være den eneste kilden for værdata
-    # ============================================================================================
-
-    # ==================== PATCH 2: persisted hit/bypass logging ====================
-    if force_recompute:
-        print(
-            f"[SVR] persisted_bypass sid={sid} reason=force_recompute",
-            file=sys.stderr,
-        )
-    else:
-        persisted_path = _pick_best_persisted_result_path(sid)
+    # ==================== PATCH B: USE USER-SCOPED RESULT PATH ====================
+    if not force_recompute:
+        persisted_path = _pick_best_user_result_path(uid, sid)
         if persisted_path is not None:
             try:
                 with persisted_path.open("r", encoding="utf-8-sig") as f:
@@ -2186,7 +2287,7 @@ async def analyze_session(
                     # ==================== PATCH: INVALIDATE PERSISTED RESULT IF PROFILE_VERSION HAS CHANGED ====================
                     try:
                         # current profile (UI truth) - bruk samme metode som i PATCH 1
-                        current_profile = _load_ui_profile_for_user_id(user_id)  # <-- NY: Bruk user_id
+                        current_profile = _load_ui_profile_for_user_id(uid)
                         # Hent profilversjonen fra current_profile (den kan være i current_profile["profile_version"])
                         current_pv = current_profile.get("profile_version")
                     except Exception as e:
@@ -2203,8 +2304,6 @@ async def analyze_session(
                         print(f"[SVR] persisted_bypass sid={sid} reason=profile_version_mismatch current={current_pv} persisted={persisted_pv}")
                         # Invalider doc slik at vi ikke returnerer den
                         doc = None
-                        # Sett persisted_path = None for å gå inn i rekompute-path
-                        persisted_path = None
                     # ==================== END PATCH ====================
 
                     if doc is not None:  # Hvis doc ikke ble invalidert
@@ -2329,7 +2428,7 @@ async def analyze_session(
 
                         doc["debug"] = dbg
                         
-                        return _RET(doc)
+                        return doc
                     # Hvis doc ble invalidert, fortsett til rekompute-grenen
                 else:
                     print(
@@ -2347,17 +2446,11 @@ async def analyze_session(
     # ==================== ORIGINAL ANALYZE LOGIC ====================
 
     # === SAFE BODY READ v2 (med BOM-strip + logging) ===
-    try:
-        raw = await request.body()
-    except Exception as e:
-        print(f"[SVR] ERROR reading body: {e!r}", flush=True)
-        raw = b""
-
     # Normaliser til bytes
-    if isinstance(raw, str):
-        raw_bytes = raw.encode("utf-8", errors="ignore")
+    if isinstance(raw_body, str):
+        raw_bytes = raw_body.encode("utf-8", errors="ignore")
     else:
-        raw_bytes = bytes(raw or b"")
+        raw_bytes = bytes(raw_body or b"")
 
     # Strip UTF-8 BOM hvis til stede (typisk fra PowerShell Set-Content -Encoding utf8)
     if raw_bytes.startswith(b"\xef\xbb\xbf"):
@@ -2596,7 +2689,6 @@ async def analyze_session(
     # ==================== PATCH: SESSIONS META WRITE (Sprint A) ====================
     # Skriv sessions_meta.json etter at samples er lastet og vi har uid
     try:
-        uid = user_id  # <-- NY: Bruk user_id fra auth guard
         if uid and isinstance(samples, list) and len(samples) > 0 and isinstance(samples[0], dict):
             FP = "META_WRITE_FP_A2_20260104"
             print(f"[META] {FP} enter uid={uid} sid={sid} samples_len={len(samples)}", file=sys.stderr)
@@ -2663,11 +2755,7 @@ async def analyze_session(
 
     # ==================== PATCH 1: USE UI PROFILE WHEN CLIENT DOESN'T SEND PROFILE ====================
     if not client_sent_profile:
-        # <-- FJERNET: debug-print av cookies
-        # print("[ANALYZE] cookies keys=", list(request.cookies.keys()))
-        # print("[ANALYZE] cg_uid=", request.cookies.get("cg_uid"))
-        
-        up = _load_ui_profile_for_user_id(user_id)  # <-- NY: Bruk user_id i stedet for request
+        up = _load_ui_profile_for_user_id(uid)
         profile = _ensure_profile_device(up)
         body["profile"] = profile
     # ==================== END PATCH 1 ====================
@@ -2727,7 +2815,7 @@ async def analyze_session(
         }
     else:
         # ==================== PATCH 1: USE UI PROFILE FOR VERSIONING ====================
-        prof_disk = _load_ui_profile_for_user_id(user_id)  # <-- NY: Bruk user_id
+        prof_disk = _load_ui_profile_for_user_id(uid)
         subset = {
             k: prof_disk.get(k)
             for k in (
@@ -2957,7 +3045,7 @@ async def analyze_session(
                 _write_observability(err_resp)
             except Exception as e_log:
                 print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
-            return _RET(err_resp)
+            return err_resp
 
         resp: Dict[str, Any] = {}
         if isinstance(r, dict):
@@ -2993,7 +3081,7 @@ async def analyze_session(
                     _write_observability(err_resp)
                 except Exception as e_log:
                     print(f"[SVR][OBS] logging wrapper failed: {e_log!r}", flush=True)
-                return _RET(err_resp)
+                return err_resp
 
         # ==================== PATCH S3D: ATTACH WX_KEY + ENSURE WEATHER META IN RESPONSE ====================
         try:
@@ -3134,7 +3222,7 @@ async def analyze_session(
                 metrics.setdefault("calibrated", False)
                 metrics.setdefault("calibration_status", "fallback")
 
-            # --- Trinn 15: heuristisk presisjonsindikator + benchmark-logg ---
+            # --- Trinn 15: heuristikk presisjonsindikator + benchmark-logg ---
             try:
                 profile_used_t15 = (
                     (metrics.get("profile_used") or resp.get("profile_used") or {})
@@ -3264,25 +3352,7 @@ async def analyze_session(
                     except Exception as e:
                         print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
 
-                    # ==================== PATCH: SKRIV RESULTAT TIL FIL ETTER REKOMPUTE ====================
-                    try:
-                        _write_json_atomic(_result_path(sid), ensured)
-                        print(f"[SVR] persisted_write sid={sid} path={_result_path(sid)}", file=sys.stderr)
-                    except Exception as e:
-                        print(f"[SVR] persisted_write FAILED sid={sid} err={e}", file=sys.stderr)
-                    # ==================== END PATCH ====================
-
-                    # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
-                    # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
-                    if isinstance(body, dict) and isinstance(body.get("debug"), dict):
-                        resp_dbg = ensured.get("debug") or {}
-                        if not isinstance(resp_dbg, dict):
-                            resp_dbg = {}
-                        resp_dbg.update(body["debug"])
-                        ensured["debug"] = resp_dbg
-                    # ==================== END PATCH B2.1 ====================
-
-                    return _RET(ensured)
+                    return ensured
                 except Exception as e:
                     print(f"[SVR][OBS] logging wrapper failed: {e!r}", flush=True)
                     resp2 = _ensure_contract_shape(resp)
@@ -3294,14 +3364,6 @@ async def analyze_session(
                     
                     resp2 = _set_basic_ride_fields(resp2, sid)
                     
-                    # ==================== PATCH: SKRIV RESULTAT TIL FIL ETTER REKOMPUTE (fallback ved feil) ====================
-                    try:
-                        _write_json_atomic(_result_path(sid), resp2)
-                        print(f"[SVR] persisted_write (fallback) sid={sid} path={_result_path(sid)}", file=sys.stderr)
-                    except Exception as e:
-                        print(f"[SVR] persisted_write (fallback) FAILED sid={sid} err={e}", file=sys.stderr)
-                    # ==================== END PATCH ====================
-                    
                     # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
                     # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
                     if isinstance(body, dict) and isinstance(body.get("debug"), dict):
@@ -3312,7 +3374,7 @@ async def analyze_session(
                         resp2["debug"] = resp_dbg
                     # ==================== END PATCH B2.1 ====================
                     
-                    return _RET(resp2)
+                    return resp2
             else:
                 print(
                     "[SVR] [RUST] missing/invalid metrics (no-fallback)",
@@ -3356,7 +3418,7 @@ async def analyze_session(
                     err["debug"] = resp_dbg
                 # ==================== END PATCH B2.1 ====================
                 
-                return _RET(err)
+                return err
 
     # --- PATCH C: REN fallback_py-gren (ingen Rust-metrics tilgjengelig) ---
     weather_flag = weather_applied  # Bruk server weather_applied
@@ -3472,15 +3534,6 @@ async def analyze_session(
 
     try:
         _write_observability(resp)
-
-        # ==================== PATCH: SKRIV RESULTAT TIL FIL FOR FALLBACK ====================
-        try:
-            _write_json_atomic(_result_path(sid), resp)
-            print(f"[SVR] persisted_write (fallback) sid={sid} path={_result_path(sid)}", file=sys.stderr)
-        except Exception as e:
-            print(f"[SVR] persisted_write (fallback) FAILED sid={sid} err={e}", file=sys.stderr)
-        # ==================== END PATCH ====================
-
     except Exception as e:
         print(f"[SVR][OBS] logging wrapper failed (fb): {e!r}", flush=True)
 
@@ -3494,13 +3547,85 @@ async def analyze_session(
         resp["debug"] = resp_dbg
     # ==================== END PATCH B2.1 ====================
 
+    return resp
+# ==================== END PATCH C ====================
+
+# ----------------- ANALYZE: RUST-FØRST + TIDLIG RETURN -----------------
+@router.post("/{sid}/analyze")
+async def analyze_session(
+    sid: str,
+    request: Request,
+    user_id: str = Depends(require_auth),  # <-- NY: Bruker auth guard
+    no_weather: bool = Query(False),
+    force_recompute: bool = Query(False),
+    debug: int = Query(0),
+    self_heal: bool = Query(False),
+):
+    
+    want_debug = bool(debug)
+    
+    print(f"[SVR] >>> ANALYZE ENTER (Rust-first) sid={sid} debug={want_debug}", file=sys.stderr)
+    print(f"[HIT] analyze_session from sessions.py sid={sid}", file=sys.stderr)
+    print(f"[SVR] HIT /sessions/{sid}/analyze force_recompute={force_recompute} debug={debug}", file=sys.stderr)
+
+    # ==================== PATCH 4: OWNER PROTECTION ====================
+    base_dir = os.getcwd()
+    # ✅ Owner-protection (SSOT) – samme som GET /{sid}
+    _assert_session_owned(base_dir, user_id, sid)
+    # ==================== END PATCH 4 ====================
+
+    # ==================== PATCH C: WRAPPER FOR ANALYZE_SESSION_CORE ====================
+    # Les request body og kall core-funksjonen
+    raw = await request.body()
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8", errors="ignore")
+    raw = bytes(raw or b"")
+    cg_auth = request.cookies.get("cg_auth")
+
+    resp = await analyze_session_core(
+        uid=str(user_id),
+        sid=str(sid),
+        raw_body=raw,
+        cg_auth=cg_auth,
+        no_weather=no_weather,
+        force_recompute=force_recompute,
+        debug=debug,
+        self_heal=self_heal,
+    )
+
+    # ==================== PATCH C: MODIFIED _RET FUNKSJON ====================
+    def _RET(x: Dict[str, Any]):
+        try:
+            x = _final_ui_override(x)
+        except Exception:
+            pass
+
+        # Cache precision_watt_avg into sessions_meta
+        try:
+            watt = _extract_precision_watt_avg(x)
+            _meta_set_precision_watt(str(user_id), str(sid), watt)
+        except Exception as e:
+            print(f"[META] cache precision_watt_avg failed sid={sid}: {e}", file=sys.stderr)
+
+        # ==================== PATCH C: ALLTID PERSIST TIL SSOT ====================
+        # Persist full result doc to user-scoped results dir (SSOT)
+        try:
+            if isinstance(x, dict):
+                _persist_user_result(str(user_id), str(sid), x)
+                print(f"[PERSIST] ✅ Persisted SSOT for {sid}", file=sys.stderr)
+            else:
+                print(f"[PERSIST] ⚠️  SKIP for {sid}: not a dict", file=sys.stderr)
+        except Exception as e:
+            print(f"[PERSIST] ❌ FAILED for {sid}: {e!r}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+
+        return x
+    # ==================== END PATCH C ====================
+    
     return _RET(resp)
 
 # ==================== PATCH: ANALYZE SESSIONS.PY PROBE (DEPRECATED) ====================
-from fastapi.responses import JSONResponse
-from fastapi import Depends, Query, Request
-from server.auth_guard import require_auth
-
 @router.post("/{sid}/analyze_sessionspy")
 async def analyze_session_sessionspy(
     sid: str,
@@ -3657,3 +3782,4 @@ def get_session(
     }
 
     return resp
+
