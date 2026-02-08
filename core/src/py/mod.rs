@@ -578,29 +578,36 @@ fn compute_scalar_metrics(
 // - metrics.precision_watt_crank = avansert (wheel / eff)
 // - resp.precision_watt_avg      = pedal (brukes i UI)
 // Ingen fysikk endres her – kun mapping.
+
 fn compute_device_watts_avg(samples: &Vec<crate::Sample>) -> (Option<f64>, &'static str, usize) {
     // --- core_watts_avg: ONLY from device_watts (powermeter) ---
-    let mut device_readings = Vec::<f64>::new();
+    let mut core_n: usize = 0;
+    let mut device: Vec<f64> = Vec::new();
 
-    for s in samples {
+    for s in samples.iter() {
         if let Some(w) = s.device_watts {
-            // PATCH 1: Strengere sjekk - bare aksepter realistiske verdier
-            if w.is_finite() && w > 0.0 && w < 2000.0 {
-                device_readings.push(w);
+            // ignore zeros / bogus
+            if w.is_finite() && w > 0.0 {
+                device.push(w);
+                core_n += 1;
             }
         }
     }
 
-    // PATCH 2: Force-disable core for nåværende appmodus (uten powermeter)
-    // Vi returnerer alltid None og sier at core er deaktivert
-    let core_watts_avg: Option<f64> = None;
-    let core_watts_source = "disabled_no_powermeter";
-    let core_n = 0;
+    // If we have device watts, report them. If not, that's fine — model still runs elsewhere.
+    let (core_watts_avg, core_watts_source) = if !device.is_empty() {
+        (Some(mean(&device)), "device_watts")
+    } else {
+        (None, "no_powermeter")
+    };
 
-    // PATCH 2: Debug logging for å bevise at device_watts faktisk finnes
-    eprintln!(
+    // Debug logging for å bevise at device_watts faktisk finnes
+    println!(
         "[CORE] core_watts_avg={:?} source={} n_device={} total_samples={}",
-        core_watts_avg, core_watts_source, core_n, samples.len()
+        core_watts_avg,
+        core_watts_source,
+        core_n,
+        samples.len()
     );
 
     (core_watts_avg, core_watts_source, core_n)

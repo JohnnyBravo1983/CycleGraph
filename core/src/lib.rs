@@ -67,32 +67,16 @@ fn analyze_session_core(
     let weather_applied = true;
 
     let no_power_stream = watts.is_empty();
-    let device_watts_false = device_watts == Some(false);
 
-    if no_power_stream || device_watts_false {
-        let reason = if no_power_stream {
-            "no_power_stream"
-        } else {
-            "device_watts_false"
-        };
-        let avg_pulse = pulses.iter().sum::<f64>() / pulses.len() as f64;
+    // device_watts == Some(false) betyr "ingen device watts tilgjengelig", ikke "disable analyse"
+    // Vi bruker flagget kun som metadata.
+    let has_device_watts = device_watts.unwrap_or(false);
 
+    if no_power_stream {
+        let reason = "no_power_stream";
         return Ok(json!({
-            "mode": "hr_only",
-            "no_power_reason": reason,
-            "avg_pulse": avg_pulse,
-            "avg": 0.0,
-            "NP": 0.0,
-            "calibrated": "Nei",
-            "cda": 0.30,
-            "crr": 0.005,
-            "mae": 0.0,
-            "reason": "hr_only_mode",
-            "weather_applied": weather_applied,
-            "wind_angle_deg": angle_deg,
-            "air_density_kg_per_m3": rho,
-            "precision_watt": 0.0,
-            "precision_watt_ci": 0.0
+            "ok": false,
+            "reason": reason
         }));
     }
 
@@ -129,6 +113,7 @@ fn analyze_session_core(
 
     Ok(json!({
         "mode": "normal",
+        "has_device_watts": has_device_watts,
         "effektivitet": eff,
         "status": status,
         "avg_watt": avg_watt,

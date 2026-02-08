@@ -29,7 +29,8 @@ fly ssh console -a cyclegraph-api
 ## start fly backend 
 fly logs -a cyclegraph-api
 
-
+# 2) Deploy backend til Fly (remote build)
+fly deploy --remote-only -a cyclegraph-api
 
 https://api.cyclegraph.app/api/sessions/list/all?debug=1
 

@@ -2118,12 +2118,24 @@ def _extract_precision_watt_avg(result: Any) -> Optional[float]:
                 v = result.get("precision_watt_avg")
                 return float(v) if v is not None else None
 
-            # 2) metrics / summary / report
+            # 2) metrics / summary / report / session
             for k in ("metrics", "summary", "report", "session"):
                 sub = result.get(k)
                 if isinstance(sub, dict) and "precision_watt_avg" in sub:
                     v = sub.get("precision_watt_avg")
                     return float(v) if v is not None else None
+
+            # 2b) pedal-fallback (ofte hovedverdi for bruker)
+            m = result.get("metrics")
+            if isinstance(m, dict):
+                for key in ("precision_watt_pedal", "total_watt_pedal", "model_watt_wheel_pedal"):
+                    if key in m:
+                        v = m.get(key)
+                        if v is not None:
+                            try:
+                                return float(v)
+                            except Exception:
+                                pass
 
             # 3) alternative navn (hvis dere bruker annet internt)
             for alt in ("precision_watt_mean", "precision_watt", "avg_precision_watt"):
