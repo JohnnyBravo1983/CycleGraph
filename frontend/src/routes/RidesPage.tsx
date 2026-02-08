@@ -6,6 +6,8 @@ import { cgApi, type SessionListItem } from "../lib/cgApi";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides } from "../demo/demoRides";
 
+type SessionsListResponse = { value: any[]; Count?: number; rows?: any[] } | any[];
+
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 
@@ -81,7 +83,9 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
       : "border-slate-300 bg-gradient-to-r from-slate-50 to-slate-100 text-slate-700 font-medium";
 
   return (
-    <span className={`inline-flex items-center rounded-full border-2 px-3 py-1 text-xs shadow-sm ${cls}`}>
+    <span
+      className={`inline-flex items-center rounded-full border-2 px-3 py-1 text-xs shadow-sm ${cls}`}
+    >
       {children}
     </span>
   );
@@ -142,13 +146,9 @@ const DemoRidesPage: React.FC = () => {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-4 text-base">
-                      <span className="text-slate-700 font-semibold">
-                        🚴 {km.toFixed(1)} km
-                      </span>
+                      <span className="text-slate-700 font-semibold">🚴 {km.toFixed(1)} km</span>
                       <span className="text-slate-400">•</span>
-                      <span className="text-slate-700 font-semibold">
-                        ⏱️ {durationMin} min
-                      </span>
+                      <span className="text-slate-700 font-semibold">⏱️ {durationMin} min</span>
                     </div>
                   </div>
 
@@ -170,7 +170,12 @@ const DemoRidesPage: React.FC = () => {
                 <div className="mt-4 flex items-center gap-2 text-sm font-bold text-indigo-600 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
                   <span>Open ride details</span>
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </div>
               </Link>
@@ -195,8 +200,34 @@ const RealRidesPage: React.FC = () => {
   const lastReloadKeyRef = useRef<string>("");
   const didInitRef = useRef<boolean>(false);
 
+  // PATCH B — formatter for watt column (always prefer precision_watt_avg)
+  const formatWatt = (row: any): string => {
+    const v = row?.precision_watt_avg;
+    if (typeof v === "number" && Number.isFinite(v)) return `${Math.round(v)} W`;
+
+    // fallback: older payloads might keep it nested
+    const v2 = row?.metrics?.precision_watt_avg ?? row?.metrics?.precision_watt_pedal;
+    if (typeof v2 === "number" && Number.isFinite(v2)) return `${Math.round(v2)} W`;
+
+    return "—";
+  };
+
+  // PATCH A — Normalize API response (array vs {value:[...]} etc) as a failsafe
+  const normalizeSessionsList = (data: SessionsListResponse): any[] => {
+    if (Array.isArray(data)) return data;
+    const d: any = data as any;
+    if (Array.isArray(d?.value)) return d.value;
+    if (Array.isArray(d?.rows)) return d.rows;
+    return [];
+  };
+
   useEffect(() => {
+    // Load via store (normal path)
     loadSessionsList();
+
+    // Failsafe: if backend returns {value:[...]} and store doesn't normalize,
+    // patch locally by coercing sessionsList once it arrives.
+    // (No-op if store already normalizes or sessionsList is already an array.)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -248,8 +279,12 @@ const RealRidesPage: React.FC = () => {
   }, [uiProfileVersion]);
 
   const rows = useMemo(() => {
-    const raw = (sessionsList ?? []) as SessionListItem[];
-    return [...raw].sort((a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null));
+    // PATCH A: normalize store payload too (defensive)
+    const rawAny = (sessionsList ?? []) as any;
+    const raw = Array.isArray(rawAny) ? rawAny : normalizeSessionsList(rawAny);
+    const typed = (raw ?? []) as SessionListItem[];
+
+    return [...typed].sort((a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null));
   }, [sessionsList]);
 
   if (loadingList) {
@@ -295,7 +330,8 @@ const RealRidesPage: React.FC = () => {
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="inline-flex items-center gap-2 rounded-full border-2 border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm">
-                ui profile_version: <span className="font-mono font-bold">{uiProfileVersion || "n/a"}</span>
+                ui profile_version:{" "}
+                <span className="font-mono font-bold">{uiProfileVersion || "n/a"}</span>
               </span>
               <button
                 type="button"
@@ -313,7 +349,12 @@ const RealRidesPage: React.FC = () => {
             className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
             </svg>
             Oppdater
           </button>
@@ -326,23 +367,20 @@ const RealRidesPage: React.FC = () => {
         ) : (
           <div className="space-y-4">
             {rows.map((s) => {
-              const sid = String(s.session_id ?? s.ride_id ?? "");
-              const wx = weatherBadge(s.weather_source ?? null);
+              const sid = String((s as any).session_id ?? (s as any).ride_id ?? "");
+              const wx = weatherBadge((s as any).weather_source ?? null);
 
-              const distOk = typeof s.distance_km === "number" && Number.isFinite(s.distance_km);
-              const wattOk =
-                typeof s.precision_watt_avg === "number" && Number.isFinite(s.precision_watt_avg);
+              const distOk = typeof (s as any).distance_km === "number" && Number.isFinite((s as any).distance_km);
 
               const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
-              const mins = minutesBetween(s.start_time ?? null, (s as any).end_time ?? null);
-              const startTxt = formatStartDateTime(s.start_time ?? null);
+              const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
+              const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
 
-              const timeRange =
-                endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+              const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
 
-              const kmTxt = distOk ? `${(s.distance_km as number).toFixed(1)} km` : "—";
+              const kmTxt = distOk ? `${((s as any).distance_km as number).toFixed(1)} km` : "—";
 
               return (
                 <div
@@ -361,7 +399,7 @@ const RealRidesPage: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-3">
                         <div className="text-base font-black text-slate-900">{timeRange}</div>
                         <Badge tone={wx.tone}>Vær: {wx.label}</Badge>
-                        <Badge tone="neutral">Profil: {s.profile_label ?? "ukjent"}</Badge>
+                        <Badge tone="neutral">Profil: {(s as any).profile_label ?? "ukjent"}</Badge>
                       </div>
 
                       {/* Metrics */}
@@ -374,7 +412,7 @@ const RealRidesPage: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <span className="text-slate-600 font-medium">⚡ Precision Watt:</span>
                           <span className="font-black text-indigo-600">
-                            {wattOk ? `${fmtNum(s.precision_watt_avg, 0)} W` : "—"}
+                            {formatWatt(s)}
                           </span>
                         </div>
                       </div>
@@ -382,12 +420,29 @@ const RealRidesPage: React.FC = () => {
                       {/* DEV details */}
                       {showDev && (
                         <div className="mt-3 rounded-xl border-2 border-slate-200 bg-slate-50 p-4 text-xs space-y-1 font-mono text-slate-600">
-                          <div><span className="font-bold">session_id:</span> {sid}</div>
-                          <div><span className="font-bold">ride_id:</span> {String(s.ride_id ?? "")}</div>
-                          <div><span className="font-bold">weather_source:</span> {String(s.weather_source ?? "")}</div>
-                          <div><span className="font-bold">start_time:</span> {String(s.start_time ?? "")}</div>
-                          <div><span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}</div>
-                          <div><span className="font-bold">mins:</span> {mins == null ? "—" : String(mins)}</div>
+                          <div>
+                            <span className="font-bold">session_id:</span> {sid}
+                          </div>
+                          <div>
+                            <span className="font-bold">ride_id:</span> {String((s as any).ride_id ?? "")}
+                          </div>
+                          <div>
+                            <span className="font-bold">weather_source:</span>{" "}
+                            {String((s as any).weather_source ?? "")}
+                          </div>
+                          <div>
+                            <span className="font-bold">start_time:</span> {String((s as any).start_time ?? "")}
+                          </div>
+                          <div>
+                            <span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}
+                          </div>
+                          <div>
+                            <span className="font-bold">mins:</span> {mins == null ? "—" : String(mins)}
+                          </div>
+                          <div>
+                            <span className="font-bold">precision_watt_avg:</span>{" "}
+                            {String((s as any).precision_watt_avg ?? "")}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -404,7 +459,12 @@ const RealRidesPage: React.FC = () => {
                       >
                         Åpne
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 5l7 7-7 7"
+                          />
                         </svg>
                       </button>
                       <div className="text-xs text-slate-400 font-medium group-hover:text-slate-600 transition-colors">
