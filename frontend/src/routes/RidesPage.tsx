@@ -11,6 +11,11 @@ type SessionsListResponse = { value: any[]; Count?: number; rows?: any[] } | any
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 
+const getPrecisionWattAvg = (row: any): number | null => {
+  const v = row?.precision_watt_avg;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+};
+
 function parseTime(v?: string | null): number {
   if (!v) return -1;
   const t = Date.parse(v);
@@ -104,9 +109,7 @@ const DemoRidesPage: React.FC = () => {
       <div className="mx-auto max-w-5xl">
         {/* Header */}
         <section className="mb-8">
-          <h1 className="text-4xl font-black tracking-tight text-slate-900 mb-3">
-            Your Rides
-          </h1>
+          <h1 className="text-4xl font-black tracking-tight text-slate-900 mb-3">Your Rides</h1>
           <p className="text-lg text-slate-600 font-medium max-w-2xl">
             Demo-visning av dine økter (hardcoded data). Viser {rows.length} økt(er).
           </p>
@@ -170,12 +173,7 @@ const DemoRidesPage: React.FC = () => {
                 <div className="mt-4 flex items-center gap-2 text-sm font-bold text-indigo-600 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
                   <span>Open ride details</span>
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </div>
               </Link>
@@ -200,18 +198,6 @@ const RealRidesPage: React.FC = () => {
   const lastReloadKeyRef = useRef<string>("");
   const didInitRef = useRef<boolean>(false);
 
-  // PATCH B — formatter for watt column (always prefer precision_watt_avg)
-  const formatWatt = (row: any): string => {
-    const v = row?.precision_watt_avg;
-    if (typeof v === "number" && Number.isFinite(v)) return `${Math.round(v)} W`;
-
-    // fallback: older payloads might keep it nested
-    const v2 = row?.metrics?.precision_watt_avg ?? row?.metrics?.precision_watt_pedal;
-    if (typeof v2 === "number" && Number.isFinite(v2)) return `${Math.round(v2)} W`;
-
-    return "—";
-  };
-
   // PATCH A — Normalize API response (array vs {value:[...]} etc) as a failsafe
   const normalizeSessionsList = (data: SessionsListResponse): any[] => {
     if (Array.isArray(data)) return data;
@@ -222,12 +208,7 @@ const RealRidesPage: React.FC = () => {
   };
 
   useEffect(() => {
-    // Load via store (normal path)
     loadSessionsList();
-
-    // Failsafe: if backend returns {value:[...]} and store doesn't normalize,
-    // patch locally by coercing sessionsList once it arrives.
-    // (No-op if store already normalizes or sessionsList is already an array.)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -279,7 +260,6 @@ const RealRidesPage: React.FC = () => {
   }, [uiProfileVersion]);
 
   const rows = useMemo(() => {
-    // PATCH A: normalize store payload too (defensive)
     const rawAny = (sessionsList ?? []) as any;
     const raw = Array.isArray(rawAny) ? rawAny : normalizeSessionsList(rawAny);
     const typed = (raw ?? []) as SessionListItem[];
@@ -370,17 +350,21 @@ const RealRidesPage: React.FC = () => {
               const sid = String((s as any).session_id ?? (s as any).ride_id ?? "");
               const wx = weatherBadge((s as any).weather_source ?? null);
 
-              const distOk = typeof (s as any).distance_km === "number" && Number.isFinite((s as any).distance_km);
+              const distOk =
+                typeof (s as any).distance_km === "number" &&
+                Number.isFinite((s as any).distance_km);
 
               const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
               const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
               const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
-
               const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
 
               const kmTxt = distOk ? `${((s as any).distance_km as number).toFixed(1)} km` : "—";
+
+              // ✅ PATCH A1 (part 2): UI reads ONLY from top-level SSOT field
+              const pw = getPrecisionWattAvg(s);
 
               return (
                 <div
@@ -412,7 +396,7 @@ const RealRidesPage: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <span className="text-slate-600 font-medium">⚡ Precision Watt:</span>
                           <span className="font-black text-indigo-600">
-                            {formatWatt(s)}
+                            {pw !== null ? `${pw.toFixed(0)} W` : "—"}
                           </span>
                         </div>
                       </div>
@@ -441,7 +425,7 @@ const RealRidesPage: React.FC = () => {
                           </div>
                           <div>
                             <span className="font-bold">precision_watt_avg:</span>{" "}
-                            {String((s as any).precision_watt_avg ?? "")}
+                            {pw === null ? "null" : String(pw)}
                           </div>
                         </div>
                       )}
@@ -459,12 +443,7 @@ const RealRidesPage: React.FC = () => {
                       >
                         Åpne
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M9 5l7 7-7 7"
-                          />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
                       <div className="text-xs text-slate-400 font-medium group-hover:text-slate-600 transition-colors">

@@ -23,14 +23,27 @@ export type ImportResp = {
 };
 
 export type SessionListItem = {
-  session_id: string;
-  ride_id: string;
+  session_id?: string | number;
+  ride_id?: string | number;
   start_time?: string | null;
   distance_km?: number | null;
+
+  // ✅ SSOT: always present on the row object (if available anywhere)
   precision_watt_avg?: number | null;
+
+  // optional nested metrics (older payloads)
+  metrics?: {
+    precision_watt_avg?: number | null;
+    precision_watt_pedal?: number | null;
+    [k: string]: unknown;
+  } | null;
+
   profile_label?: string | null;
   weather_source?: string | null;
   debug_source_path?: string | null;
+
+  // keep any other backend fields without losing them
+  [k: string]: unknown;
 };
 
 // ✅ PATCH 1: legg til ProfileGetResp
@@ -107,7 +120,7 @@ function baseUrl(): string {
  * - Prod: kan være https://api.cyclegraph.app (via env), ellers fallback.
  */
 function apiUrl(pathStartingWithApi: string): string {
-  const base = import.meta.env.PROD 
+  const base = import.meta.env.PROD
     ? "https://api.cyclegraph.app"
     : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
   return base + pathStartingWithApi;
@@ -123,26 +136,45 @@ function extractErrorMessage(json: unknown): unknown {
 }
 
 /**
+ * ✅ PATCH A1 — do not drop fields; normalize precision_watt_avg to top-level
+ */
+function normalizeSessionRow(r: any): SessionListItem {
+  const pw =
+    (typeof r?.precision_watt_avg === "number" ? r.precision_watt_avg : null) ??
+    (typeof r?.metrics?.precision_watt_avg === "number" ? r.metrics.precision_watt_avg : null) ??
+    (typeof r?.metrics?.precision_watt_pedal === "number" ? r.metrics.precision_watt_pedal : null);
+
+  return {
+    ...(isRecord(r) ? (r as Record<string, unknown>) : {}),
+    precision_watt_avg: pw,
+  } as SessionListItem;
+}
+
+/**
  * Backend kan returnere:
  *  - Array: [...]
  *  - Objekt: { value: [...], Count: n } (eller lignende casing)
  */
 function normalizeListAll(json: unknown): SessionListItem[] {
-  if (Array.isArray(json)) return json as SessionListItem[];
+  let rows: any[] = [];
 
-  if (json && typeof json === "object") {
+  if (Array.isArray(json)) {
+    rows = json as any[];
+  } else if (json && typeof json === "object") {
     const v =
       (json as any).value ??
       (json as any).Value ??
+      (json as any).rows ??
+      (json as any).Rows ??
       (json as any).items ??
       (json as any).Items ??
       (json as any).sessions ??
       (json as any).Sessions;
 
-    if (Array.isArray(v)) return v as SessionListItem[];
+    if (Array.isArray(v)) rows = v as any[];
   }
 
-  return [];
+  return rows.map(normalizeSessionRow);
 }
 
 // ✅ PATCH 1 — cgApi: legg til ApiError (typed error for 409/400/etc)
@@ -280,6 +312,7 @@ export const cgApi = {
   },
 
   // ✅ robust list/all: støtter array eller {value: [...], Count: n}
+  // ✅ PATCH A1: also normalizes precision_watt_avg onto top-level for UI SSOT
   async listAll(): Promise<SessionListItem[]> {
     const json = await cgFetchJson<unknown>("/api/sessions/list/all", { method: "GET" });
     return normalizeListAll(json);
