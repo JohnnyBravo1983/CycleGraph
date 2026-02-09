@@ -415,7 +415,7 @@ def _fmt_dt(dt: datetime) -> str:
 
 
 # -------------------------------
-# PATCH C4-REPLACE: “siste mile”
+# PATCH C4-REPLACE: "siste mile"
 # -------------------------------
 
 
@@ -720,7 +720,7 @@ def _safe_get_metrics(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # -------------------------------
-# PATCH D1 — Låst “truth”: liste-watt = detalj-watt
+# PATCH D1 — Låst "truth": liste-watt = detalj-watt
 # -------------------------------
 def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Optional[float]:
     pw_avg = _to_float(doc.get("precision_watt_avg"))
@@ -919,6 +919,80 @@ def _safe_load_json(path: Path) -> dict | None:
         logger.info(f"[LIST] result_read_failed path={path} err={e!r}")
         return None
 
+
+# ============================================================
+# PATCH B2.1 - New helpers for precision_watt_avg hydration
+# ============================================================
+
+def _atomic_write_json(path: Path, obj: Any) -> None:
+    """
+    Atomically write JSON to file.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _extract_precision_watt_from_result(doc: Dict[str, Any]) -> Optional[float]:
+    """
+    SSOT:
+      - result top-level precision_watt_avg
+      - fallback: metrics.precision_watt_avg
+      - fallback: metrics.precision_watt_pedal
+    """
+    v = _to_float(doc.get("precision_watt_avg"))
+    if v is not None:
+        return v
+
+    metrics = doc.get("metrics") or {}
+    if isinstance(metrics, dict):
+        v = _to_float(metrics.get("precision_watt_avg"))
+        if v is not None:
+            return v
+        v = _to_float(metrics.get("precision_watt_pedal"))
+        if v is not None:
+            return v
+
+    return None
+
+
+def _ensure_meta_precision_watt(
+    *,
+    uid_root: Path,
+    sid: str,
+    meta: Dict[str, Any],
+) -> Tuple[Optional[float], bool]:
+    """
+    Returnerer (precision_watt_avg, meta_updated?)
+    meta forventes å være dict keyed by sid -> dict(fields)
+    """
+    cur = meta.get(sid)
+    if not isinstance(cur, dict):
+        cur = {}
+
+    existing = _to_float(cur.get("precision_watt_avg"))
+    if existing is not None:
+        return existing, False
+
+    # hydrate fra result_<sid>.json
+    res_p = uid_root / "sessions" / f"result_{sid}.json"
+    res_doc = _read_json_if_exists(res_p)
+    if not isinstance(res_doc, dict):
+        return None, False
+
+    pw = _extract_precision_watt_from_result(res_doc)
+    if pw is None:
+        return None, False
+
+    cur["precision_watt_avg"] = pw
+    meta[sid] = cur
+    return pw, True
+
+
+# ============================================================
+# UPDATED _build_rows_from_state with PATCH B2.2 integration
+# ============================================================
+
 def _build_rows_from_state(uid: str) -> list[dict]:
     """
     Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
@@ -941,7 +1015,11 @@ def _build_rows_from_state(uid: str) -> list[dict]:
 
     udir = _user_dir(uid)
     idx = _load_json(udir / "sessions_index.json") or {}
-    meta = _load_json(udir / "sessions_meta.json") or {}
+    meta_p = udir / "sessions_meta.json"
+    meta = _load_json(meta_p) or {}
+
+    if not isinstance(meta, dict):
+        meta = {}
 
     sessions: list[str] = []
     if isinstance(idx, dict) and isinstance(idx.get("sessions"), list):
@@ -949,10 +1027,8 @@ def _build_rows_from_state(uid: str) -> list[dict]:
     elif isinstance(idx, list):
         sessions = [str(x) for x in idx]
 
-    if not isinstance(meta, dict):
-        meta = {}
-
     rows: list[dict] = []
+    meta_changed = False
 
     for sid in sessions:
         sid = str(sid).strip()
@@ -1014,24 +1090,16 @@ def _build_rows_from_state(uid: str) -> list[dict]:
                     source = "logs"
 
                 if isinstance(result_doc, dict):
-                    metrics = result_doc.get("metrics", {})
-                    if not isinstance(metrics, dict):
-                        metrics = {}
-
-                    power = (
-                        result_doc.get("precision_watt_avg")
-                        or metrics.get("precision_watt_avg")
-                        or metrics.get("precision_watt")
-                        or metrics.get("precision_watt_pedal")
-                    )
-
-                    if power is not None:
-                        try:
-                            precision_watt_avg = float(power)
-                            debug_src = f"{debug_src}+result:{source}"
-                        except Exception:
-                            # keep None, no logging, no writes
-                            pass
+                    pw = _pick_precision_watt_avg(result_doc, result_doc.get("metrics") or {})
+                    if pw is not None:
+                        precision_watt_avg = pw
+                        debug_src = f"{debug_src}+result:{source}"
+                        
+                        # PATCH B2.2: Update meta if power was found and missing
+                        if m.get("precision_watt_avg") is None:
+                            m["precision_watt_avg"] = pw
+                            meta[sid] = m
+                            meta_changed = True
             except Exception:
                 # listing skal være robust: ikke fail hard her
                 pass
@@ -1062,8 +1130,11 @@ def _build_rows_from_state(uid: str) -> list[dict]:
             "status": status,  # <-- ✅ NY
         })
 
-    return rows
+    # PATCH B2.2: Save meta if changed
+    if meta_changed:
+        _atomic_write_json(meta_p, meta)
 
+    return rows
 
 
 # -----------------------------------
