@@ -202,6 +202,56 @@ def _rebuild_sessions_index_from_sessions_dir(uid: str) -> List[str]:
 
 
 # ----------------------------
+# SSOT helpers (sessions_index.json) - NEW FUNCTIONS
+# ----------------------------
+def _sessions_dir(uid: str) -> Path:
+    return _user_dir(uid) / "sessions"
+
+
+def _list_session_ids_on_disk(uid: str) -> List[str]:
+    sdir = _sessions_dir(uid)
+    if not sdir.exists():
+        return []
+    out: List[str] = []
+    for p in sdir.glob("session_*.json"):
+        sid = p.stem.replace("session_", "").strip()
+        if sid.isdigit():
+            out.append(sid)
+    # newest-ish first
+    out = sorted(set(out), reverse=True)
+    return out
+
+
+def _read_existing_index_ids(uid: str) -> set[str]:
+    p = _sessions_index_path(uid)
+    if not p.exists():
+        return set()
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8-sig"))
+        if isinstance(obj, dict):
+            arr = obj.get("sessions")
+            if isinstance(arr, list):
+                return set(str(x).strip() for x in arr if str(x).strip().isdigit())
+        return set()
+    except Exception:
+        return set()
+
+
+def _maybe_batch_analyze(uid: str, session_ids: List[str]) -> None:
+    """
+    Best-effort analyze. Must NOT crash import/sync if analysis fails.
+    """
+    try:
+        if not session_ids:
+            return
+        # local import to avoid circulars
+        from server.routes.sessions import batch_analyze_sessions_internal  # type: ignore
+        batch_analyze_sessions_internal(str(uid), [str(x) for x in session_ids])
+    except Exception as e:
+        print("[STRAVA][ANALYZE] batch analyze failed:", repr(e))
+
+
+# ----------------------------
 # Sprint 4: sessions_meta.json helpers (list-view cache)
 # Dict format: { "<sid>": { ...fields... } }
 # ----------------------------
@@ -717,41 +767,6 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 
 
 # ----------------------------
-# Patch 3D: internal analyze call MUST forward cg_auth (not cg_uid)
-# ----------------------------
-def _trigger_analyze_local(rid: str, cg_auth: Optional[str]) -> Dict[str, Any]:
-    base = os.getenv("CG_API_BASE") or "http://localhost:5175"
-    url = f"{base}/api/sessions/{rid}/analyze?self_heal=true"
-
-    cookies: Dict[str, str] = {}
-    if cg_auth:
-        cookies["cg_auth"] = str(cg_auth)
-
-    try:
-        r = requests.post(url, json={}, cookies=cookies, timeout=60)
-
-        out: Dict[str, Any] = {
-            "status_code": r.status_code,
-            "url": url,
-            "forwarded_cookies": list(cookies.keys()),
-        }
-
-        try:
-            out["json"] = r.json()
-        except Exception:
-            out["text"] = (r.text or "")[:5000]
-
-        return out
-    except Exception as e:
-        return {
-            "status_code": 0,
-            "error": repr(e),
-            "url": url,
-            "forwarded_cookies": list(cookies.keys()),
-        }
-
-
-# ----------------------------
 # PATCH 2.4-B (A2): chunked/resumable sync endpoint
 # ----------------------------
 def _epoch_now() -> int:
@@ -886,7 +901,8 @@ def sync_strava_activities(
             rid_s = str(rid)
 
             try:
-                out = _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=analyze)
+                # In sync, we set analyze=False and will run batch analyze at the end.
+                out = _import_one(uid=uid, rid=rid_s, cg_auth=cg_auth, analyze=False)
 
                 # If meta-check inside _import_one decided to skip, don't count as imported
                 if isinstance(out, dict) and out.get("skipped") is True:
@@ -930,31 +946,11 @@ def sync_strava_activities(
     # PATCH 4B: SSOT batch-commit: ensure index matches sessions/ after this call
     canonical = _rebuild_sessions_index_from_sessions_dir(uid)
     
+    # ---- batch analyze only new sessions (if analyze is True) ----
     ensured: List[str] = []
-    ensure_errors: List[Dict[str, Any]] = []
-
-    if analyze:
-        try:
-            # Analyze ALL missing results in SSOT, not only those imported in this call
-            sids = list(canonical) if isinstance(canonical, list) else []
-            if not isinstance(sids, list):
-                sids = []
-
-            cap = 300  # juster etter smak
-            for sid in sids:
-                sid = str(sid)
-                rp = state_root() / "users" / uid / "results" / f"result_{sid}.json"
-                if not rp.exists():
-                    try:
-                        _trigger_analyze_local(sid, cg_auth)
-                        ensured.append(sid)
-                        if len(ensured) >= cap:
-                            break
-                    except Exception as e:
-                        ensure_errors.append({"sid": sid, "error": repr(e)})
-        except Exception as e:
-            ensure_errors.append({"sid": "__sync__", "error": f"ensure_failed: {e!r}"})
-
+    if analyze and imported:
+        _maybe_batch_analyze(uid, imported)
+        ensured = imported
 
     return {
         "ok": True,
@@ -982,8 +978,6 @@ def sync_strava_activities(
         "resume_same_page": bool(next_page == cur_page and stop_mid_page),
         "ensure_analyze_count": len(ensured),
         "ensure_analyze": ensured[:50],
-        "ensure_errors_count": len(ensure_errors),
-        "ensure_errors": ensure_errors[:20],
     }
 
 
@@ -1077,7 +1071,8 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
     if analyze:
         try:
-            analyze_out = _trigger_analyze_local(rid, cg_auth)
+            _maybe_batch_analyze(uid, [rid])
+            analyze_out = {"status": "batch_analyze_called"}
         except Exception:
             # best-effort rollback: remove SSOT session so index never points to partial state
             try:
