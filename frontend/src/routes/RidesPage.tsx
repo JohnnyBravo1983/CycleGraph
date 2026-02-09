@@ -264,8 +264,22 @@ const RealRidesPage: React.FC = () => {
     const raw = Array.isArray(rawAny) ? rawAny : normalizeSessionsList(rawAny);
     const typed = (raw ?? []) as SessionListItem[];
 
-    return [...typed].sort((a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null));
+    return [...typed].sort(
+      (a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null)
+    );
   }, [sessionsList]);
+
+  // DEBUG (temporary): verify rows shape + watt fields
+  useEffect(() => {
+    console.log("RIDES rows len", (rows as any)?.length ?? 0);
+    console.log("RIDES sample keys", (rows as any)?.[0] ? Object.keys(rows[0] as any) : null);
+
+    const want = new Set(["15378170998", "15412107820"]);
+    const hits = (rows ?? []).filter((r: any) =>
+      want.has(String(r?.session_id ?? r?.ride_id ?? ""))
+    );
+    console.log("RIDES hits", hits);
+  }, [rows]);
 
   if (loadingList) {
     return (
@@ -363,7 +377,7 @@ const RealRidesPage: React.FC = () => {
 
               const kmTxt = distOk ? `${((s as any).distance_km as number).toFixed(1)} km` : "—";
 
-              // ✅ PATCH A1 (part 2): UI reads ONLY from top-level SSOT field
+              // SSOT: only read from row.precision_watt_avg
               const pw = getPrecisionWattAvg(s);
 
               return (
