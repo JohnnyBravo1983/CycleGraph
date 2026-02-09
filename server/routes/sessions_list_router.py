@@ -1017,6 +1017,10 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
       - data: result_<sid>.json (SSOT) else logs/results fallback
       - NO hydration / NO meta writes
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     udir = _user_dir(uid)
     index_path, wanted, idx_doc, idx_keys = _read_user_sessions_index(udir, uid)
 
@@ -1036,6 +1040,25 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
         ssot_p = _ssot_user_result_path(uid, sid)
         if ssot_p.exists():
             doc = _read_json_if_exists(ssot_p)
+
+            # DEBUG: verify doc shape + watt fields from SSOT
+            if isinstance(doc, dict):
+                try:
+                    pw = doc.get("precision_watt_avg")
+                    metrics_obj = doc.get("metrics") if isinstance(doc.get("metrics"), dict) else {}
+                    mpw = (metrics_obj or {}).get("precision_watt_pedal")
+                    logger.info(
+                        "[LIST_DEBUG] sid=%s doc_keys=%s pw=%s mpw=%s",
+                        sid,
+                        list(doc.keys())[:5],
+                        pw,
+                        mpw,
+                    )
+                except Exception as e:
+                    logger.warning("[LIST_DEBUG] sid=%s debug_extract_failed err=%s", sid, repr(e))
+            else:
+                logger.warning("[LIST_DEBUG] sid=%s doc is not dict: %s", sid, type(doc))
+
             if isinstance(doc, dict):
                 source_path = "state/users/*/results"
                 dbg["ssot_hits"] += 1
@@ -1077,22 +1100,23 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
         status = _compute_status(uid, sid)
         analyzed = bool(_ssot_user_result_path(uid, sid).exists() or _logs_result_path(sid).exists())
 
-        rows.append({
-            "session_id": sid,
-            "ride_id": sid,
-            "start_time": start_time,
-            "end_time": end_time,
-            "distance_km": distance_km,
-            "precision_watt_avg": precision_watt_avg,
-            "profile_label": profile_label,
-            "weather_source": weather_source,
-            "debug_source_path": source_path,
-            "analyzed": analyzed,
-            "status": status,
-        })
+        rows.append(
+            {
+                "session_id": sid,
+                "ride_id": sid,
+                "start_time": start_time,
+                "end_time": end_time,
+                "distance_km": distance_km,
+                "precision_watt_avg": precision_watt_avg,
+                "profile_label": profile_label,
+                "weather_source": weather_source,
+                "debug_source_path": source_path,
+                "analyzed": analyzed,
+                "status": status,
+            }
+        )
 
     return rows, dbg
-
 
 # -----------------------------------
 # Routes
