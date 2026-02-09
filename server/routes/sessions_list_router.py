@@ -29,12 +29,9 @@ _TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
 _LAST_TABS_RE = re.compile(r'"t_abs"\s*:\s*"([^"]+)"')
 
 
-
-STATE_ROOT = Path("/app/state/users")
-
 def _compute_status(uid: str, sid: str) -> str:
-    session_path = STATE_ROOT / uid / "sessions" / f"session_{sid}.json"
-    result_path  = STATE_ROOT / uid / "results"  / f"result_{sid}.json"
+    session_path = state_root() / "users" / uid / "sessions" / f"session_{sid}.json"
+    result_path  = state_root() / "users" / uid / "results"  / f"result_{sid}.json"
 
     if not session_path.exists():
         return "needs_import"
@@ -107,14 +104,32 @@ def _logs_results_dir() -> Path:
 
 
 def _logs_result_path(sid: str) -> Path:
-    # Fly: uvicorn starter fra /app → CWD == /app
+    # Match SessionView semantics: if state_root() is /app/state, logs is /app/logs
     sid2 = _safe_sid(sid)
+    root = state_root()
+    if root.name == "state":
+        return root.parent / "logs" / "results" / f"result_{sid2}.json"
+    # dev fallback
     return Path(os.getcwd()) / "logs" / "results" / f"result_{sid2}.json"
 
 
 def _ssot_user_result_path(uid: str, sid: str) -> Path:
     sid2 = _safe_sid(sid)
     return state_root() / "users" / uid / "results" / f"result_{sid2}.json"
+
+
+def _allow_debug_inputs() -> bool:
+    return os.getenv("CG_ALLOW_DEBUG_INPUTS", "").lower() in ("1", "true", "yes")
+
+
+def _debug_result_path(sid: str) -> Optional[Path]:
+    if not _allow_debug_inputs():
+        return None
+    sid2 = _safe_sid(sid)
+    root = state_root()
+    if root.name == "state":
+        return root.parent / "_debug" / f"result_{sid2}.json"
+    return Path(os.getcwd()) / "_debug" / f"result_{sid2}.json"
 
 
 def _read_json_if_exists(p: Path) -> Optional[Dict[str, Any]]:
@@ -992,133 +1007,91 @@ def _ensure_meta_precision_watt(
 
 
 # ============================================================
-# PATCH B2.5 - Updated _build_rows_from_state with hydration counters
+# PATCH 1 — Gjør list/all til samme SSOT-loader som SessionView
 # ============================================================
 
 def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], Dict[str, Any]]:
     """
-    Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
-
-    Returnerer (rows, ssot_dbg)
+    SSOT list/all:
+      - ownership: sessions_index.json
+      - data: result_<sid>.json (SSOT) else logs/results fallback
+      - NO hydration / NO meta writes
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     udir = _user_dir(uid)
-    idx = _load_json(udir / "sessions_index.json") or {}
-
-    sessions: list[str] = []
-    if isinstance(idx, dict) and isinstance(idx.get("sessions"), list):
-        sessions = [str(x) for x in idx["sessions"]]
-    elif isinstance(idx, list):
-        sessions = [str(x) for x in idx]
-
-    # SSOT debug counters (no hydration)
-    ssot_dbg: Dict[str, Any] = {
-        "checked": 0,
-        "ssot_hit": 0,
-        "logs_fallback_hit": 0,
-        "missing_result_file": 0,
-    }
+    index_path, wanted, idx_doc, idx_keys = _read_user_sessions_index(udir, uid)
 
     rows: list[dict] = []
+    dbg = {"checked": 0, "ssot_hits": 0, "logs_hits": 0, "debug_hits": 0}
+
+    # stable order
+    sessions = sorted(list(wanted), reverse=True)
 
     for sid in sessions:
-        ssot_dbg["checked"] += 1
+        dbg["checked"] += 1
 
-        try:
-            sid = str(sid).strip()
-        except Exception:
-            continue
-        if not sid:
-            continue
+        sid = str(sid).strip()
+        doc: Optional[Dict[str, Any]] = None
+        source_path = None
 
-        # Build row from meta (except power which is SSOT via result files)
-        meta_p = udir / "sessions_meta.json"
-        meta_doc = _load_json(meta_p) or {}
-        if not isinstance(meta_doc, dict):
-            meta_doc = {}
-        m = meta_doc.get(sid, {})
-        if not isinstance(m, dict):
-            m = {}
-
-        start_time = m.get("start_time")
-        end_time = m.get("end_time")
-        distance_km = m.get("distance_km")
-        profile_label = m.get("profile_label")
-        weather_source = m.get("weather_source")
-
-        if distance_km is not None:
-            try:
-                distance_km = float(distance_km)
-            except Exception:
-                distance_km = None
-
-        # SSOT: read result doc exactly like SessionView concept:
-        # 1) state/users/<uid>/results/result_<sid>.json
-        # 2) fallback logs/results/result_<sid>.json
-        doc = None
-        source = None
-
-        try:
-            ssot_p = _ssot_user_result_path(uid, sid)
-        except Exception:
-            ssot_p = udir / "results" / f"result_{sid}.json"
-
+        ssot_p = _ssot_user_result_path(uid, sid)
         if ssot_p.exists():
             doc = _read_json_if_exists(ssot_p)
-            source = "ssot"
             if isinstance(doc, dict):
-                ssot_dbg["ssot_hit"] += 1
+                source_path = "state/users/*/results"
+                dbg["ssot_hits"] += 1
 
         if doc is None:
-            try:
-                logs_p = _logs_result_path(sid)
-            except Exception:
-                logs_p = None
-            if logs_p is not None and logs_p.exists():
+            logs_p = _logs_result_path(sid)
+            if logs_p.exists():
                 doc = _read_json_if_exists(logs_p)
-                source = "logs"
                 if isinstance(doc, dict):
-                    ssot_dbg["logs_fallback_hit"] += 1
+                    source_path = "logs/results"
+                    dbg["logs_hits"] += 1
 
-        precision_watt_avg = None
-        if isinstance(doc, dict):
-            try:
-                precision_watt_avg = _extract_precision_watt_avg(doc)
-            except Exception:
-                precision_watt_avg = None
-        else:
-            ssot_dbg["missing_result_file"] += 1
+        if doc is None and debug:
+            dp = _debug_result_path(sid)
+            if dp is not None and dp.exists():
+                doc = _read_json_if_exists(dp)
+                if isinstance(doc, dict):
+                    source_path = "_debug"
+                    dbg["debug_hits"] += 1
 
-        # Status and analyzed flag
+        if not isinstance(doc, dict):
+            # No doc found => still return row, but power is None
+            doc = {}
+            source_path = "none"
+
+        metrics = doc.get("metrics") if isinstance(doc.get("metrics"), dict) else {}
+        start_time = doc.get("start_time")
+        end_time = doc.get("end_time")
+        distance_km = doc.get("distance_km")
+        profile_label = doc.get("profile_label") or (doc.get("profile_used") or {}).get("profile_label")
+        weather_meta = metrics.get("weather_meta") if isinstance(metrics, dict) else None
+        weather_source = None
+        if isinstance(weather_meta, dict):
+            weather_source = weather_meta.get("provider") or weather_meta.get("source")
+
+        # Use same extraction semantics as sessions.py helper
+        precision_watt_avg = _extract_precision_watt_avg(doc)
+
         status = _compute_status(uid, sid)
-        analyzed = False
-        if status != "needs_import":
-            try:
-                ssot_path = _ssot_user_result_path(uid, sid)
-                logs_path = _logs_result_path(sid)
-                analyzed = bool(ssot_path.exists() or logs_path.exists())
-            except Exception:
-                analyzed = False
+        analyzed = bool(_ssot_user_result_path(uid, sid).exists() or _logs_result_path(sid).exists())
 
-        rows.append(
-            {
-                "session_id": sid,
-                "ride_id": sid,
-                "start_time": start_time,
-                "end_time": end_time,
-                "distance_km": distance_km,
-                "precision_watt_avg": precision_watt_avg,
-                "profile_label": profile_label,
-                "weather_source": weather_source,
-                "debug_source_path": source or "none",
-                "analyzed": analyzed,
-                "status": status,
-            }
-        )
+        rows.append({
+            "session_id": sid,
+            "ride_id": sid,
+            "start_time": start_time,
+            "end_time": end_time,
+            "distance_km": distance_km,
+            "precision_watt_avg": precision_watt_avg,
+            "profile_label": profile_label,
+            "weather_source": weather_source,
+            "debug_source_path": source_path,
+            "analyzed": analyzed,
+            "status": status,
+        })
 
-    return rows, ssot_dbg
+    return rows, dbg
 
 
 # -----------------------------------
@@ -1199,10 +1172,9 @@ async def list_all(
     """
     uid = str(user_id)
     
-    # PATCH B2.5 - Build rows with hydration counters
-    rows, hydr_dbg = _build_rows_from_state(uid, debug=bool(debug))
+    # PATCH 1 - Build rows with SSOT loader (no hydration/meta writes)
+    rows, dbg = _build_rows_from_state(uid, debug=bool(debug))
 
-    # PATCH B2.4 - Start
     resp: Dict[str, Any] = {"value": rows, "Count": len(rows)}
     
     # --- DEBUG FINGERPRINT (TEMP) ---
@@ -1210,7 +1182,7 @@ async def list_all(
     # -------------------------------
 
     if debug:
-        # PATCH B2.4 - Debug hydration stats
+        # PATCH 1 - Debug result sources
         with_pw = 0
         for r in rows:
             try:
@@ -1227,23 +1199,21 @@ async def list_all(
         resp["debug"] = {
             "uid": uid,
             "index_path": str((udir / "sessions_index.json")).replace("\\", "/"),
-            "meta_path": str((udir / "sessions_meta.json")).replace("\\", "/"),
             "index_exists": (udir / "sessions_index.json").exists(),
-            "meta_exists": (udir / "sessions_meta.json").exists(),
             "rows_returned": len(rows),
             "null_power_count": null_power_count,
             "logs_results_dir": str(_logs_results_dir()).replace("\\", "/"),
             "repo_root": str(_repo_root_from_here()).replace("\\", "/"),
         }
         
-        # PATCH B2.4 & B2.5 - New debug hydration stats
+        # PATCH 1 - New debug result sources
         resp["_debug"] = {
             "rows_total": len(rows),
             "rows_with_precision_watt_avg": with_pw,
             "rows_without_precision_watt_avg": len(rows) - with_pw,
-            "hydration": hydr_dbg,  # PATCH B2.5
+            "result_sources": dbg,
+            "allow_debug_inputs": _allow_debug_inputs(),
         }
-    # PATCH B2.4 - End
 
     return resp
 
