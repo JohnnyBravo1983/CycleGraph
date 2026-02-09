@@ -1,4 +1,3 @@
-# server/routes/strava_import_router.py
 from __future__ import annotations
 
 import os
@@ -15,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
 from server.auth_guard import require_auth
 from server.user_state import state_root
+from server.routes.sessions import batch_analyze_sessions_internal  # ← NY LINJE
 
 router = APIRouter(prefix="/api/strava", tags=["strava-import"])
 
