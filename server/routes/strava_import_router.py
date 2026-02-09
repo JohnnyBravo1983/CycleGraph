@@ -245,7 +245,7 @@ def _maybe_batch_analyze(uid: str, session_ids: List[str]) -> None:
         if not session_ids:
             return
         # local import to avoid circulars
-        from server.routes.sessions import batch_analyze_sessions_internal  # type: ignore
+        from server.routes.sessions import batch_analyze_sessions_internal  
         batch_analyze_sessions_internal(str(uid), [str(x) for x in session_ids])
     except Exception as e:
         print("[STRAVA][ANALYZE] batch analyze failed:", repr(e))
@@ -772,9 +772,8 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 def _epoch_now() -> int:
     return int(time.time())
 
-
 @router.post("/sync")
-def sync_strava_activities(
+async def sync_strava_activities(  # ← Endre til async
     request: Request,
     user_id: str = Depends(require_auth),
     # tidsvindu
@@ -946,11 +945,28 @@ def sync_strava_activities(
     # PATCH 4B: SSOT batch-commit: ensure index matches sessions/ after this call
     canonical = _rebuild_sessions_index_from_sessions_dir(uid)
     
-    # ---- batch analyze only new sessions (if analyze is True) ----
+    # ========== AUTO-ANALYZE PATCH ==========
     ensured: List[str] = []
+    analyzed_count = 0
+    
     if analyze and imported:
+        # Old batch analyze (keep for backwards compat if needed)
         _maybe_batch_analyze(uid, imported)
+        
+        # NEW: Auto-analyze via internal function
+        try:
+            result = await batch_analyze_sessions_internal(
+                user_id=uid,
+                force=False,
+                debug=0
+            )
+            analyzed_count = result.get("analyzed", 0)
+            print(f"[SYNC] Auto-analyzed {analyzed_count}/{len(imported)} sessions", file=sys.stderr)
+        except Exception as e:
+            print(f"[SYNC] Auto-analyze failed: {e}", file=sys.stderr)
+        
         ensured = imported
+    # ========== END AUTO-ANALYZE PATCH ==========
 
     return {
         "ok": True,
@@ -978,6 +994,7 @@ def sync_strava_activities(
         "resume_same_page": bool(next_page == cur_page and stop_mid_page),
         "ensure_analyze_count": len(ensured),
         "ensure_analyze": ensured[:50],
+        "auto_analyzed": analyzed_count,  # NEW field
     }
 
 
