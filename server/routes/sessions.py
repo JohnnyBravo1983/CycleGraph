@@ -2781,21 +2781,40 @@ async def analyze_session_core(
                 input_used = candidate
                 break
 
-    # ==================== PATCH: LOAD SAMPLES FROM INPUT_USED (SSOT-FIRST) ====================
+    # ==================== PATCH S5D.1: load full session doc when using session_*.json ====================
+    session_doc_loaded = None
+
     if (not isinstance(samples, list) or len(samples) == 0) and input_used:
         try:
             loaded = None
 
-            # Hvis input_used peker på en session_*.json, last samples fra den
+            # Hvis input_used peker på en session_*.json, last doc + samples fra den
             if isinstance(input_used, str) and input_used.endswith(".json") and "session_" in input_used:
-                loaded = _load_samples_from_session_file(Path(input_used))
+                p_in = Path(input_used)
+
+                try:
+                    session_doc_loaded = _load_json_file(p_in)
+                    if not isinstance(session_doc_loaded, dict):
+                        session_doc_loaded = None
+                except Exception:
+                    session_doc_loaded = None
+
+                loaded = _load_samples_from_session_file(p_in)
 
             if isinstance(loaded, list) and len(loaded) > 0:
                 samples = loaded
                 body["samples"] = loaded
                 input_debug_info["samples_len"] = len(loaded)
+
         except Exception as e:
-            input_debug_info["load_samples_error"] = repr(e)
+           input_debug_info["load_samples_error"] = repr(e)
+
+    if want_debug:
+        input_debug_info["session_doc_loaded"] = bool(isinstance(session_doc_loaded, dict)
+    )
+
+
+
     # ==================== END PATCH ====================
 
                 

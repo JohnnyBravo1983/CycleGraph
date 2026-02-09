@@ -1034,6 +1034,53 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
     except Exception:
         distance_km = None
 
+    # ------------------------------------------------------------
+    # SSOT metadata (distance, hr, duration) — primary from Strava meta
+    # ------------------------------------------------------------
+    distance_m_meta = meta.get("distance") if isinstance(meta, dict) else None
+    distance_km_meta = (float(distance_m_meta) / 1000.0) if isinstance(distance_m_meta, (int, float)) else None
+
+    # Prefer Strava activity.distance; fallback to streams-derived distance_km
+    distance_km_final = distance_km_meta if distance_km_meta is not None else distance_km
+    distance_m_final = float(distance_m_meta) if isinstance(distance_m_meta, (int, float)) else None
+
+    # Duration (prefer elapsed_time; fallback moving_time)
+    elapsed_s = None
+    moving_s = None
+    if isinstance(meta, dict):
+        et = meta.get("elapsed_time")
+        mt = meta.get("moving_time")
+        if isinstance(et, (int, float)) and et > 0:
+            elapsed_s = int(et)
+        if isinstance(mt, (int, float)) and mt > 0:
+            moving_s = int(mt)
+
+    # Heart rate (avg/max) — from Strava activity meta (most reliable)
+    avg_hr_bpm = None
+    max_hr_bpm = None
+    if isinstance(meta, dict):
+        ah = meta.get("average_heartrate")
+        mh = meta.get("max_heartrate")
+        if isinstance(ah, (int, float)) and ah > 0:
+            avg_hr_bpm = float(ah)
+        if isinstance(mh, (int, float)) and mh > 0:
+            max_hr_bpm = float(mh)
+
+    # End time (optional): compute if we have start_time + elapsed_s
+    end_time = None
+    try:
+        if isinstance(meta, dict) and elapsed_s:
+            # start_date is typically ISO8601 (UTC) from Strava
+            st = meta.get("start_date")
+            if isinstance(st, str) and st:
+                # robust parse: accept "Z" suffix
+                st2 = st.replace("Z", "+00:00")
+                dt0 = dt.datetime.fromisoformat(st2)
+                dt1 = dt0 + dt.timedelta(seconds=int(elapsed_s))
+                end_time = dt1.isoformat().replace("+00:00", "Z")
+    except Exception:
+        end_time = None
+
     profile: Dict[str, Any] = {}
     samples = _build_samples_v1(meta, streams)
 
@@ -1041,8 +1088,14 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
         "profile": profile,
         "samples": samples,
         "weather_hint": {},
-        # ensure canonical field exists on the session doc (used later by analysis/list)
-        "distance_km": distance_km,
+        # SSOT core fields (for list + analyze)
+        "distance_km": distance_km_final,
+        "distance_m": distance_m_final,
+        "avg_hr_bpm": avg_hr_bpm,
+        "max_hr_bpm": max_hr_bpm,
+        "elapsed_s": elapsed_s,
+        "moving_s": moving_s,
+        "end_time": end_time,
         "strava": {
             "activity_id": str(rid),
             "sport_type": sport_type,
@@ -1061,18 +1114,6 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
     # ✅ Deterministic list metadata (so Rides list can render without analyze)
     try:
-        # Keep using meta distance too (now also persisted inside session_doc)
-        distance_m = meta.get("distance") if isinstance(meta, dict) else None
-        distance_km_meta = (float(distance_m) / 1000.0) if isinstance(distance_m, (int, float)) else None
-
-        elapsed_s = None
-        if isinstance(meta, dict):
-            for k in ("elapsed_time", "moving_time"):
-                v = meta.get(k)
-                if isinstance(v, (int, float)):
-                    elapsed_s = int(v)
-                    break
-
         start_time = meta.get("start_date") if isinstance(meta, dict) else None
 
         _meta_upsert_v1(
@@ -1081,9 +1122,14 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
             {
                 "session_id": str(rid),
                 "start_time": start_time,
+                "end_time": end_time,
                 "sport_type": sport_type,
-                "distance_km": distance_km_meta,
+                "distance_km": distance_km_final,
+                "distance_m": distance_m_final,
+                "avg_hr_bpm": avg_hr_bpm,
+                "max_hr_bpm": max_hr_bpm,
                 "elapsed_s": elapsed_s,
+                "moving_s": moving_s,
                 "precision_watt_avg": None,  # enriched after analyze
                 "address": None,  # enriched later
                 "has_result": False,
