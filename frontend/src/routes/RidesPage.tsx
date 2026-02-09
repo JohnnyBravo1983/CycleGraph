@@ -14,16 +14,18 @@ type SessionsListResponse = { value: any[]; Count?: number; rows?: any[] } | any
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 
-// SSOT helper
+// PATCH FINAL #1: robust precision watt getter (SSOT + fallback for legacy nested metrics)
 const getPrecisionWattAvg = (row: any): number | null => {
-  const v = row?.precision_watt_avg;
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
-};
+  const v1 = row?.precision_watt_avg;
+  if (typeof v1 === "number" && Number.isFinite(v1)) return v1;
 
-// PATCH E2.D (optional helper) — same as SSOT helper, kept explicit
-const getPw = (row: any): number | null => {
-  const v = row?.precision_watt_avg;
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
+  const v2 = row?.metrics?.precision_watt_avg;
+  if (typeof v2 === "number" && Number.isFinite(v2)) return v2;
+
+  const v3 = row?.metrics?.precision_watt_pedal;
+  if (typeof v3 === "number" && Number.isFinite(v3)) return v3;
+
+  return null;
 };
 
 function parseTime(v?: string | null): number {
@@ -411,13 +413,13 @@ const RealRidesPage: React.FC = () => {
 
               const kmTxt = distOk ? `${((s as any).distance_km as number).toFixed(1)} km` : "—";
 
-              // SSOT: only read from row.precision_watt_avg
+              // PATCH FINAL #2: watt read via robust helper
               const pw = getPrecisionWattAvg(s);
-              const pw2 = getPw(s); // (optional mirror) helps confirm SSOT helper isn't shadowed
 
               return (
                 <div
-                  key={sid}
+                  // PATCH FINAL #3: stable key (never index)
+                  key={String((s as any).session_id ?? (s as any).ride_id ?? "")}
                   role="button"
                   tabIndex={0}
                   onClick={open}
@@ -479,10 +481,6 @@ const RealRidesPage: React.FC = () => {
                             <span className="font-bold">precision_watt_avg:</span>{" "}
                             {pw === null ? "null" : String(pw)}
                           </div>
-                          <div>
-                            <span className="font-bold">getPw(pw2):</span>{" "}
-                            {pw2 === null ? "null" : String(pw2)}
-                          </div>
                         </div>
                       )}
                     </div>
@@ -499,12 +497,7 @@ const RealRidesPage: React.FC = () => {
                       >
                         Åpne
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M9 5l7 7-7 7"
-                          />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
                       <div className="text-xs text-slate-400 font-medium group-hover:text-slate-600 transition-colors">
