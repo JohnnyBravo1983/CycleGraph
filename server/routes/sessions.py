@@ -1253,6 +1253,102 @@ def _extract_start_time_from_samples(samples: list) -> str | None:
         
     return None
 
+# ==================== PATCH: compute distance_km (raw_activity → GPS fallback) ====================
+
+def _try_distance_km_from_raw_activity(sid: str) -> Optional[float]:
+    """
+    Best-effort: les logs/data/raw/activity_<sid>.json og hent distance.
+    Strava activity pleier å ha "distance" i meter.
+    """
+    try:
+        p = _paths_for_sid(str(sid)).get("raw_activity")
+        if not p or (not os.path.exists(p)):
+            return None
+        with open(p, "r", encoding="utf-8-sig") as f:
+            obj = json.load(f)
+        if not isinstance(obj, dict):
+            return None
+
+        # vanlig Strava: {"distance": <meters>}
+        d = obj.get("distance")
+        if isinstance(d, (int, float)) and d > 0:
+            return float(d) / 1000.0
+
+        # fallback navn
+        d2 = obj.get("distance_m") or obj.get("total_distance_m")
+        if isinstance(d2, (int, float)) and d2 > 0:
+            return float(d2) / 1000.0
+    except Exception:
+        return None
+    return None
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    # jordradius meter
+    R = 6371000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2.0)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlmb/2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+def _try_distance_km_from_samples(samples: Any) -> Optional[float]:
+    """
+    Summerer distanse fra GPS samples (lat/lon).
+    Forventer liste av dict med lat/lon (eller latitude/longitude).
+    """
+    try:
+        if not isinstance(samples, list) or len(samples) < 2:
+            return None
+        pts: list[tuple[float, float]] = []
+        for s in samples:
+            if not isinstance(s, dict):
+                continue
+            lat = s.get("lat")
+            lon = s.get("lon")
+            if lat is None or lon is None:
+                lat = s.get("latitude")
+                lon = s.get("longitude")
+            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                # filtrer åpenbare nullpunkter
+                if float(lat) == 0.0 and float(lon) == 0.0:
+                    continue
+                pts.append((float(lat), float(lon)))
+        if len(pts) < 2:
+            return None
+        total_m = 0.0
+        prev = pts[0]
+        for cur in pts[1:]:
+            total_m += _haversine_m(prev[0], prev[1], cur[0], cur[1])
+            prev = cur
+        if total_m <= 0:
+            return None
+        return total_m / 1000.0
+    except Exception:
+        return None
+
+def _fill_distance_km(sid: str, resp: Dict[str, Any], samples: List[Dict]) -> Dict[str, Any]:
+    """
+    Fyll distance_km i responsen hvis den mangler, ved å prøve raw_activity og deretter GPS samples.
+    """
+    try:
+        if isinstance(resp, dict):
+            if resp.get("distance_km") is None:
+                km = _try_distance_km_from_raw_activity(sid)
+                if km is None:
+                    km = _try_distance_km_from_samples(samples)
+                if isinstance(km, (int, float)) and km > 0:
+                    resp["distance_km"] = float(km)
+                    m = resp.get("metrics")
+                    if isinstance(m, dict) and m.get("distance_km") is None:
+                        m["distance_km"] = float(km)
+    except Exception:
+        pass
+    return resp
+
+# ==================== END PATCH DISTANCE ====================
+
 # ==================== ORIGINAL HELPER FUNCTIONS ====================
 
 def _load_result_doc(base_dir: str, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
@@ -2529,6 +2625,10 @@ async def analyze_session_core(
 
                         doc["debug"] = dbg
                         
+                        # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+                        doc = _fill_distance_km(sid, doc, samples if samples else [])
+                        # ==================== END PATCH DISTANCE ====================
+                        
                         return doc
                     # Hvis doc ble invalidert, fortsett til rekompute-grenen
                 else:
@@ -3142,6 +3242,9 @@ async def analyze_session_core(
             err_resp["debug"].update(input_debug_info)
             err_resp = _ensure_contract_shape(err_resp)
             err_resp = _set_basic_ride_fields(err_resp, sid)
+            # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+            err_resp = _fill_distance_km(sid, err_resp, samples)
+            # ==================== END PATCH DISTANCE ====================
             try:
                 _write_observability(err_resp)
             except Exception as e_log:
@@ -3178,6 +3281,9 @@ async def analyze_session_core(
                 err_resp["debug"].update(input_debug_info)
                 err_resp = _ensure_contract_shape(err_resp)
                 err_resp = _set_basic_ride_fields(err_resp, sid)
+                # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+                err_resp = _fill_distance_km(sid, err_resp, samples)
+                # ==================== END PATCH DISTANCE ====================
                 try:
                     _write_observability(err_resp)
                 except Exception as e_log:
@@ -3447,6 +3553,9 @@ async def analyze_session_core(
                     # ==================== END PATCH D1 ====================
 
                     ensured = _set_basic_ride_fields(ensured, sid)
+                    # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+                    ensured = _fill_distance_km(sid, ensured, samples)
+                    # ==================== END PATCH DISTANCE ====================
 
                     try:
                         _write_observability(ensured)
@@ -3464,6 +3573,9 @@ async def analyze_session_core(
                     # ==================== END PATCH D1 ====================
                     
                     resp2 = _set_basic_ride_fields(resp2, sid)
+                    # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+                    resp2 = _fill_distance_km(sid, resp2, samples)
+                    # ==================== END PATCH DISTANCE ====================
                     
                     # ==================== PATCH B2.1: Kopier body debug til resp debug ====================
                     # sørg for at body-debug kommer med ut i response debug (for inspeksjon i PS)
@@ -3504,6 +3616,9 @@ async def analyze_session_core(
                 # ==================== END PATCH D1 ====================
                 
                 err = _set_basic_ride_fields(err, sid)
+                # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+                err = _fill_distance_km(sid, err, samples)
+                # ==================== END PATCH DISTANCE ====================
                 try:
                     _write_observability(err)
                 except Exception as e:
@@ -3632,6 +3747,9 @@ async def analyze_session_core(
     mm["profile_used"] = dict(mu_top)
 
     resp = _set_basic_ride_fields(resp, sid)
+    # ==================== PATCH DISTANCE: fill distance_km if missing ====================
+    resp = _fill_distance_km(sid, resp, samples)
+    # ==================== END PATCH DISTANCE ====================
 
     try:
         _write_observability(resp)
@@ -3883,4 +4001,3 @@ def get_session(
     }
 
     return resp
-

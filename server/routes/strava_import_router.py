@@ -1,3 +1,4 @@
+# server/routes/strava_import_router.py
 from __future__ import annotations
 
 import os
@@ -245,7 +246,8 @@ def _maybe_batch_analyze(uid: str, session_ids: List[str]) -> None:
         if not session_ids:
             return
         # local import to avoid circulars
-        from server.routes.sessions import batch_analyze_sessions_internal  
+        from server.routes.sessions import batch_analyze_sessions_internal
+
         batch_analyze_sessions_internal(str(uid), [str(x) for x in session_ids])
     except Exception as e:
         print("[STRAVA][ANALYZE] batch analyze failed:", repr(e))
@@ -772,6 +774,7 @@ def _write_session_v1(uid: str, rid: str, doc: Dict[str, Any]) -> Dict[str, Any]
 def _epoch_now() -> int:
     return int(time.time())
 
+
 @router.post("/sync")
 async def sync_strava_activities(
     request: Request,
@@ -922,7 +925,9 @@ async def sync_strava_activities(
 
         # Page/window done checks
         done_strava = len(acts) < int(per_page)
-        done_cap = ((cur_page * int(per_page)) >= int(max_activities)) or ((len(imported) + len(skipped)) >= int(max_activities))
+        done_cap = ((cur_page * int(per_page)) >= int(max_activities)) or (
+            (len(imported) + len(skipped)) >= int(max_activities)
+        )
         done_batch = len(imported) >= int(batch_limit)
 
         done = bool(done_strava or done_cap or done_batch)
@@ -944,26 +949,22 @@ async def sync_strava_activities(
 
     # PATCH 4B: SSOT batch-commit: ensure index matches sessions/ after this call
     canonical = _rebuild_sessions_index_from_sessions_dir(uid)
-    
+
     # ========== AUTO-ANALYZE PATCH ==========
     ensured: List[str] = []
     analyzed_count = 0
-    
+
     if analyze and imported:
         # Lazy import to avoid circular dependency
         from server.routes.sessions import batch_analyze_sessions_internal
-        
+
         try:
-            result = await batch_analyze_sessions_internal(
-                user_id=uid,
-                force=False,
-                debug=0
-            )
+            result = await batch_analyze_sessions_internal(user_id=uid, force=False, debug=0)
             analyzed_count = result.get("analyzed", 0)
             print(f"[SYNC] Auto-analyzed {analyzed_count}/{len(imported)} sessions", file=sys.stderr)
         except Exception as e:
             print(f"[SYNC] Auto-analyze failed: {e}", file=sys.stderr)
-        
+
         ensured = imported
     # ========== END AUTO-ANALYZE PATCH ==========
 
@@ -996,6 +997,7 @@ async def sync_strava_activities(
         "auto_analyzed": analyzed_count,
     }
 
+
 def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True) -> Dict[str, Any]:
     rid = str(rid).strip()
 
@@ -1025,6 +1027,13 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
             "reason": "non_cycling_activity",
         }
 
+    # --- PATCH A: distance_km from Strava (meters -> km) ---
+    dist_m = meta.get("distance") if isinstance(meta, dict) else None
+    try:
+        distance_km = float(dist_m) / 1000.0 if dist_m is not None else None
+    except Exception:
+        distance_km = None
+
     profile: Dict[str, Any] = {}
     samples = _build_samples_v1(meta, streams)
 
@@ -1032,12 +1041,17 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
         "profile": profile,
         "samples": samples,
         "weather_hint": {},
+        # ensure canonical field exists on the session doc (used later by analysis/list)
+        "distance_km": distance_km,
         "strava": {
             "activity_id": str(rid),
             "sport_type": sport_type,
             "type": meta.get("type") if isinstance(meta, dict) else None,
             "mode": "indoor"
-            if (isinstance(meta, dict) and (meta.get("trainer") or meta.get("sport_type") == "VirtualRide"))
+            if (
+                isinstance(meta, dict)
+                and (meta.get("trainer") or meta.get("sport_type") == "VirtualRide")
+            )
             else "outdoor",
             "start_date": meta.get("start_date") if isinstance(meta, dict) else None,
         },
@@ -1047,8 +1061,9 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
 
     # ✅ Deterministic list metadata (so Rides list can render without analyze)
     try:
+        # Keep using meta distance too (now also persisted inside session_doc)
         distance_m = meta.get("distance") if isinstance(meta, dict) else None
-        distance_km = (float(distance_m) / 1000.0) if isinstance(distance_m, (int, float)) else None
+        distance_km_meta = (float(distance_m) / 1000.0) if isinstance(distance_m, (int, float)) else None
 
         elapsed_s = None
         if isinstance(meta, dict):
@@ -1067,7 +1082,7 @@ def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True
                 "session_id": str(rid),
                 "start_time": start_time,
                 "sport_type": sport_type,
-                "distance_km": distance_km,
+                "distance_km": distance_km_meta,
                 "elapsed_s": elapsed_s,
                 "precision_watt_avg": None,  # enriched after analyze
                 "address": None,  # enriched later
