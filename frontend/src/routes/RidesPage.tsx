@@ -6,6 +6,9 @@ import { cgApi, type SessionListItem } from "../lib/cgApi";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides } from "../demo/demoRides";
 
+// CANARY (module load)
+console.log("RIDES DEBUG MODULE LOADED v1");
+
 type SessionsListResponse = { value: any[]; Count?: number; rows?: any[] } | any[];
 
 const fmtNum = (n?: number | null, digits = 0): string =>
@@ -100,6 +103,9 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
 // DEMO PAGE
 // -------------------------------
 const DemoRidesPage: React.FC = () => {
+  // CANARY (component render)
+  console.log("RIDES DEBUG COMPONENT RENDER v1");
+
   const rows = useMemo(() => {
     return [...demoRides].sort((a, b) => b.date.localeCompare(a.date));
   }, []);
@@ -189,6 +195,9 @@ const DemoRidesPage: React.FC = () => {
 // REAL PAGE
 // -------------------------------
 const RealRidesPage: React.FC = () => {
+  // CANARY (component render)
+  console.log("RIDES DEBUG COMPONENT RENDER v1");
+
   const navigate = useNavigate();
   const { sessionsList, loadingList, errorList, loadSessionsList } = useSessionStore();
 
@@ -373,7 +382,8 @@ const RealRidesPage: React.FC = () => {
               const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
               const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
-              const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+              const timeRange =
+                endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
 
               const kmTxt = distOk ? `${((s as any).distance_km as number).toFixed(1)} km` : "—";
 
@@ -476,6 +486,9 @@ const RealRidesPage: React.FC = () => {
 };
 
 const RidesPage: React.FC = () => {
+  // CANARY (component render)
+  console.log("RIDES DEBUG COMPONENT RENDER v1");
+
   return isDemoMode() ? <DemoRidesPage /> : <RealRidesPage />;
 };
 
