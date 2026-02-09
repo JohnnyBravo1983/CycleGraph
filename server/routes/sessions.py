@@ -1185,6 +1185,7 @@ def _load_result_doc(base_dir: str, user_id: str, session_id: str) -> Optional[D
     iht. SSOT: state/users/<uid>/sessions_index.json.
 
     Kandidater (etter SSOT-check):
+      0) state/users/<uid>/results/result_<id>.json (SSOT)
       1) _debug/result_<id>.json (fasit fra scriptet)
       2) logs/results/result_<id>.json (fallback/skall)
     """
@@ -1235,7 +1236,19 @@ def _load_result_doc(base_dir: str, user_id: str, session_id: str) -> Optional[D
         return None
 
     # --- Now safe to read result files ---
-    candidates: list[str] = [
+    candidates: list[str] = []
+
+    # 0) SSOT: user-scoped results (Fly volume)
+    try:
+        from server.user_state import state_root  # local import to avoid circulars at module load
+        candidates.append(
+            str(state_root() / "users" / str(user_id) / "results" / f"result_{session_id}.json")
+        )
+    except Exception:
+        pass
+
+    # 1) + 2) legacy/debug fallbacks
+    candidates += [
         os.path.join(base_dir, "_debug", f"result_{session_id}.json"),
         os.path.join(base_dir, "logs", "results", f"result_{session_id}.json"),
     ]

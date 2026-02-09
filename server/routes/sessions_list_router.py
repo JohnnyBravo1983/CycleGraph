@@ -485,7 +485,7 @@ def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optio
     except Exception:
         pass
 
-    cand.append(root / "_debug" / f"session_{sid}.json"
+    cand.append(root / "_debug" / f"session_{sid}.json")
 
     for sp in cand:
         if sp.exists() and sp.is_file():
@@ -974,8 +974,10 @@ def _ensure_meta_precision_watt(
     if existing is not None:
         return existing, False
 
-    # hydrate fra result_<sid>.json
-    res_p = uid_root / "sessions" / f"result_{sid}.json"
+    # hydrate fra SSOT result_<sid>.json
+    # SSOT: /app/state/users/<uid>/results/result_<sid>.json
+    # (ikke /sessions/result_*.json)
+    res_p = uid_root / "results" / f"result_{sid}.json"
     res_doc = _read_json_if_exists(res_p)
     if not isinstance(res_doc, dict):
         return None, False
@@ -1079,14 +1081,19 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
             meta_changed = True
             precision_watt_avg = pw
 
-        # If still missing, check if result file exists
+        # If still missing, check if SSOT result exists
         if pw is None:
-            res_p = uid_root / "sessions" / f"result_{sid}.json"
+            try:
+                res_p = _ssot_user_result_path(uid, str(sid))
+            except Exception:
+                res_p = uid_root / "results" / f"result_{sid}.json"
             if not res_p.exists():
                 hydr_dbg["missing_result_file"] += 1
 
         # Enforce SSOT on row (frontend field)
-        precision_watt_avg = pw
+        # (kun overskriv hvis vi faktisk har en verdi)
+        if pw is not None:
+            precision_watt_avg = pw
 
         # Status and analyzed flag
         status = _compute_status(uid, sid)
