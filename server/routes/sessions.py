@@ -775,6 +775,82 @@ def _meta_bulk_set_precision_watt(uid: str, updates: Dict[str, Optional[float]])
     _write_sessions_meta(uid, meta)
 
 
+# ============================================================
+# PATCH: Internal batch-analyze (no HTTP dependencies)
+# ============================================================
+
+async def batch_analyze_sessions_internal(
+    user_id: str,
+    force: bool = False,
+    debug: int = 0
+) -> dict:
+    """
+    Internal version of batch_analyze_sessions.
+    Used by import/sync to auto-analyze without HTTP overhead.
+    """
+    base_dir = os.getcwd()
+
+    from server.user_state import load_user_sessions_index
+    idx = load_user_sessions_index(base_dir, str(user_id))
+    sids = idx.get("sessions") if isinstance(idx, dict) else []
+    if not isinstance(sids, list):
+        sids = []
+
+    sids = [str(x) for x in sids if str(x)]
+
+    targets: List[str] = []
+    for sid in sids:
+        try:
+            p = _canonical_user_result_path(str(user_id), sid)
+            if force or (not p.exists()):
+                targets.append(sid)
+        except Exception:
+            targets.append(sid)
+
+    analyzed: List[str] = []
+    failed: List[Dict[str, str]] = []
+    meta_updates: Dict[str, Optional[float]] = {}
+
+    for sid in targets:
+        try:
+            resp = await analyze_session_core(
+                uid=str(user_id),
+                sid=str(sid),
+                raw_body=b"",
+                cg_auth=None,
+                no_weather=False,
+                force_recompute=bool(force),
+                debug=int(debug),
+                self_heal=False,
+            )
+
+            _persist_user_result(str(user_id), str(sid), resp)
+
+            watt = _extract_precision_watt_avg(resp)
+            meta_updates[str(sid)] = watt
+
+            analyzed.append(str(sid))
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            failed.append({"sid": str(sid), "error": str(e)})
+            continue
+
+    if meta_updates:
+        _meta_bulk_set_precision_watt(str(user_id), meta_updates)
+
+    return {
+        "count_total": len(sids),
+        "count_target": len(targets),
+        "analyzed": len(analyzed),
+        "failed": len(failed),
+        "errors": failed[:10],
+    }
+
+
+
+
 @router.post("/batch-analyze")
 async def batch_analyze_sessions(
     user_id: str = Depends(require_auth),
