@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
 from server.auth_guard import require_auth
 from server.user_state import state_root
-from server.routes.sessions import batch_analyze_sessions_internal  # ← NY LINJE
+
 
 router = APIRouter(prefix="/api/strava", tags=["strava-import"])
 
@@ -773,7 +773,7 @@ def _epoch_now() -> int:
     return int(time.time())
 
 @router.post("/sync")
-async def sync_strava_activities(  # ← Endre til async
+async def sync_strava_activities(
     request: Request,
     user_id: str = Depends(require_auth),
     # tidsvindu
@@ -847,7 +847,7 @@ async def sync_strava_activities(  # ← Endre til async
                     "errors": errors[:50],
                     "skipped_count": len(skipped),
                     "skipped": skipped[:50],
-                    "next_page": cur_page,  # samme page igjen
+                    "next_page": cur_page,
                     "done": False,
                     "rate_limited": True,
                     "retry_after_s": retry_after_s,
@@ -950,10 +950,9 @@ async def sync_strava_activities(  # ← Endre til async
     analyzed_count = 0
     
     if analyze and imported:
-        # Old batch analyze (keep for backwards compat if needed)
-        _maybe_batch_analyze(uid, imported)
+        # Lazy import to avoid circular dependency
+        from server.routes.sessions import batch_analyze_sessions_internal
         
-        # NEW: Auto-analyze via internal function
         try:
             result = await batch_analyze_sessions_internal(
                 user_id=uid,
@@ -994,9 +993,8 @@ async def sync_strava_activities(  # ← Endre til async
         "resume_same_page": bool(next_page == cur_page and stop_mid_page),
         "ensure_analyze_count": len(ensured),
         "ensure_analyze": ensured[:50],
-        "auto_analyzed": analyzed_count,  # NEW field
+        "auto_analyzed": analyzed_count,
     }
-
 
 def _import_one(uid: str, rid: str, cg_auth: Optional[str], analyze: bool = True) -> Dict[str, Any]:
     rid = str(rid).strip()
