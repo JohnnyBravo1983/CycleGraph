@@ -485,7 +485,7 @@ def _compute_end_time_and_km(root: Path, sid: str) -> Tuple[Optional[str], Optio
     except Exception:
         pass
 
-    cand.append(root / "_debug" / f"session_{sid}.json")
+    cand.append(root / "_debug" / f"session_{sid}.json"
 
     for sp in cand:
         if sp.exists() and sp.is_file():
@@ -990,25 +990,14 @@ def _ensure_meta_precision_watt(
 
 
 # ============================================================
-# UPDATED _build_rows_from_state with PATCH B2.2 integration
+# PATCH B2.5 - Updated _build_rows_from_state with hydration counters
 # ============================================================
 
-def _build_rows_from_state(uid: str) -> list[dict]:
+def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], Dict[str, Any]]:
     """
     Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
-
-    PATCH (listing-only):
-    - Ingen "enrichment"-logging (✅ Enriched ...).
-    - Ingen stats-logging ("List enrichment stats ...").
-    - Aldri skriv tilbake til sessions_meta.json fra listing.
-    - Les kun det som finnes (meta/result), men aldri persister og aldri logg enriched.
-    - Legg til `status = _compute_status(uid, sid)` i hver row.
-
-    Viktig:
-    - For status == "needs_import": det er OK at start/distance/power er None.
-      Ikke "fyll inn" fra meta eller logs/results hvis de mangler (vi prøver ikke å hente/derivere mer).
-    - For status == "needs_analysis": session finnes, men result mangler.
-      Da kan start/distance komme fra meta (om det finnes), men ingenting skrives.
+    
+    Returnerer (rows, hydr_dbg)
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -1016,10 +1005,10 @@ def _build_rows_from_state(uid: str) -> list[dict]:
     udir = _user_dir(uid)
     idx = _load_json(udir / "sessions_index.json") or {}
     meta_p = udir / "sessions_meta.json"
-    meta = _load_json(meta_p) or {}
+    meta_doc = _load_json(meta_p) or {}
 
-    if not isinstance(meta, dict):
-        meta = {}
+    if not isinstance(meta_doc, dict):
+        meta_doc = {}
 
     sessions: list[str] = []
     if isinstance(idx, dict) and isinstance(idx.get("sessions"), list):
@@ -1027,30 +1016,40 @@ def _build_rows_from_state(uid: str) -> list[dict]:
     elif isinstance(idx, list):
         sessions = [str(x) for x in idx]
 
+    # PATCH B2.5 - Initialize hydration debug counters
+    hydr_dbg = {
+        "checked": 0,
+        "had_pw_initially": 0,
+        "hydrated_now": 0,
+        "missing_result_file": 0,
+        "meta_written": False,
+    }
+    
     rows: list[dict] = []
     meta_changed = False
+    uid_root = udir
 
     for sid in sessions:
         sid = str(sid).strip()
         if not sid:
             continue
 
-        status = _compute_status(uid, sid)  # ✅ NY
+        # Increment checked counter
+        hydr_dbg["checked"] += 1
 
-        m = meta.get(sid, {})
+        # Get meta for this session
+        m = meta_doc.get(sid, {})
         if not isinstance(m, dict):
             m = {}
 
-        # Default: les kun fra meta (ingen Strava-fetch, ingen persistering)
+        # Build initial row from meta
         start_time = m.get("start_time")
         distance_km = m.get("distance_km")
         end_time = m.get("end_time")
         profile_label = m.get("profile_label")
         weather_source = m.get("weather_source")
-
-        debug_src = "sessions_meta"
-
-        # Parse numeric fields defensivt (uten å skrive tilbake)
+        
+        # Parse numeric fields
         if distance_km is not None:
             try:
                 distance_km = float(distance_km)
@@ -1064,49 +1063,33 @@ def _build_rows_from_state(uid: str) -> list[dict]:
             except Exception:
                 precision_watt_avg = None
 
-        # ---- Listing-only power read (no writes, no "✅ Enriched" logs) ----
-        #
-        # For needs_import: do NOT attempt to derive/fill anything if missing.
-        # (Leave start/distance/power as-is; it's OK that they are None.)
-        #
-        # For other statuses: if power missing, we may read existing result-docs
-        # (SSOT first, then logs) to display power *if already computed*.
-        if status != "needs_import" and precision_watt_avg is None:
-            ssot_path = _ssot_user_result_path(uid, sid)
-            logs_path = _logs_result_path(sid)
+        # Check if row already had power initially
+        if precision_watt_avg is not None:
+            hydr_dbg["had_pw_initially"] += 1
 
-            result_doc = None
-            source = None
+        # Hydrate power from result -> meta (ONLY if missing)
+        pw, updated = _ensure_meta_precision_watt(
+            uid_root=uid_root, 
+            sid=str(sid), 
+            meta=meta_doc
+        )
 
-            try:
-                # 1) SSOT først
-                if ssot_path.exists():
-                    result_doc = _read_json_if_exists(ssot_path)
-                    source = "ssot"
+        if updated:
+            hydr_dbg["hydrated_now"] += 1
+            meta_changed = True
+            precision_watt_avg = pw
 
-                # 2) Fallback: logs
-                if result_doc is None and logs_path.exists():
-                    result_doc = _read_json_if_exists(logs_path)
-                    source = "logs"
+        # If still missing, check if result file exists
+        if pw is None:
+            res_p = uid_root / "sessions" / f"result_{sid}.json"
+            if not res_p.exists():
+                hydr_dbg["missing_result_file"] += 1
 
-                if isinstance(result_doc, dict):
-                    pw = _pick_precision_watt_avg(result_doc, result_doc.get("metrics") or {})
-                    if pw is not None:
-                        precision_watt_avg = pw
-                        debug_src = f"{debug_src}+result:{source}"
-                        
-                        # PATCH B2.2: Update meta if power was found and missing
-                        if m.get("precision_watt_avg") is None:
-                            m["precision_watt_avg"] = pw
-                            meta[sid] = m
-                            meta_changed = True
-            except Exception:
-                # listing skal være robust: ikke fail hard her
-                pass
+        # Enforce SSOT on row (frontend field)
+        precision_watt_avg = pw
 
-        # ---- analyzed flag (behold feltet, men sett meningsfullt uten writes) ----
-        # Hvis det finnes et resultatdokument (SSOT eller logs), regn som analyzed=True.
-        # Ellers False. (Dette er kun for listing-visning.)
+        # Status and analyzed flag
+        status = _compute_status(uid, sid)
         analyzed = False
         if status != "needs_import":
             try:
@@ -1125,16 +1108,17 @@ def _build_rows_from_state(uid: str) -> list[dict]:
             "precision_watt_avg": precision_watt_avg,
             "profile_label": profile_label,
             "weather_source": weather_source,
-            "debug_source_path": debug_src,
+            "debug_source_path": "sessions_meta",
             "analyzed": analyzed,
-            "status": status,  # <-- ✅ NY
+            "status": status,
         })
 
-    # PATCH B2.2: Save meta if changed
+    # PATCH B2.5: Save meta if changed
     if meta_changed:
-        _atomic_write_json(meta_p, meta)
+        _atomic_write_json(meta_p, meta_doc)
+        hydr_dbg["meta_written"] = True
 
-    return rows
+    return rows, hydr_dbg
 
 
 # -----------------------------------
@@ -1214,13 +1198,15 @@ async def list_all(
     - PATCH: precision_watt_avg berikes fra /logs/results/result_<sid>.json ✅
     """
     uid = str(user_id)
-    rows = _build_rows_from_state(uid)
+    
+    # PATCH B2.5 - Build rows with hydration counters
+    rows, hydr_dbg = _build_rows_from_state(uid, debug=bool(debug))
 
     # PATCH B2.4 - Start
     resp: Dict[str, Any] = {"value": rows, "Count": len(rows)}
     
     # --- DEBUG FINGERPRINT (TEMP) ---
-    resp["_fingerprint"] = "sessions_list_all::B2.4"
+    resp["_fingerprint"] = "sessions_list_all::B2.5"
     # -------------------------------
 
     if debug:
@@ -1250,11 +1236,12 @@ async def list_all(
             "repo_root": str(_repo_root_from_here()).replace("\\", "/"),
         }
         
-        # PATCH B2.4 - New debug hydration stats
+        # PATCH B2.4 & B2.5 - New debug hydration stats
         resp["_debug"] = {
             "rows_total": len(rows),
             "rows_with_precision_watt_avg": with_pw,
             "rows_without_precision_watt_avg": len(rows) - with_pw,
+            "hydration": hydr_dbg,  # PATCH B2.5
         }
     # PATCH B2.4 - End
 
