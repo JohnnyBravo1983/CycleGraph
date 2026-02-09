@@ -14,7 +14,14 @@ type SessionsListResponse = { value: any[]; Count?: number; rows?: any[] } | any
 const fmtNum = (n?: number | null, digits = 0): string =>
   typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 
+// SSOT helper
 const getPrecisionWattAvg = (row: any): number | null => {
+  const v = row?.precision_watt_avg;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+};
+
+// PATCH E2.D (optional helper) — same as SSOT helper, kept explicit
+const getPw = (row: any): number | null => {
   const v = row?.precision_watt_avg;
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 };
@@ -105,6 +112,12 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
 const DemoRidesPage: React.FC = () => {
   // CANARY (component render)
   console.log("RIDES DEBUG COMPONENT RENDER v1");
+
+  // PATCH E2.B — expose demo rows to window
+  (window as any).__CG_RIDES_CANARY = "rides-demo-canary";
+  useEffect(() => {
+    (window as any).__cg_rides_rows = demoRides ?? [];
+  }, []);
 
   const rows = useMemo(() => {
     return [...demoRides].sort((a, b) => b.date.localeCompare(a.date));
@@ -198,6 +211,9 @@ const RealRidesPage: React.FC = () => {
   // CANARY (component render)
   console.log("RIDES DEBUG COMPONENT RENDER v1");
 
+  // PATCH E2.C — expose real canary to window
+  (window as any).__CG_RIDES_CANARY = "rides-real-canary";
+
   const navigate = useNavigate();
   const { sessionsList, loadingList, errorList, loadSessionsList } = useSessionStore();
 
@@ -277,6 +293,11 @@ const RealRidesPage: React.FC = () => {
       (a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null)
     );
   }, [sessionsList]);
+
+  // PATCH E2.C — expose the *rendered* list to window
+  useEffect(() => {
+    (window as any).__cg_rides_rows = rows ?? [];
+  }, [rows]);
 
   // DEBUG (temporary): verify rows shape + watt fields
   useEffect(() => {
@@ -379,7 +400,10 @@ const RealRidesPage: React.FC = () => {
 
               const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
-              const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
+              const mins = minutesBetween(
+                (s as any).start_time ?? null,
+                (s as any).end_time ?? null
+              );
               const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
               const timeRange =
@@ -389,6 +413,7 @@ const RealRidesPage: React.FC = () => {
 
               // SSOT: only read from row.precision_watt_avg
               const pw = getPrecisionWattAvg(s);
+              const pw2 = getPw(s); // (optional mirror) helps confirm SSOT helper isn't shadowed
 
               return (
                 <div
@@ -432,17 +457,20 @@ const RealRidesPage: React.FC = () => {
                             <span className="font-bold">session_id:</span> {sid}
                           </div>
                           <div>
-                            <span className="font-bold">ride_id:</span> {String((s as any).ride_id ?? "")}
+                            <span className="font-bold">ride_id:</span>{" "}
+                            {String((s as any).ride_id ?? "")}
                           </div>
                           <div>
                             <span className="font-bold">weather_source:</span>{" "}
                             {String((s as any).weather_source ?? "")}
                           </div>
                           <div>
-                            <span className="font-bold">start_time:</span> {String((s as any).start_time ?? "")}
+                            <span className="font-bold">start_time:</span>{" "}
+                            {String((s as any).start_time ?? "")}
                           </div>
                           <div>
-                            <span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}
+                            <span className="font-bold">end_time:</span>{" "}
+                            {String((s as any).end_time ?? "")}
                           </div>
                           <div>
                             <span className="font-bold">mins:</span> {mins == null ? "—" : String(mins)}
@@ -450,6 +478,10 @@ const RealRidesPage: React.FC = () => {
                           <div>
                             <span className="font-bold">precision_watt_avg:</span>{" "}
                             {pw === null ? "null" : String(pw)}
+                          </div>
+                          <div>
+                            <span className="font-bold">getPw(pw2):</span>{" "}
+                            {pw2 === null ? "null" : String(pw2)}
                           </div>
                         </div>
                       )}
@@ -467,7 +499,12 @@ const RealRidesPage: React.FC = () => {
                       >
                         Åpne
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 5l7 7-7 7"
+                          />
                         </svg>
                       </button>
                       <div className="text-xs text-slate-400 font-medium group-hover:text-slate-600 transition-colors">
