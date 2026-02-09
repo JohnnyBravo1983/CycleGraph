@@ -1216,14 +1216,29 @@ async def list_all(
     uid = str(user_id)
     rows = _build_rows_from_state(uid)
 
-    out: Dict[str, Any] = {"value": rows, "Count": len(rows)}
+    # PATCH B2.4 - Start
+    resp: Dict[str, Any] = {"value": rows, "Count": len(rows)}
+    
+    # --- DEBUG FINGERPRINT (TEMP) ---
+    resp["_fingerprint"] = "sessions_list_all::B2.4"
+    # -------------------------------
 
     if debug:
+        # PATCH B2.4 - Debug hydration stats
+        with_pw = 0
+        for r in rows:
+            try:
+                v = r.get("precision_watt_avg", None)
+                if isinstance(v, (int, float)):
+                    with_pw += 1
+            except Exception:
+                pass
+
+        # Original debug info preserved
         udir = _user_dir(uid)
-
         null_power_count = sum(1 for r in rows if r.get("precision_watt_avg") is None)
-
-        out["debug"] = {
+        
+        resp["debug"] = {
             "uid": uid,
             "index_path": str((udir / "sessions_index.json")).replace("\\", "/"),
             "meta_path": str((udir / "sessions_meta.json")).replace("\\", "/"),
@@ -1234,8 +1249,16 @@ async def list_all(
             "logs_results_dir": str(_logs_results_dir()).replace("\\", "/"),
             "repo_root": str(_repo_root_from_here()).replace("\\", "/"),
         }
+        
+        # PATCH B2.4 - New debug hydration stats
+        resp["_debug"] = {
+            "rows_total": len(rows),
+            "rows_with_precision_watt_avg": with_pw,
+            "rows_without_precision_watt_avg": len(rows) - with_pw,
+        }
+    # PATCH B2.4 - End
 
-    return out
+    return resp
 
 
 @router.get("/list/_debug_paths")
