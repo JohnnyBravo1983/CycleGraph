@@ -998,19 +998,14 @@ def _ensure_meta_precision_watt(
 def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], Dict[str, Any]]:
     """
     Bygger rows fra state/users/<uid>/sessions_index.json + sessions_meta.json.
-    
-    Returnerer (rows, hydr_dbg)
+
+    Returnerer (rows, ssot_dbg)
     """
     import logging
     logger = logging.getLogger(__name__)
 
     udir = _user_dir(uid)
     idx = _load_json(udir / "sessions_index.json") or {}
-    meta_p = udir / "sessions_meta.json"
-    meta_doc = _load_json(meta_p) or {}
-
-    if not isinstance(meta_doc, dict):
-        meta_doc = {}
 
     sessions: list[str] = []
     if isinstance(idx, dict) and isinstance(idx.get("sessions"), list):
@@ -1018,82 +1013,83 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
     elif isinstance(idx, list):
         sessions = [str(x) for x in idx]
 
-    # PATCH B2.5 - Initialize hydration debug counters
-    hydr_dbg = {
+    # SSOT debug counters (no hydration)
+    ssot_dbg: Dict[str, Any] = {
         "checked": 0,
-        "had_pw_initially": 0,
-        "hydrated_now": 0,
+        "ssot_hit": 0,
+        "logs_fallback_hit": 0,
         "missing_result_file": 0,
-        "meta_written": False,
     }
-    
+
     rows: list[dict] = []
-    meta_changed = False
-    uid_root = udir
 
     for sid in sessions:
-        sid = str(sid).strip()
+        ssot_dbg["checked"] += 1
+
+        try:
+            sid = str(sid).strip()
+        except Exception:
+            continue
         if not sid:
             continue
 
-        # Increment checked counter
-        hydr_dbg["checked"] += 1
-
-        # Get meta for this session
+        # Build row from meta (except power which is SSOT via result files)
+        meta_p = udir / "sessions_meta.json"
+        meta_doc = _load_json(meta_p) or {}
+        if not isinstance(meta_doc, dict):
+            meta_doc = {}
         m = meta_doc.get(sid, {})
         if not isinstance(m, dict):
             m = {}
 
-        # Build initial row from meta
         start_time = m.get("start_time")
-        distance_km = m.get("distance_km")
         end_time = m.get("end_time")
+        distance_km = m.get("distance_km")
         profile_label = m.get("profile_label")
         weather_source = m.get("weather_source")
-        
-        # Parse numeric fields
+
         if distance_km is not None:
             try:
                 distance_km = float(distance_km)
             except Exception:
                 distance_km = None
 
-        precision_watt_avg = m.get("precision_watt_avg")
-        if precision_watt_avg is not None:
+        # SSOT: read result doc exactly like SessionView concept:
+        # 1) state/users/<uid>/results/result_<sid>.json
+        # 2) fallback logs/results/result_<sid>.json
+        doc = None
+        source = None
+
+        try:
+            ssot_p = _ssot_user_result_path(uid, sid)
+        except Exception:
+            ssot_p = udir / "results" / f"result_{sid}.json"
+
+        if ssot_p.exists():
+            doc = _read_json_if_exists(ssot_p)
+            source = "ssot"
+            if isinstance(doc, dict):
+                ssot_dbg["ssot_hit"] += 1
+
+        if doc is None:
             try:
-                precision_watt_avg = float(precision_watt_avg)
+                logs_p = _logs_result_path(sid)
+            except Exception:
+                logs_p = None
+            if logs_p is not None and logs_p.exists():
+                doc = _read_json_if_exists(logs_p)
+                source = "logs"
+                if isinstance(doc, dict):
+                    ssot_dbg["logs_fallback_hit"] += 1
+
+        precision_watt_avg = None
+        if isinstance(doc, dict):
+            try:
+                precision_watt_avg = _extract_precision_watt_avg(doc)
             except Exception:
                 precision_watt_avg = None
-
-        # Check if row already had power initially
-        if precision_watt_avg is not None:
-            hydr_dbg["had_pw_initially"] += 1
-
-        # Hydrate power from result -> meta (ONLY if missing)
-        pw, updated = _ensure_meta_precision_watt(
-            uid_root=uid_root, 
-            sid=str(sid), 
-            meta=meta_doc
-        )
-
-        if updated:
-            hydr_dbg["hydrated_now"] += 1
-            meta_changed = True
-            precision_watt_avg = pw
-
-        # If still missing, check if SSOT result exists
-        if pw is None:
-            try:
-                res_p = _ssot_user_result_path(uid, str(sid))
-            except Exception:
-                res_p = uid_root / "results" / f"result_{sid}.json"
-            if not res_p.exists():
-                hydr_dbg["missing_result_file"] += 1
-
-        # Enforce SSOT on row (frontend field)
-        # (kun overskriv hvis vi faktisk har en verdi)
-        if pw is not None:
-            precision_watt_avg = pw
+        else:
+            ssot_dbg["missing_result_file"] += 1
 
         # Status and analyzed flag
         status = _compute_status(uid, sid)
@@ -1106,26 +1102,23 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
             except Exception:
                 analyzed = False
 
-        rows.append({
-            "session_id": sid,
-            "ride_id": sid,
-            "start_time": start_time,
-            "end_time": end_time,
-            "distance_km": distance_km,
-            "precision_watt_avg": precision_watt_avg,
-            "profile_label": profile_label,
-            "weather_source": weather_source,
-            "debug_source_path": "sessions_meta",
-            "analyzed": analyzed,
-            "status": status,
-        })
+        rows.append(
+            {
+                "session_id": sid,
+                "ride_id": sid,
+                "start_time": start_time,
+                "end_time": end_time,
+                "distance_km": distance_km,
+                "precision_watt_avg": precision_watt_avg,
+                "profile_label": profile_label,
+                "weather_source": weather_source,
+                "debug_source_path": source or "none",
+                "analyzed": analyzed,
+                "status": status,
+            }
+        )
 
-    # PATCH B2.5: Save meta if changed
-    if meta_changed:
-        _atomic_write_json(meta_p, meta_doc)
-        hydr_dbg["meta_written"] = True
-
-    return rows, hydr_dbg
+    return rows, ssot_dbg
 
 
 # -----------------------------------
