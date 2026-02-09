@@ -452,6 +452,14 @@ const RealRidesPage: React.FC = () => {
                         </div>
                       </div>
 
+                      {/* DEV: remove after debugging */}
+<div className="mt-1 text-[11px] font-mono text-slate-500">
+  sid={String((s as any).session_id ?? (s as any).ride_id ?? "")} · pw=
+  {pw === null ? "null" : String(pw)} · raw=
+  {String((s as any).precision_watt_avg ?? "undefined")}
+</div>
+
+
                       {/* DEV details */}
                       {showDev && (
                         <div className="mt-3 rounded-xl border-2 border-slate-200 bg-slate-50 p-4 text-xs space-y-1 font-mono text-slate-600">
