@@ -524,10 +524,22 @@ export type SessionListItem = {
   session_id: string;
   ride_id: string;
   start_time: string | null;
+  end_time?: string | null; // NEW
+  elapsed_s?: number | null; // NEW
   distance_km: number | null;
   precision_watt_avg: number | null;
+  hr_avg?: number | null; // NEW
+  hr_max?: number | null; // NEW
   profile_label: string | null;
   weather_source: string | null;
+
+  // optional passthroughs (debug/status)
+  analyzed?: any;
+  status?: any;
+  debug_source_path?: string | null;
+
+  // allow extra fields without TS pain
+  [key: string]: any;
 };
 
 // PATCH: Replace fetchSessionsList() komplett
@@ -596,21 +608,21 @@ export async function fetchSessionsList(): Promise<SessionListItem[]> {
     if (!session_id || !ride_id) continue;
 
     out.push({
-      session_id,
-      ride_id,
+      ...rec, // <-- behold alt fra API, inkl hr_avg/hr_max/end_time
+      session_id: String(session_id),
+      ride_id: String(ride_id),
       start_time: rec.start_time != null ? String(rec.start_time) : null,
+      end_time: rec.end_time != null ? String(rec.end_time) : null,
+      elapsed_s:
+        typeof rec.elapsed_s === "number" && Number.isFinite(rec.elapsed_s) ? rec.elapsed_s : null,
       distance_km:
-        typeof rec.distance_km === "number"
-          ? rec.distance_km
-          : rec.distance_km != null
-            ? Number(rec.distance_km)
-            : null,
+        typeof rec.distance_km === "number" && Number.isFinite(rec.distance_km) ? rec.distance_km : null,
       precision_watt_avg:
-        typeof rec.precision_watt_avg === "number"
+        typeof rec.precision_watt_avg === "number" && Number.isFinite(rec.precision_watt_avg)
           ? rec.precision_watt_avg
-          : rec.precision_watt_avg != null
-            ? Number(rec.precision_watt_avg)
-            : null,
+          : null,
+      hr_avg: typeof rec.hr_avg === "number" && Number.isFinite(rec.hr_avg) ? rec.hr_avg : null,
+      hr_max: typeof rec.hr_max === "number" && Number.isFinite(rec.hr_max) ? rec.hr_max : null,
       profile_label: rec.profile_label != null ? String(rec.profile_label) : null,
       weather_source: rec.weather_source != null ? String(rec.weather_source) : null,
     });
