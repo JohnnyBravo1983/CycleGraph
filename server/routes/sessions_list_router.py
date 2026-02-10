@@ -916,6 +916,17 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
 
     # ID
     sid = str(doc.get("session_id") or doc.get("ride_id") or doc.get("id") or fallback_sid)
+    
+    # ========== DEBUG START ==========
+    import sys
+    if sid == "16743906198":
+        print(f"[WX] sid={sid}", file=sys.stderr)
+        print(f"[WX] metrics type={type(metrics).__name__}", file=sys.stderr)
+        print(f"[WX] isinstance(metrics, dict)={isinstance(metrics, dict)}", file=sys.stderr)
+        if isinstance(metrics, dict):
+            print(f"[WX] metrics.weather_source={metrics.get('weather_source')}", file=sys.stderr)
+            print(f"[WX] metrics keys (first 10)={list(metrics.keys())[:10]}", file=sys.stderr)
+    # ========== DEBUG END ==========
 
     # distance_km: les kun eksisterende felt (ingen derive)
     distance_km = _to_float(doc.get("distance_km"))
