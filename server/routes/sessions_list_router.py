@@ -904,7 +904,6 @@ def _pick_precision_watt_avg(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Op
 
     return pw_avg
 
-
 def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> Dict[str, Any]:
     """
     Listing-only row builder:
@@ -927,17 +926,64 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
     # power: bare plukk fra doc/metrics (ingen andre kilder)
     pw_avg = _pick_precision_watt_avg(doc, metrics)
 
-    # weather: dette er ikke enrichment, bare prioritering mellom felter som allerede finnes
-    weather_meta = metrics.get("weather_meta") if isinstance(metrics, dict) else None
-    if not isinstance(weather_meta, dict):
-        weather_meta = {}
+    # ---------------------------------------------------------------------
+    # Weather (deterministic read; NO enrichment, only prioritize existing fields)
+    #
+    # Root cause (S7):
+    # - Newer result docs often store canonical weather on metrics.weather_source
+    # - Older code only looked at metrics.weather_meta.provider/source -> null in list/all
+    #
+    # Priority order:
+    # 1) metrics.weather_source (canonical string)
+    # 2) metrics.weather_meta.provider|source
+    # 3) metrics.weather_used.meta.source|provider
+    # 4) doc.weather_source / doc.weather_meta.provider / doc.weather.source (legacy)
+    # ---------------------------------------------------------------------
+    weather_source = None
 
-    weather_source = (
-        weather_meta.get("provider")
-        or (doc.get("weather_meta") or {}).get("provider")
-        or doc.get("weather_source")
-        or (doc.get("weather") or {}).get("source")
-    )
+    # 1) Prefer canonical metrics.weather_source
+    if isinstance(metrics, dict):
+        ws = metrics.get("weather_source")
+        if isinstance(ws, str) and ws.strip():
+            weather_source = ws.strip()
+
+    # 2) Fallback: metrics.weather_meta.provider|source
+    if weather_source is None and isinstance(metrics, dict):
+        wm = metrics.get("weather_meta")
+        if isinstance(wm, dict):
+            ws = wm.get("provider") or wm.get("source")
+            if isinstance(ws, str) and ws.strip():
+                weather_source = ws.strip()
+
+    # 3) Fallback: metrics.weather_used.meta.source|provider
+    if weather_source is None and isinstance(metrics, dict):
+        wu = metrics.get("weather_used")
+        if isinstance(wu, dict):
+            meta = wu.get("meta")
+            if isinstance(meta, dict):
+                ws = meta.get("source") or meta.get("provider")
+                if isinstance(ws, str) and ws.strip():
+                    weather_source = ws.strip()
+
+    # 4) Legacy fallbacks from doc (top-level)
+    if weather_source is None:
+        ws = doc.get("weather_source")
+        if isinstance(ws, str) and ws.strip():
+            weather_source = ws.strip()
+
+    if weather_source is None:
+        dm = doc.get("weather_meta")
+        if isinstance(dm, dict):
+            ws = dm.get("provider") or dm.get("source")
+            if isinstance(ws, str) and ws.strip():
+                weather_source = ws.strip()
+
+    if weather_source is None:
+        dw = doc.get("weather")
+        if isinstance(dw, dict):
+            ws = dw.get("source") or dw.get("provider")
+            if isinstance(ws, str) and ws.strip():
+                weather_source = ws.strip()
 
     row: Dict[str, Any] = {
         "session_id": sid,
