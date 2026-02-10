@@ -5,6 +5,7 @@ import json
 import os
 import re
 import logging
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -59,18 +60,83 @@ def _safe_float(x):
         return None
 
 
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6371000.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _distance_km_from_samples(samples: list) -> float | None:
+    # samples may contain non-dicts
+    s = [x for x in samples if isinstance(x, dict)]
+    if not s:
+        return None
+
+    # 1) Prefer GPS distance (lat/lon)
+    pts: list[tuple[float, float]] = []
+    for x in s:
+        if x.get("moving") is False:
+            continue
+        lat = x.get("lat_deg")
+        lon = x.get("lon_deg")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            pts.append((float(lat), float(lon)))
+
+    if len(pts) >= 2:
+        total_m = 0.0
+        last = pts[0]
+        for cur in pts[1:]:
+            total_m += _haversine_m(last[0], last[1], cur[0], cur[1])
+            last = cur
+        km = total_m / 1000.0
+        if 0.1 <= km <= 400.0:
+            return km
+
+    # 2) Fallback: integrate v_ms over t_abs
+    total_m = 0.0
+    prev_t = None
+    prev_v = None
+    for x in s:
+        if x.get("moving") is False:
+            continue
+        t = x.get("t_abs")
+        v = x.get("v_ms")
+        if not isinstance(t, (int, float)) or not isinstance(v, (int, float)):
+            continue
+        t = float(t)
+        v = float(v)
+        if prev_t is not None and prev_v is not None:
+            dt = t - prev_t
+            # guard against bad jumps
+            if 0.0 <= dt <= 10.0:
+                total_m += prev_v * dt
+        prev_t = t
+        prev_v = v
+
+    km = total_m / 1000.0
+    if 0.1 <= km <= 400.0:
+        return km
+
+    return None
+
+
 def _derive_meta_from_samples(samples: list) -> dict:
     """
     Deterministisk meta fra session samples.
     - hr_avg/hr_max fra samples[].hr
     - elapsed_s + end_time fra samples[0].t_abs og samples[-1].t_abs (epoch seconds)
+    - distance_km fra samples (via GPS eller v_ms)
     """
     out = {
         "hr_avg": None,
         "hr_max": None,
         "elapsed_s": None,
         "end_time": None,
-        "distance_km": None,  # holdes None i S6 med mindre vi finner en sikker kilde
+        "distance_km": None,
     }
 
     if not isinstance(samples, list) or not samples:
@@ -105,6 +171,9 @@ def _derive_meta_from_samples(samples: list) -> dict:
             out["elapsed_s"] = int(round(elapsed))
             out["end_time"] = t1  # epoch seconds (float)
 
+    # ---- distance_km ----
+    out["distance_km"] = _distance_km_from_samples(samples)
+
     return out
 
 
@@ -118,78 +187,6 @@ def _load_sessions_meta(meta_path: Path) -> Dict[str, Any]:
     except Exception:
         pass
     return {}
-
-import math
-from typing import Any, Dict, List, Optional, Tuple
-
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6371000.0
-    p1 = math.radians(lat1)
-    p2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(a))
-
-def _distance_km_from_samples(samples: List[Dict[str, Any]]) -> Optional[float]:
-    if not samples:
-        return None
-
-    # 1) GPS haversine (lat_deg/lon_deg)
-    pts: List[Tuple[float, float]] = []
-    for x in samples:
-        if not isinstance(x, dict):
-            continue
-        if x.get("moving") is False:
-            continue
-        lat = x.get("lat_deg")
-        lon = x.get("lon_deg")
-        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-            pts.append((float(lat), float(lon)))
-
-    if len(pts) >= 2:
-        total_m = 0.0
-        last = pts[0]
-        for cur in pts[1:]:
-            total_m += _haversine_m(last[0], last[1], cur[0], cur[1])
-            last = cur
-        if total_m > 0:
-            km = total_m / 1000.0
-            # sanity: ikke skriv absurd dist (kan skje ved GPS-hopp)
-            if 0.1 <= km <= 400.0:
-                return km
-
-    # 2) Fallback: integrate v_ms over dt via t_abs
-    total_m = 0.0
-    prev_t = None
-    prev_v = None
-    for x in samples:
-        if not isinstance(x, dict):
-            continue
-        if x.get("moving") is False:
-            continue
-        t = x.get("t_abs")
-        v = x.get("v_ms")
-        if not isinstance(t, (int, float)) or not isinstance(v, (int, float)):
-            continue
-        t = float(t)
-        v = float(v)
-        if prev_t is not None and prev_v is not None:
-            dt = t - prev_t
-            # sanity: typisk 1s sampling, tillat litt jitter
-            if 0.0 <= dt <= 10.0:
-                total_m += prev_v * dt
-        prev_t = t
-        prev_v = v
-
-    if total_m > 0:
-        km = total_m / 1000.0
-        if 0.1 <= km <= 400.0:
-            return km
-
-    return None
-
-
 
 
 def _atomic_write_json(path: Path, obj: Any) -> None:
@@ -1097,15 +1094,6 @@ def _safe_load_json(path: Path) -> dict | None:
 # PATCH B2.1 - New helpers for precision_watt_avg hydration
 # ============================================================
 
-def _atomic_write_json(path: Path, obj: Any) -> None:
-    """
-    Atomically write JSON to file.
-    """
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
-
-
 def _extract_precision_watt_from_result(doc: Dict[str, Any]) -> Optional[float]:
     """
     SSOT:
@@ -1164,6 +1152,23 @@ def _ensure_meta_precision_watt(
     return pw, True
 
 
+def _distance_km_from_session_samples(uid: str, sid: str) -> Optional[float]:
+    """
+    Les session_<sid>.json for brukeren og beregn distanse fra samples.
+    """
+    session_path = state_root() / "users" / uid / "sessions" / f"session_{sid}.json"
+    if not session_path.exists():
+        return None
+
+    try:
+        doc = json.loads(session_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    samples = doc.get("samples") or []
+    return _distance_km_from_samples(samples)
+
+
 # ============================================================
 # PATCH 1 — Gjør list/all til samme SSOT-loader som SessionView
 # ============================================================
@@ -1197,8 +1202,9 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
         # Vi trenger bare å derivere hvis mangler (best-effort)
         need_hr = (cur.get("hr_avg") is None) and (cur.get("hr_max") is None)
         need_time = (cur.get("elapsed_s") is None) and (cur.get("end_time") is None)
+        need_dist = (cur.get("distance_km") is None)
 
-        if not (need_hr or need_time):
+        if not (need_hr or need_time or need_dist):
             continue
 
         sp = udir / "sessions" / f"session_{sid}.json"
@@ -1320,7 +1326,7 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
         # PATCH S6-B: Merge meta inn i hver row
         # -------------------------------
         m = meta.get(str(sid)) or {}
-        for k in ["hr_avg", "hr_max", "elapsed_s", "end_time", "distance_km", "start_time"]:  # <-- Oppdatert med "start_time"
+        for k in ["hr_avg", "hr_max", "elapsed_s", "end_time", "distance_km", "start_time"]:
             if row.get(k) is None and m.get(k) is not None:
                 row[k] = m.get(k)
 
