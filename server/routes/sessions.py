@@ -440,7 +440,8 @@ def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon
         meta["lon_used"] = float(lon)
 
         import datetime
-        meta["hour_iso_utc"] = datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-dT%H:00")
+        # ✅ FIX: %d (dag i måneden) + legg på Z for UTC
+        meta["hour_iso_utc"] = datetime.datetime.utcfromtimestamp(int(ts_hour)).strftime("%Y-%m-%dT%H:00Z")
 
         if fp:
             meta["fp"] = fp
@@ -450,7 +451,6 @@ def _inject_weather_key_meta_into_resp(resp: dict, ts_hour: int, lat: float, lon
         resp["metrics"] = metrics
     except Exception:
         return
-# ==================== END PATCH S3D ====================
 
 # ==================== PATCH 2.3-A: Robust allowed IDs helper functions ====================
 def _allowed_ids_set_from_index(idx: dict) -> set[str]:
@@ -1773,6 +1773,16 @@ def _unix_from_iso_hour(s: str) -> int:
     if ts_epoch is None:
         raise ValueError(f"bad ts_hour: {s!r}")
     return ts_epoch
+
+def _wx_is_valid(wx: dict) -> bool:
+    """Minimumskrav før vi setter weather_applied=True."""
+    if not isinstance(wx, dict):
+        return False
+    wind_ms = _safe_float(wx.get("wind_ms"))
+    wind_dir_deg = _safe_float(wx.get("wind_dir_deg"))
+    return (wind_ms is not None) and (wind_dir_deg is not None)
+
+
     # ==================== END PATCH ====================
 
 async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Optional[Dict[str, float]]:
@@ -1790,9 +1800,9 @@ async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Opt
         # Dato + time i UTC fra ts_hour
         dt_utc = datetime.datetime.utcfromtimestamp(int(ts_hour))
         day = dt_utc.strftime("%Y-%m-%d")
-        wanted_iso = dt_utc.strftime("%Y-%m-dT%H:00")
+        # ✅ FIX: %d (dag i måneden)
+        wanted_iso = dt_utc.strftime("%Y-%m-%dT%H:00")
 
-        # Bruk samme param/key-format som din manuelle "fasit"-URL
         url = (
             "https://archive-api.open-meteo.com/v1/era5"
             f"?latitude={lat}&longitude={lon}"
@@ -1811,11 +1821,9 @@ async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Opt
         hrs = payload.get("hourly") or {}
         times = hrs.get("time") or []
 
-        # Støtt både snake_case og legacy keys, men prefer snake_case
         t2m = hrs.get("temperature_2m") or []
         pmsl = hrs.get("pressure_msl") or []
 
-        # Wind keys: prefer wind_speed_10m (som i manual URL), men fallback til windspeed_10m
         w10 = hrs.get("wind_speed_10m")
         if not w10:
             w10 = hrs.get("windspeed_10m")
@@ -1836,33 +1844,25 @@ async def _fetch_open_meteo_hour_ms(lat: float, lon: float, ts_hour: int) -> Opt
         try:
             idx = times.index(wanted_iso)
         except ValueError:
-            # Fallback: nærmeste time (men innenfor samme day-array)
             idx = min(
                 range(len(times)),
                 key=lambda i: abs(_parse_ts_hour_to_epoch(times[i]) - ts_hour),
             )
 
-        # Les verdier
         t_c = float(t2m[idx])
         p_hpa = float(pmsl[idx])
 
-        # Open-Meteo Archive: wind_speed_10m er typisk km/h → konverter til m/s
         w10_raw = float(w10[idx])
         w10_ms = w10_raw / 3.6
+        w_deg = float(wdir[idx])
 
-        w_deg = float(wdir[idx])  # fra-retning
-
-        # Skaler 10 m → 2 m
         w2_ms = w10_ms * float(REDUCE_10M_TO_2M)
-
-        # Debug-linje som gjør dette 100% verifiserbart ved behov
-        # print(f"[WXDBG] {wanted_iso} idx={idx} T={t_c} P={p_hpa} W10_kmh={w10_raw} DIR={w_deg}", flush=True)
 
         return {
             "air_temp_c": t_c,
             "air_pressure_hpa": p_hpa,
-            "wind_ms": w2_ms,      # endelig m/s (~2 m)
-            "wind_dir_deg": w_deg, # "fra"-retning
+            "wind_ms": w2_ms,
+            "wind_dir_deg": w_deg,
             "meta": {
                 "windspeed_10m_ms": w10_ms,
                 "reduce_factor": REDUCE_10M_TO_2M,
@@ -3103,10 +3103,16 @@ async def analyze_session_core(
     fp = None
     weather_applied = False
 
+    
+    # Hent vær fra server (Open-Meteo) hvis ikke no_weather
+    weather_applied = False
+
     # Hent vær fra server (Open-Meteo) hvis ikke no_weather
     if not no_weather and center_lat is not None and center_lon is not None and ts_hour is not None:
         wx_fetched = await _fetch_open_meteo_hour_ms(float(center_lat), float(center_lon), int(ts_epoch))
-        if wx_fetched:
+
+        # ✅ Kritisk: weather_applied=True kun hvis payload er gyldig
+        if isinstance(wx_fetched, dict) and _wx_is_valid(wx_fetched):
             wx_used = wx_fetched
             wx_used["dir_is_from"] = True
             wx_meta = {
@@ -3118,21 +3124,30 @@ async def analyze_session_core(
                 "unit_wind": "m/s",
                 "cache_key": f"om:{round(center_lat, 4)}:{round(center_lon, 4)}:{ts_hour}",
             }
-            # ==================== PATCH S2B: Bruk _weather_fp_from_key ====================
             fp = _weather_fp_from_key(ts_hour, center_lat, center_lon, "open-meteo/era5")
-            # ==================== END PATCH S2B ====================
             weather_applied = True
-            
-            print(f"[WX] Server fetched weather: T={wx_used['air_temp_c']}°C P={wx_used['air_pressure_hpa']}hPa "
-                  f"wind_2m={wx_used['wind_ms']:.2f} m/s from={wx_used['wind_dir_deg']}° fp={fp[:8]}")
+            print(
+                f"[WX] Server fetched weather: T={wx_used.get('air_temp_c')}°C P={wx_used.get('air_pressure_hpa')}hPa "
+                f"wind_2m={wx_used.get('wind_ms'):.2f} m/s from={wx_used.get('wind_dir_deg')}° "
+                f"fp={fp[:8] if isinstance(fp, str) else 'no-fp'}"
+            )
         else:
-            print(f"[WX] Server weather fetch failed for sid={sid}")
-    else:
+            # fetch returnerte noe truthy/ikke-None, men uten nødvendige felt (eller None)
+            weather_applied = False
+            wx_used = None
+            wx_meta = {}
+            fp = None
+            print(f"[WX] Server weather invalid/empty payload for sid={sid}: {wx_fetched!r}", file=sys.stderr)
+    else:  
         if no_weather:
             print(f"[WX] Weather disabled via no_weather flag for sid={sid}")
         else:
-            print(f"[WX] Missing weather key params for sid={sid}: center_lat={center_lat}, center_lon={center_lon}, ts_hour={ts_hour}")
-    # ==================== END PATCH S3C ====================
+            print(
+                f"[WX] Missing weather key params for sid={sid}: "
+                f"center_lat={center_lat}, center_lon={center_lon}, ts_hour={ts_hour}"
+            )
+
+
 
     # ==================== PATCH: Debug logging for ts_hour ====================
     if want_debug:
@@ -3547,7 +3562,7 @@ async def analyze_session_core(
 
             if rust_has_metrics:
                 # ==================== PATCH S3F: SET TOP-LEVEL WEATHER FIELDS ====================
-                if weather_applied:
+                if weather_applied and wx_used:
                     resp["weather_source"] = "open-meteo/era5"
                     resp["weather_applied"] = True
                 else:
