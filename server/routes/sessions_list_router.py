@@ -40,6 +40,93 @@ def _compute_status(uid: str, sid: str) -> str:
     return "ready"
 
 
+# -------------------------------
+# PATCH S6-A: Meta derivation helpers
+# -------------------------------
+def _safe_float(x):
+    """
+    Safely convert to float, handling NaN and invalid values.
+    """
+    try:
+        if x is None:
+            return None
+        v = float(x)
+        # NaN guard
+        if v != v:
+            return None
+        return v
+    except Exception:
+        return None
+
+
+def _derive_meta_from_samples(samples: list) -> dict:
+    """
+    Deterministisk meta fra session samples.
+    - hr_avg/hr_max fra samples[].hr
+    - elapsed_s + end_time fra samples[0].t_abs og samples[-1].t_abs (epoch seconds)
+    """
+    out = {
+        "hr_avg": None,
+        "hr_max": None,
+        "elapsed_s": None,
+        "end_time": None,
+        "distance_km": None,  # holdes None i S6 med mindre vi finner en sikker kilde
+    }
+
+    if not isinstance(samples, list) or not samples:
+        return out
+
+    # ---- HR ----
+    hrs = []
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+        h = s.get("hr")
+        if isinstance(h, (int, float)):
+            # guard for garbage
+            if 30 <= h <= 240:
+                hrs.append(float(h))
+
+    if hrs:
+        out["hr_avg"] = sum(hrs) / len(hrs)
+        out["hr_max"] = max(hrs)
+
+    # ---- elapsed_s + end_time via t_abs ----
+    s0 = samples[0] if isinstance(samples[0], dict) else None
+    s1 = samples[-1] if isinstance(samples[-1], dict) else None
+
+    t0 = _safe_float(s0.get("t_abs")) if s0 else None
+    t1 = _safe_float(s1.get("t_abs")) if s1 else None
+
+    if t0 is not None and t1 is not None and t1 >= t0:
+        elapsed = t1 - t0
+        # guard: 0..2 døgn
+        if 0 <= elapsed <= 60 * 60 * 24 * 2:
+            out["elapsed_s"] = int(round(elapsed))
+            out["end_time"] = t1  # epoch seconds (float)
+
+    return out
+
+
+def _load_sessions_meta(meta_path: Path) -> Dict[str, Any]:
+    """
+    Load sessions_meta.json safely.
+    """
+    try:
+        if meta_path.exists():
+            return json.loads(meta_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _atomic_write_json(path: Path, obj: Any) -> None:
+    """
+    Atomically write JSON to file.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
 
 
 # -------------------------------
@@ -100,7 +187,6 @@ def _logs_results_dir() -> Path:
         return p
     except Exception:
         return Path("/app/logs/results")
-
 
 
 def _logs_result_path(sid: str) -> Path:
@@ -1024,6 +1110,50 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
     udir = _user_dir(uid)
     index_path, wanted, idx_doc, idx_keys = _read_user_sessions_index(udir, uid)
 
+    # -------------------------------
+    # PATCH S6-A: Load and update sessions_meta.json
+    # -------------------------------
+    meta_path = udir / "sessions_meta.json"
+    meta = _load_sessions_meta(meta_path)
+    meta_changed = False
+
+    # Lazy meta rebuild: deterministisk HR + elapsed for eksisterende sessions
+    for sid in sorted(list(wanted), reverse=True):
+        sid = str(sid).strip()
+        cur = meta.get(sid) or {}
+
+        # Vi trenger bare å derivere hvis mangler (best-effort)
+        need_hr = (cur.get("hr_avg") is None) and (cur.get("hr_max") is None)
+        need_time = (cur.get("elapsed_s") is None) and (cur.get("end_time") is None)
+
+        if not (need_hr or need_time):
+            continue
+
+        sp = udir / "sessions" / f"session_{sid}.json"
+        if not sp.exists():
+            continue
+
+        try:
+            doc = json.loads(sp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        samples = doc.get("samples") or []
+        d = _derive_meta_from_samples(samples)
+
+        before = dict(cur)
+        # Merge bare inn når cur mangler (ikke overskriv)
+        for k, v in d.items():
+            if cur.get(k) is None and v is not None:
+                cur[k] = v
+
+        if cur != before:
+            meta[sid] = cur
+            meta_changed = True
+
+    if meta_changed:
+        _atomic_write_json(meta_path, meta)
+
     rows: list[dict] = []
     dbg = {"checked": 0, "ssot_hits": 0, "logs_hits": 0, "debug_hits": 0}
 
@@ -1100,23 +1230,32 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
         status = _compute_status(uid, sid)
         analyzed = bool(_ssot_user_result_path(uid, sid).exists() or _logs_result_path(sid).exists())
 
-        rows.append(
-            {
-                "session_id": sid,
-                "ride_id": sid,
-                "start_time": start_time,
-                "end_time": end_time,
-                "distance_km": distance_km,
-                "precision_watt_avg": precision_watt_avg,
-                "profile_label": profile_label,
-                "weather_source": weather_source,
-                "debug_source_path": source_path,
-                "analyzed": analyzed,
-                "status": status,
-            }
-        )
+        row = {
+            "session_id": sid,
+            "ride_id": sid,
+            "start_time": start_time,
+            "end_time": end_time,
+            "distance_km": distance_km,
+            "precision_watt_avg": precision_watt_avg,
+            "profile_label": profile_label,
+            "weather_source": weather_source,
+            "debug_source_path": source_path,
+            "analyzed": analyzed,
+            "status": status,
+        }
+
+        # -------------------------------
+        # PATCH S6-B: Merge meta inn i hver row
+        # -------------------------------
+        m = meta.get(str(sid)) or {}
+        for k in ["hr_avg", "hr_max", "elapsed_s", "end_time", "distance_km", "start_time"]:  # <-- Oppdatert med "start_time"
+            if row.get(k) is None and m.get(k) is not None:
+                row[k] = m.get(k)
+
+        rows.append(row)
 
     return rows, dbg
+
 
 # -----------------------------------
 # Routes
@@ -1193,26 +1332,33 @@ async def list_all(
     - PATCH: Bruk sessions_meta.json som cache for start_time + distance_km,
       og fallback til Strava activity én gang per session hvis mangler.
     - PATCH: precision_watt_avg berikes fra /logs/results/result_<sid>.json ✅
+    - PATCH S6: Deriver HR + elapsed fra session samples og cache i meta
     """
     uid = str(user_id)
     
-    # PATCH 1 - Build rows with SSOT loader (no hydration/meta writes)
+    # PATCH 1 - Build rows with SSOT loader (includes S6 meta derivation)
     rows, dbg = _build_rows_from_state(uid, debug=bool(debug))
 
     resp: Dict[str, Any] = {"value": rows, "Count": len(rows)}
     
     # --- DEBUG FINGERPRINT (TEMP) ---
-    resp["_fingerprint"] = "sessions_list_all::B2.5"
+    resp["_fingerprint"] = "sessions_list_all::B2.5+S6"
     # -------------------------------
 
     if debug:
         # PATCH 1 - Debug result sources
         with_pw = 0
+        with_hr = 0
+        with_elapsed = 0
         for r in rows:
             try:
                 v = r.get("precision_watt_avg", None)
                 if isinstance(v, (int, float)):
                     with_pw += 1
+                if r.get("hr_avg") is not None:
+                    with_hr += 1
+                if r.get("elapsed_s") is not None:
+                    with_elapsed += 1
             except Exception:
                 pass
 
@@ -1235,8 +1381,12 @@ async def list_all(
             "rows_total": len(rows),
             "rows_with_precision_watt_avg": with_pw,
             "rows_without_precision_watt_avg": len(rows) - with_pw,
+            "rows_with_hr_avg": with_hr,
+            "rows_with_elapsed_s": with_elapsed,
             "result_sources": dbg,
             "allow_debug_inputs": _allow_debug_inputs(),
+            "meta_path": str((udir / "sessions_meta.json")).replace("\\", "/"),
+            "meta_exists": (udir / "sessions_meta.json").exists(),
         }
 
     return resp
