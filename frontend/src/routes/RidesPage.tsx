@@ -28,17 +28,91 @@ const getPrecisionWattAvg = (row: any): number | null => {
   return null;
 };
 
-function parseTime(v?: string | null): number {
-  if (!v) return -1;
-  const t = Date.parse(v);
-  if (Number.isFinite(t)) return t;
+// -------------------------------
+// PATCH S6-C: HR + elapsed + distance helpers (robust mot None + ulike shape/typer)
+// -------------------------------
+const fmtMmSs = (sec: number | null | undefined): string => {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return "—";
+  const s = Math.round(sec);
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (hh > 0) return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+};
 
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (!m) return -1;
-  const y = Number(m[1]);
-  const mo = Number(m[2]) - 1;
-  const d = Number(m[3]);
-  return new Date(y, mo, d, 12, 0, 0).getTime();
+const fmtHr = (v: any): string => {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return "—";
+  return String(Math.round(v));
+};
+
+const getDistanceKm = (row: any): number | null => {
+  const v =
+    row?.distance_km ??
+    row?.metrics?.distance_km ??
+    row?.distanceKm ??
+    row?.distance; // legacy/alt
+
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  return null;
+};
+
+const getElapsedS = (row: any): number | null => {
+  const v =
+    row?.elapsed_s ??
+    row?.metrics?.elapsed_s ??
+    row?.elapsed ??
+    row?.elapsedSec ??
+    row?.moving_time_s; // mulig senere fallback
+
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  return null;
+};
+
+const getHrAvg = (row: any): number | null => {
+  const v = row?.hr_avg ?? row?.metrics?.hr_avg;
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  return null;
+};
+
+const getHrMax = (row: any): number | null => {
+  const v = row?.hr_max ?? row?.metrics?.hr_max;
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  return null;
+};
+
+// Robust tid parsing: støtt ISO-string, "YYYY-MM-DD", epoch-sek og epoch-ms
+function toMillis(v: any): number | null {
+  if (v == null) return null;
+
+  if (typeof v === "number" && Number.isFinite(v)) {
+    // heuristikk: < 1e11 => seconds, ellers ms
+    return v < 1e11 ? Math.round(v * 1000) : Math.round(v);
+  }
+
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return t;
+
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (m) {
+      const y = Number(m[1]);
+      const mo = Number(m[2]) - 1;
+      const d = Number(m[3]);
+      return new Date(y, mo, d, 12, 0, 0).getTime();
+    }
+
+    // numeric string?
+    const asNum = Number(v);
+    if (Number.isFinite(asNum)) return toMillis(asNum);
+  }
+
+  return null;
+}
+
+function parseTime(v?: string | number | null): number {
+  const t = toMillis(v);
+  return t == null ? -1 : t;
 }
 
 function isEra5(src?: string | null): boolean {
@@ -56,19 +130,17 @@ function weatherBadge(
   return { label: s, tone: "neutral" };
 }
 
-function minutesBetween(start?: string | null, end?: string | null): number | null {
-  if (!start || !end) return null;
-  const a = Date.parse(start);
-  const b = Date.parse(end);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+function minutesBetween(start?: string | number | null, end?: string | number | null): number | null {
+  const a = toMillis(start);
+  const b = toMillis(end);
+  if (a == null || b == null) return null;
   const mins = Math.round((b - a) / 60000);
   return mins >= 0 ? mins : null;
 }
 
-function formatStartDateTime(start?: string | null): string {
-  if (!start) return "Ukjent";
-  const t = Date.parse(start);
-  if (!Number.isFinite(t)) return "Ukjent";
+function formatStartDateTime(start?: string | number | null): string {
+  const t = toMillis(start);
+  if (t == null) return "Ukjent";
   return new Date(t).toLocaleString("nb-NO", {
     day: "2-digit",
     month: "2-digit",
@@ -78,10 +150,9 @@ function formatStartDateTime(start?: string | null): string {
   });
 }
 
-function formatEndTime(end?: string | null): string | null {
-  if (!end) return null;
-  const t = Date.parse(end);
-  if (!Number.isFinite(t)) return null;
+function formatEndTime(end?: string | number | null): string | null {
+  const t = toMillis(end);
+  if (t == null) return null;
   return new Date(t).toLocaleTimeString("nb-NO", {
     hour: "2-digit",
     minute: "2-digit",
@@ -291,9 +362,7 @@ const RealRidesPage: React.FC = () => {
     const raw = Array.isArray(rawAny) ? rawAny : normalizeSessionsList(rawAny);
     const typed = (raw ?? []) as SessionListItem[];
 
-    return [...typed].sort(
-      (a, b) => parseTime(b.start_time ?? null) - parseTime(a.start_time ?? null)
-    );
+    return [...typed].sort((a, b) => parseTime((b as any).start_time ?? null) - parseTime((a as any).start_time ?? null));
   }, [sessionsList]);
 
   // PATCH E2.C — expose the *rendered* list to window
@@ -307,9 +376,7 @@ const RealRidesPage: React.FC = () => {
     console.log("RIDES sample keys", (rows as any)?.[0] ? Object.keys(rows[0] as any) : null);
 
     const want = new Set(["15378170998", "15412107820"]);
-    const hits = (rows ?? []).filter((r: any) =>
-      want.has(String(r?.session_id ?? r?.ride_id ?? ""))
-    );
+    const hits = (rows ?? []).filter((r: any) => want.has(String(r?.session_id ?? r?.ride_id ?? "")));
     console.log("RIDES hits", hits);
   }, [rows]);
 
@@ -396,22 +463,26 @@ const RealRidesPage: React.FC = () => {
               const sid = String((s as any).session_id ?? (s as any).ride_id ?? "");
               const wx = weatherBadge((s as any).weather_source ?? null);
 
-              const distOk =
-                typeof (s as any).distance_km === "number" &&
-                Number.isFinite((s as any).distance_km);
-
               const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
-              const mins = minutesBetween(
-                (s as any).start_time ?? null,
-                (s as any).end_time ?? null
-              );
+              // Time range: støtter både ISO og epoch (sek/ms)
+              const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
               const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
-              const timeRange =
-                endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+              const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
 
-              const kmTxt = distOk ? `${((s as any).distance_km as number).toFixed(1)} km` : "—";
+              // S6 meta (best-effort)
+              const distKm = getDistanceKm(s);
+              const elapsedS = getElapsedS(s);
+              const hrAvg = getHrAvg(s);
+              const hrMax = getHrMax(s);
+
+              const kmTxt = distKm != null ? `${distKm.toFixed(1)} km` : "—";
+              const durTxt = elapsedS != null ? fmtMmSs(elapsedS) : mins != null ? `${mins} min` : "—";
+              const hrTxt =
+                hrAvg != null || hrMax != null
+                  ? `${hrAvg != null ? fmtHr(hrAvg) : "—"} / ${hrMax != null ? fmtHr(hrMax) : "—"}`
+                  : "—";
 
               // PATCH FINAL #2: watt read via robust helper
               const pw = getPrecisionWattAvg(s);
@@ -441,24 +512,35 @@ const RealRidesPage: React.FC = () => {
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-base">
                         <div className="flex items-center gap-2">
                           <span className="text-slate-600 font-medium">🚴 Km:</span>
-                          <span className="font-black text-slate-900">{kmTxt}</span>
+                          <span className="font-black text-slate-900 tabular-nums">{kmTxt}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 font-medium">⏱️ Varighet:</span>
+                          <span className="font-black text-slate-900 tabular-nums">{durTxt}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 font-medium">❤️ HR (avg/max):</span>
+                          <span className="font-black text-slate-900 tabular-nums">{hrTxt}</span>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <span className="text-slate-600 font-medium">⚡ Precision Watt:</span>
-                          <span className="font-black text-indigo-600">
+                          <span className="font-black text-indigo-600 tabular-nums">
                             {pw !== null ? `${pw.toFixed(0)} W` : "—"}
                           </span>
                         </div>
                       </div>
 
                       {/* DEV: remove after debugging */}
-<div className="mt-1 text-[11px] font-mono text-slate-500">
-  sid={String((s as any).session_id ?? (s as any).ride_id ?? "")} · pw=
-  {pw === null ? "null" : String(pw)} · raw=
-  {String((s as any).precision_watt_avg ?? "undefined")}
-</div>
-
+                      <div className="mt-1 text-[11px] font-mono text-slate-500">
+                        sid={String((s as any).session_id ?? (s as any).ride_id ?? "")} · pw=
+                        {pw === null ? "null" : String(pw)} · raw=
+                        {String((s as any).precision_watt_avg ?? "undefined")} · hr=
+                        {hrTxt} · elapsed={elapsedS == null ? "null" : String(elapsedS)} · end=
+                        {String((s as any).end_time ?? "null")}
+                      </div>
 
                       {/* DEV details */}
                       {showDev && (
@@ -467,27 +549,34 @@ const RealRidesPage: React.FC = () => {
                             <span className="font-bold">session_id:</span> {sid}
                           </div>
                           <div>
-                            <span className="font-bold">ride_id:</span>{" "}
-                            {String((s as any).ride_id ?? "")}
+                            <span className="font-bold">ride_id:</span> {String((s as any).ride_id ?? "")}
                           </div>
                           <div>
-                            <span className="font-bold">weather_source:</span>{" "}
-                            {String((s as any).weather_source ?? "")}
+                            <span className="font-bold">weather_source:</span> {String((s as any).weather_source ?? "")}
                           </div>
                           <div>
-                            <span className="font-bold">start_time:</span>{" "}
-                            {String((s as any).start_time ?? "")}
+                            <span className="font-bold">start_time:</span> {String((s as any).start_time ?? "")}
                           </div>
                           <div>
-                            <span className="font-bold">end_time:</span>{" "}
-                            {String((s as any).end_time ?? "")}
+                            <span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}
                           </div>
                           <div>
                             <span className="font-bold">mins:</span> {mins == null ? "—" : String(mins)}
                           </div>
                           <div>
-                            <span className="font-bold">precision_watt_avg:</span>{" "}
-                            {pw === null ? "null" : String(pw)}
+                            <span className="font-bold">elapsed_s:</span>{" "}
+                            {elapsedS == null ? "—" : String(elapsedS)}
+                          </div>
+                          <div>
+                            <span className="font-bold">distance_km:</span>{" "}
+                            {distKm == null ? "—" : String(distKm)}
+                          </div>
+                          <div>
+                            <span className="font-bold">hr_avg/hr_max:</span>{" "}
+                            {hrAvg == null ? "—" : fmtHr(hrAvg)}/{hrMax == null ? "—" : fmtHr(hrMax)}
+                          </div>
+                          <div>
+                            <span className="font-bold">precision_watt_avg:</span> {pw === null ? "null" : String(pw)}
                           </div>
                         </div>
                       )}
