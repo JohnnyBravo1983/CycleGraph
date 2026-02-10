@@ -1,4 +1,3 @@
-// frontend/src/routes/RidesPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSessionStore } from "../state/sessionStore";
@@ -29,6 +28,18 @@ const getPrecisionWattAvg = (row: any): number | null => {
 };
 
 // -------------------------------
+// PATCH S6-C.1: Coerce numeric strings helper
+// -------------------------------
+const coerceNum = (v: any): number | null => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+};
+
+// -------------------------------
 // PATCH S6-C: HR + elapsed + distance helpers (robust mot None + ulike shape/typer)
 // -------------------------------
 const fmtMmSs = (sec: number | null | undefined): string => {
@@ -47,37 +58,41 @@ const fmtHr = (v: any): string => {
 };
 
 const getDistanceKm = (row: any): number | null => {
-  const v =
+  const raw =
     row?.distance_km ??
     row?.metrics?.distance_km ??
     row?.distanceKm ??
     row?.distance; // legacy/alt
 
-  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  const v = coerceNum(raw);
+  if (v != null && v > 0) return v;
   return null;
 };
 
 const getElapsedS = (row: any): number | null => {
-  const v =
+  const raw =
     row?.elapsed_s ??
     row?.metrics?.elapsed_s ??
     row?.elapsed ??
     row?.elapsedSec ??
     row?.moving_time_s; // mulig senere fallback
 
-  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  const v = coerceNum(raw);
+  if (v != null && v > 0) return v;
   return null;
 };
 
 const getHrAvg = (row: any): number | null => {
-  const v = row?.hr_avg ?? row?.metrics?.hr_avg;
-  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  const raw = row?.hr_avg ?? row?.metrics?.hr_avg;
+  const v = coerceNum(raw);
+  if (v != null && v > 0) return v;
   return null;
 };
 
 const getHrMax = (row: any): number | null => {
-  const v = row?.hr_max ?? row?.metrics?.hr_max;
-  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  const raw = row?.hr_max ?? row?.metrics?.hr_max;
+  const v = coerceNum(raw);
+  if (v != null && v > 0) return v;
   return null;
 };
 
