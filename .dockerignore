@@ -1,25 +1,16 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.pytest_cache/
-.venv/
-venv/
+﻿# deps / venv
+node_modules
+frontend/node_modules
+.venv
 
-# Node / frontend build
-frontend/node_modules/
-frontend/dist/
-landing/node_modules/
-landing/dist/
+# caches
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
 
-# Git / misc
-.git/
-.gitignore
+# local/OS/editor
 .DS_Store
-
-# Data/state (skal mountes som volume i prod)
-state/
-data/
-logs/
-_debug/
+Thumbs.db
+**/.~lock.*
+**/*.~lock.*
