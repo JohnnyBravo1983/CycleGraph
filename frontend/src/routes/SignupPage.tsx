@@ -12,8 +12,17 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(false);
 
+  // ✅ Day 1: Demografi under signup (lagres i auth.json)
+  const [gender, setGender] = useState<"" | "male" | "female">("");
+  const [country, setCountry] = useState("");
+  const [city, setCity] = useState("");
+  const [age, setAge] = useState<string>(""); // hold som string for input-kontroll
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const ageNum = Number(age);
+  const ageOk = Number.isFinite(ageNum) && ageNum >= 13 && ageNum <= 100;
 
   const canContinue =
     !submitting &&
@@ -21,6 +30,10 @@ export default function SignupPage() {
     bikeName.trim().length >= 2 &&
     email.trim().includes("@") &&
     password.trim().length >= 8 &&
+    gender !== "" &&
+    country.trim().length >= 2 &&
+    city.trim().length >= 2 &&
+    ageOk &&
     consent;
 
   const reasons = useMemo(
@@ -30,9 +43,14 @@ export default function SignupPage() {
       bikeNameLen: bikeName.trim().length,
       emailHasAt: email.trim().includes("@"),
       passwordLen: password.trim().length,
+      gender,
+      countryLen: country.trim().length,
+      cityLen: city.trim().length,
+      age,
+      ageOk,
       consent,
     }),
-    [submitting, fullName, bikeName, email, password, consent]
+    [submitting, fullName, bikeName, email, password, consent, gender, country, city, age, ageOk]
   );
 
   function mapSignupError(err: unknown): string {
@@ -63,7 +81,12 @@ export default function SignupPage() {
 
     setSubmitting(true);
     try {
-      await cgApi.authSignup(email.trim(), password);
+      await cgApi.authSignup(email.trim(), password, {
+        gender,
+        country: country.trim(),
+        city: city.trim(),
+        age: ageNum,
+      });
       await cgApi.authMe();
       window.location.assign("/onboarding");
       return;
@@ -75,7 +98,7 @@ export default function SignupPage() {
   }
 
   return (
-    <div 
+    <div
       className="min-h-screen flex items-center justify-center px-4 py-12 relative overflow-hidden"
       style={{
         backgroundImage:
@@ -107,9 +130,7 @@ export default function SignupPage() {
         <div className="rounded-3xl border-2 border-white/25 bg-white/95 backdrop-blur-2xl shadow-[0_25px_80px_rgba(0,0,0,0.5)] ring-2 ring-white/30 p-8">
           {/* Header */}
           <div className="text-center mb-6">
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">
-              Opprett konto
-            </h1>
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">Opprett konto</h1>
             <p className="text-sm text-slate-600 font-medium">
               Lag en konto for å lagre profil og analysere økter
             </p>
@@ -125,9 +146,7 @@ export default function SignupPage() {
           {/* Form */}
           <form onSubmit={onSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">
-                Fullt navn
-              </label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">Fullt navn</label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={fullName}
@@ -138,9 +157,7 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">
-                Sykkelnavn
-              </label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">Sykkelnavn</label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={bikeName}
@@ -149,10 +166,62 @@ export default function SignupPage() {
               />
             </div>
 
+            {/* ✅ Day 1: Demografi */}
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">Kjønn</label>
+              <select
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={gender}
+                onChange={(e) => setGender(e.target.value as any)}
+              >
+                <option value="">Velg…</option>
+                <option value="male">Mann</option>
+                <option value="female">Kvinne</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">Land</label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="Norge"
+                autoComplete="country-name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">By</label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="Oslo"
+                autoComplete="address-level2"
+              />
+            </div>
+
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">
-                E-post
+                Alder <span className="text-slate-500 font-medium">(13–100)</span>
               </label>
+              <input
+                className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                type="number"
+                min={13}
+                max={100}
+                placeholder="41"
+              />
+              {!submitting && age.length > 0 && !ageOk && (
+                <div className="mt-2 text-xs font-semibold text-red-700">Alder må være mellom 13 og 100.</div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">E-post</label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={email}
@@ -203,8 +272,20 @@ export default function SignupPage() {
               {submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                      fill="none"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
                   </svg>
                   Oppretter...
                 </span>
@@ -218,10 +299,7 @@ export default function SignupPage() {
           <div className="mt-6 pt-6 border-t-2 border-slate-200 text-center">
             <span className="text-sm text-slate-600 font-medium">
               Har du konto allerede?{" "}
-              <Link 
-                className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors" 
-                to="/login"
-              >
+              <Link className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors" to="/login">
                 Logg inn
               </Link>
             </span>
@@ -234,7 +312,12 @@ export default function SignupPage() {
             to="/"
             className="inline-flex items-center gap-2 text-sm font-bold text-white/90 hover:text-white transition-colors group"
           >
-            <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg
+              className="w-4 h-4 transition-transform group-hover:-translate-x-1"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
             Tilbake til forsiden

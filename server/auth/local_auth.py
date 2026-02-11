@@ -16,6 +16,7 @@ from fastapi import Request, Response
 # Repo-root + state/users (samme idiom som auth_strava.py)
 # -----------------------------------------------------------------------------
 
+
 def _repo_root() -> Path:
     # .../server/auth/local_auth.py -> repo root
     return Path(__file__).resolve().parents[2]
@@ -47,6 +48,7 @@ def _get_or_set_uid(req: Request, resp: Optional[Response] = None) -> str:
 # User storage (per-uid): state/users/<uid>/auth.json
 # -----------------------------------------------------------------------------
 
+
 def _auth_path(uid: str) -> Path:
     return _users_dir() / uid / "auth.json"
 
@@ -71,6 +73,7 @@ def save_auth(uid: str, doc: Dict[str, Any]) -> None:
 # Email index (global): state/users/_email_index.json
 # email (lowercased) -> uid
 # -----------------------------------------------------------------------------
+
 
 def _email_index_path() -> Path:
     return _users_dir() / "_email_index.json"
@@ -128,6 +131,7 @@ def set_uid_for_email(email: str, uid: str) -> None:
 # Format: pbkdf2_sha256$<iters>$<salt_b64>$<hash_b64>
 # -----------------------------------------------------------------------------
 
+
 _PBKDF2_ITERS = int(os.getenv("CG_PBKDF2_ITERS", "200000"))
 
 
@@ -166,6 +170,7 @@ def verify_password(password: str, stored: str) -> bool:
 # Cookie value: base64url(payload_json).base64url(sig)
 # payload: {"uid": "...", "exp": 1234567890}
 # -----------------------------------------------------------------------------
+
 
 COOKIE_NAME = os.getenv("CG_AUTH_COOKIE", "cg_auth")
 
@@ -214,11 +219,20 @@ def verify_session(value: str) -> Optional[Dict[str, Any]]:
 # Public helpers used by routes/middleware
 # -----------------------------------------------------------------------------
 
+
 def ensure_uid(req: Request, resp: Optional[Response] = None) -> str:
     return _get_or_set_uid(req, resp)
 
 
-def signup_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:
+def signup_for_uid(
+    uid: str,
+    email: str,
+    password: str,
+    gender: str,
+    country: str,
+    city: str,
+    age: int,
+) -> Dict[str, Any]:
     email_norm = (email or "").strip().lower()
     if not email_norm or "@" not in email_norm:
         raise ValueError("Invalid email.")
@@ -237,6 +251,11 @@ def signup_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:
         "email": email_norm,
         "password_hash": hash_password(password),
         "created_at": int(time.time()),
+        # ✅ Day 1: demografi lagres i auth.json
+        "gender": gender,
+        "country": (country or "").strip(),
+        "city": (city or "").strip(),
+        "age": int(age),
     }
     save_auth(uid, doc)
 

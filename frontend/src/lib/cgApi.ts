@@ -70,6 +70,12 @@ export type ProfileSaveBody = Record<string, unknown> | { profile: Record<string
 export type AuthBody = {
   email: string;
   password: string;
+
+  // ✅ Day 1: demografi under signup (lagres i auth.json)
+  gender?: "male" | "female";
+  country?: string;
+  city?: string;
+  age?: number;
 };
 
 const BASE =
@@ -270,10 +276,20 @@ async function profileSave(body: ProfileSaveBody): Promise<ProfileSaveResp> {
 }
 
 // ✅ PATCH: authSignup/authLogin (for SignupPage.tsx)
-async function authSignup(email: string, password: string): Promise<void> {
+async function authSignup(
+  email: string,
+  password: string,
+  extra?: { gender: "male" | "female"; country: string; city: string; age: number }
+): Promise<void> {
   await cgFetchJson<unknown>("/api/auth/signup", {
     method: "POST",
-    body: JSON.stringify({ email, password } satisfies AuthBody),
+    body: JSON.stringify(
+      {
+        email,
+        password,
+        ...(extra ?? {}),
+      } satisfies AuthBody
+    ),
   });
 }
 

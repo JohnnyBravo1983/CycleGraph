@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import secrets
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -25,6 +27,10 @@ COOKIE_TTL = int(os.getenv("CG_AUTH_TTL_SECONDS", str(60 * 60 * 24 * 7)))  # 7d
 class SignupIn(BaseModel):
     email: str = Field(..., min_length=3)
     password: str = Field(..., min_length=8)
+    gender: Literal["male", "female"]
+    country: str = Field(..., min_length=2)
+    city: str = Field(..., min_length=2)
+    age: int = Field(..., ge=13, le=100)
 
 
 class LoginIn(BaseModel):
@@ -77,7 +83,15 @@ def signup(req: Request, payload: SignupIn):
     uid = "u_" + secrets.token_urlsafe(16).replace("-", "").replace("_", "")
 
     try:
-        u = signup_for_uid(uid, payload.email, payload.password)
+        u = signup_for_uid(
+            uid,
+            payload.email,
+            payload.password,
+            payload.gender,
+            payload.country,
+            payload.city,
+            payload.age,
+        )
     except ValueError as e:
         # Returner med cookies allerede slettet for å unngå halv-state
         raise HTTPException(status_code=400, detail=str(e))
