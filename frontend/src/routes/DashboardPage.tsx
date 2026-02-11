@@ -3,7 +3,6 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { cgApi } from "../lib/cgApi";
 import { StravaImportCard } from "../components/StravaImportCard";
-import { AccountStatus } from "../components/AccountStatus";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
 
@@ -958,7 +957,7 @@ const DemoProgressionPanel: React.FC = () => {
 };
 
 // ========================================
-// 🚀 REAL MODE DASHBOARD V2 - WOW FOCUSED
+// 🚀 REAL MODE DASHBOARD V3 - CLEAN & FOCUSED
 // ========================================
 
 export default function DashboardPage() {
@@ -981,7 +980,7 @@ export default function DashboardPage() {
   }
 
   // ========================================
-  // 🎨 REAL MODE V2 - TRENDS AS HERO
+  // 🎨 REAL MODE V3 - STREAMLINED
   // ========================================
   return (
     <div 
@@ -990,7 +989,7 @@ export default function DashboardPage() {
         background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       }}
     >
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-4 py-8">
         {/* HEADER */}
         <header className="flex items-center justify-between mb-8">
           <Link
@@ -1010,211 +1009,57 @@ export default function DashboardPage() {
           </button>
         </header>
 
-        {/* 🔥 HERO: TRENDS PREVIEW (placeholder for now, will show real data when available) */}
-        <section className="mb-8">
+        {/* 🔥 HERO: TRENDS (WOW FACTOR) */}
+        <section className="mb-6">
           <div className="rounded-3xl bg-white/95 backdrop-blur-sm p-8 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
             
-            {/* Trends Hero */}
-            <div className="mb-6">
-              <div className="flex items-start gap-4 mb-4">
-                <div className="flex-none">
-                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg">
-                    📈
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-                    Your Power Journey
-                  </h1>
-                  <p className="mt-1 text-slate-600">
-                    Track your progression with precision physics-based power estimation
-                  </p>
+            <div className="flex items-start gap-4 mb-6">
+              <div className="flex-none">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg">
+                  📈
                 </div>
               </div>
-
-              {/* Placeholder for Trends (when user has data) */}
-              <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-                <div className="text-slate-400 text-5xl mb-3">📊</div>
-                <h3 className="text-lg font-semibold text-slate-700 mb-2">
-                  Upload rides to see your trends
-                </h3>
-                <p className="text-sm text-slate-600 max-w-md mx-auto">
-                  Once you import your rides, you'll see an amazing analysis of your FTP progression, 
-                  W/kg improvements, and training insights over time.
+              <div className="flex-1">
+                <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+                  Your Power Journey
+                </h1>
+                <p className="mt-1 text-slate-600">
+                  Precision physics-based power estimation · ~3-5% accuracy
                 </p>
               </div>
             </div>
 
-            {/* Account Status - Integrated */}
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5 mt-6">
-              <AccountStatus />
+            {/* Placeholder for Trends Analysis */}
+            <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+              <div className="text-slate-400 text-5xl mb-3">📊</div>
+              <h3 className="text-lg font-semibold text-slate-700 mb-2">
+                Upload rides to unlock your trends
+              </h3>
+              <p className="text-sm text-slate-600 max-w-md mx-auto">
+                Import your last 50 rides and get an incredible analysis of your FTP progression, 
+                W/kg improvements, and training insights over time.
+              </p>
             </div>
           </div>
         </section>
 
-        {/* MAIN CONTENT GRID */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* LEFT COLUMN (2/3 width) */}
-          <div className="lg:col-span-2 space-y-6">
+        {/* 🎯 GOALS (Also launching April 1st) */}
+        <section className="mb-6">
+          <div className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)] relative overflow-hidden">
             
-            {/* Import Rides Card */}
-            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xl">
-                  🚴‍♂️
-                </div>
-                <h2 className="text-xl font-bold text-slate-900">Import Rides</h2>
-              </div>
-              <StravaImportCard />
-            </section>
-
-            {/* Stats Card */}
-            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center text-white text-xl">
-                  📊
-                </div>
-                <h2 className="text-xl font-bold text-slate-900">Your Stats</h2>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                {/* Calibration */}
-                <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 p-5">
-                  <div className="relative h-28 w-28 mx-auto mb-4">
-                    <svg className="transform -rotate-90 h-28 w-28">
-                      <circle
-                        cx="56"
-                        cy="56"
-                        r="50"
-                        stroke="currentColor"
-                        strokeWidth="10"
-                        fill="none"
-                        className="text-emerald-200"
-                      />
-                      <circle
-                        cx="56"
-                        cy="56"
-                        r="50"
-                        stroke="currentColor"
-                        strokeWidth="10"
-                        fill="none"
-                        strokeDasharray={`${2 * Math.PI * 50}`}
-                        strokeDashoffset={`${2 * Math.PI * 50 * (1 - 0.75)}`}
-                        className="text-emerald-600"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-3xl font-bold text-emerald-900">75%</span>
-                    </div>
-                  </div>
-                  <p className="text-sm font-semibold text-emerald-900 text-center">
-                    Calibration completeness
-                  </p>
-                </div>
-
-                {/* Accuracy */}
-                <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-5">
-                  <div className="relative h-28 w-28 mx-auto mb-4">
-                    <svg className="transform -rotate-90 h-28 w-28">
-                      <circle
-                        cx="56"
-                        cy="56"
-                        r="50"
-                        stroke="currentColor"
-                        strokeWidth="10"
-                        fill="none"
-                        className="text-blue-200"
-                      />
-                      <circle
-                        cx="56"
-                        cy="56"
-                        r="50"
-                        stroke="currentColor"
-                        strokeWidth="10"
-                        fill="none"
-                        strokeDasharray={`${2 * Math.PI * 50}`}
-                        strokeDashoffset={`${2 * Math.PI * 50 * (1 - 0.90)}`}
-                        className="text-blue-600"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-3xl font-bold text-blue-900">90%</span>
-                    </div>
-                  </div>
-                  <p className="text-sm font-semibold text-blue-900 text-center">
-                    Estimated power accuracy
-                  </p>
+            {/* Lock overlay */}
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-900/5 to-slate-900/10 backdrop-blur-[2px] z-10 flex items-center justify-center">
+              <div className="text-center">
+                <div className="text-5xl mb-2">🔒</div>
+                <div className="bg-white/90 backdrop-blur-sm rounded-xl px-4 py-2.5 shadow-lg">
+                  <div className="text-sm font-bold text-slate-900">Launching April 1st</div>
+                  <div className="text-xs text-slate-600 mt-0.5">Set training goals</div>
                 </div>
               </div>
-            </section>
+            </div>
 
-          </div>
-
-          {/* RIGHT COLUMN (1/3 width) */}
-          <div className="space-y-6">
-            
-            {/* 🏆 LEADERBOARDS TEASER (LOCKED) */}
-            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)] relative overflow-hidden">
-              {/* Lock overlay */}
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-900/5 to-slate-900/10 backdrop-blur-[2px] z-10 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-6xl mb-3">🔒</div>
-                  <div className="bg-white/90 backdrop-blur-sm rounded-xl px-4 py-3 shadow-lg">
-                    <div className="text-sm font-bold text-slate-900">Launching April 1st</div>
-                    <div className="text-xs text-slate-600 mt-1">Get notified</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Content (blurred background) */}
-              <div className="relative">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-white text-xl">
-                    🏆
-                  </div>
-                  <h2 className="text-xl font-bold text-slate-900">Leaderboards</h2>
-                </div>
-
-                <div className="space-y-3 opacity-60">
-                  <div className="text-xs font-semibold text-slate-500 uppercase">
-                    Preview Rankings
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 py-2 border-b border-slate-200">
-                      <div className="text-xs font-medium text-slate-600">
-                        📍 Oslo, Norway · Men 25-29
-                      </div>
-                    </div>
-
-                    {[1, 2, 3, '...', '?'].map((rank, idx) => (
-                      <div
-                        key={idx}
-                        className="grid grid-cols-[30px_1fr_auto] gap-2 items-center px-3 py-2 border-b border-slate-200 last:border-b-0 bg-white"
-                      >
-                        <div className="text-sm font-bold text-slate-500">{rank}</div>
-                        <div className="text-sm text-slate-400">███████</div>
-                        <div className="text-sm font-semibold text-slate-400">
-                          {rank === '?' ? '260 W' : '—'}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="text-xs text-slate-600 space-y-1">
-                    <div>• 1min, 5min, 20min, 60min power curves</div>
-                    <div>• Filter by: Age, Gender, Location</div>
-                    <div>• City & National rankings</div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* 🎯 GOALS QUICK-SETTER */}
-            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
+            {/* Content (blurred) */}
+            <div className="opacity-60">
               <div className="flex items-center gap-3 mb-4">
                 <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-rose-400 to-rose-600 flex items-center justify-center text-white text-xl">
                   🎯
@@ -1222,80 +1067,120 @@ export default function DashboardPage() {
                 <h2 className="text-xl font-bold text-slate-900">Goals</h2>
               </div>
 
-              <Link
-                to="/goals"
-                className="block rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center hover:border-rose-400 hover:bg-rose-50 transition-all group"
-              >
-                <div className="text-slate-400 group-hover:text-rose-500 text-3xl mb-2">+</div>
-                <div className="text-sm font-semibold text-slate-700 group-hover:text-rose-700">
+              <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div className="text-slate-400 text-3xl mb-2">+</div>
+                <div className="text-sm font-semibold text-slate-700">
                   Set your first goal
                 </div>
-                <div className="text-xs text-slate-500 group-hover:text-rose-600 mt-1">
+                <div className="text-xs text-slate-500 mt-1">
                   Based on your trends
                 </div>
-              </Link>
-            </section>
+              </div>
+            </div>
+          </div>
+        </section>
 
-            {/* Navigation Links */}
-            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center text-white text-xl">
-                  ⚙️
+        {/* MAIN CONTENT - 2 Columns */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* LEFT: Import Rides */}
+          <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xl">
+                🚴‍♂️
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">Import Rides</h2>
+            </div>
+            <StravaImportCard />
+          </section>
+
+          {/* RIGHT: Leaderboards Teaser */}
+          <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)] relative overflow-hidden">
+            
+            {/* Lock overlay */}
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-900/5 to-slate-900/10 backdrop-blur-[2px] z-10 flex items-center justify-center">
+              <div className="text-center">
+                <div className="text-5xl mb-2">🔒</div>
+                <div className="bg-white/90 backdrop-blur-sm rounded-xl px-4 py-2.5 shadow-lg">
+                  <div className="text-sm font-bold text-slate-900">Launching April 1st</div>
+                  <div className="text-xs text-slate-600 mt-0.5">Compete & compare</div>
                 </div>
-                <h2 className="text-xl font-bold text-slate-900">More</h2>
+              </div>
+            </div>
+
+            {/* Content (blurred) */}
+            <div className="opacity-60">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-white text-xl">
+                  🏆
+                </div>
+                <h2 className="text-xl font-bold text-slate-900">Leaderboards</h2>
               </div>
 
-              <nav className="space-y-2">
-                <Link
-                  to="/rides"
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-all group"
-                >
-                  <span className="text-slate-600 group-hover:text-slate-900 font-medium text-sm flex-1">
-                    View Rides
-                  </span>
-                  <span className="text-slate-400 group-hover:text-slate-600">→</span>
-                </Link>
+              <div className="space-y-3">
+                <div className="text-xs font-semibold text-slate-500 uppercase">
+                  Preview Rankings
+                </div>
 
-                <Link
-                  to="/trends"
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-all group"
-                >
-                  <span className="text-slate-600 group-hover:text-slate-900 font-medium text-sm flex-1">
-                    Trends
-                  </span>
-                  <span className="text-slate-400 group-hover:text-slate-600">→</span>
-                </Link>
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-50 px-3 py-2 border-b border-slate-200">
+                    <div className="text-xs font-medium text-slate-600">
+                      📍 Your City · Age Group
+                    </div>
+                  </div>
 
-                <Link
-                  to="/profile"
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-all group"
-                >
-                  <span className="text-slate-600 group-hover:text-slate-900 font-medium text-sm flex-1">
-                    Profile Settings
-                  </span>
-                  <span className="text-slate-400 group-hover:text-slate-600">→</span>
-                </Link>
+                  {[1, 2, 3, '...', '?'].map((rank, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[30px_1fr_auto] gap-2 items-center px-3 py-2 border-b border-slate-200 last:border-b-0 bg-white"
+                    >
+                      <div className="text-sm font-bold text-slate-500">{rank}</div>
+                      <div className="text-sm text-slate-400">███████</div>
+                      <div className="text-sm font-semibold text-slate-400">
+                        {rank === '?' ? '260 W' : '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-                <Link
-                  to="/how-it-works"
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-all group"
-                >
-                  <span className="text-slate-600 group-hover:text-slate-900 font-medium text-sm flex-1">
-                    How It Works
-                  </span>
-                  <span className="text-slate-400 group-hover:text-slate-600">→</span>
-                </Link>
-              </nav>
-            </section>
-
-          </div>
+                <div className="text-xs text-slate-600 space-y-1">
+                  <div>• 1min, 5min, 20min, 60min power</div>
+                  <div>• Age, Gender, Location filters</div>
+                  <div>• City & National rankings</div>
+                </div>
+              </div>
+            </div>
+          </section>
 
         </div>
+
+        {/* PROFILE LINK */}
+        <section className="mt-6">
+          <Link
+            to="/profile"
+            className="block rounded-3xl bg-white/95 backdrop-blur-sm p-5 shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:bg-white transition-all group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center text-white text-2xl">
+                👤
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-900 group-hover:text-purple-700">
+                  Profile Settings
+                </h3>
+                <p className="text-sm text-slate-600 group-hover:text-purple-600">
+                  Manage your bike, weight, and connection settings
+                </p>
+              </div>
+              <span className="text-slate-400 group-hover:text-purple-600 text-xl">→</span>
+            </div>
+          </Link>
+        </section>
 
         {/* Footer */}
         <footer className="mt-12 text-center">
           <p className="text-white/70 text-sm">
-            Precision physics modeling · ~3-5% accuracy · No power meter required
+            No power meter required · Physics-based precision
           </p>
         </footer>
 
