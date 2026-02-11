@@ -1,0 +1,34 @@
+###Engineering Summary — Sprint 1 Day 1
+Outcome Status: Completed
+Delivered
+Signup flow støtter nå demografiske felter:
+gender
+country
+city
+age
+Feltene er obligatoriske i frontend.
+Backend /api/auth/signup aksepterer og lagrer feltene.
+Data persisteres i state/users/<uid>/auth.json.
+Full bakoverkompatibilitet for eksisterende brukere.
+Carry-over
+Ingen.
+Key Technical Changes
+Frontend: utvidet signup-form state, validering og payload.
+API-client: utvidet signup payload-typer.
+Backend: Signup schema + persistence utvidet.
+Ingen endringer i sessions, SSOT-strukturer eller auth-indexing.
+New Constraints / Discoveries
+.fly/config.yml korrupsjon kan blokkere deploy (ikke kode-relatert).
+Manglende .dockerignore gir ekstrem build-context.
+Systems Touched
+Signup frontend
+Auth API signup-endepunkt
+auth.json persistence
+Systems Untouched
+Sessions / rides / SSOT
+Strava
+Analyzer / Rust
+Meta-systemer
+###Profilversjonering
+
+

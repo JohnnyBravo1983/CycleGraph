@@ -248,7 +248,7 @@ function DemoInsightBox() {
       <div className="text-sm font-semibold text-slate-900">What this demo shows</div>
       <div className="mt-2 text-sm text-slate-700 leading-relaxed">
         The metrics below are based on <span className="font-medium">real rides</span>{" "}
-        (curated demo set, 2022–2025) analyzed through CycleGraph’s own pipeline.
+        (curated demo set, 2022–2025) analyzed through CycleGraph's own pipeline.
       </div>
 
       <ul className="mt-3 space-y-1 text-sm text-slate-700">
@@ -258,7 +258,7 @@ function DemoInsightBox() {
           (calibrated inputs).
         </li>
         <li>
-          • Compared to “estimated power” views, results can be more consistent for training
+          • Compared to "estimated power" views, results can be more consistent for training
           decisions (FTP tracking, pacing, W/kg).
         </li>
         <li>
@@ -361,7 +361,7 @@ function sortByMetric(rows: LbEntry[], metric: "ftp" | "wkg") {
   return [...rows].sort((a, b) => (metric === "ftp" ? b.ftp - a.ftp : b.wkg - a.wkg));
 }
 
-// Top N, but always include current user (with “…” separator) if outside top N
+// Top N, but always include current user (with "…" separator) if outside top N
 function topWithCurrent(rows: LbEntry[], metric: "ftp" | "wkg", n = 5) {
   const sorted = sortByMetric(rows, metric).map((r, idx) => ({ ...r, _rank: idx + 1 }));
   const top = sorted.slice(0, n);
@@ -517,7 +517,7 @@ const DemoProgressionPanel: React.FC = () => {
               <span className="font-semibold">2022–2025</span> (offline &amp; deterministic)
             </div>
             <div className="text-xs text-amber-900/80 mt-1">
-              Demo uses curated real rides analyzed through CycleGraph’s pipeline.
+              Demo uses curated real rides analyzed through CycleGraph's pipeline.
             </div>
 
             <div className="mt-3 text-xs font-semibold tracking-wide text-amber-700">DEMO MODE</div>
@@ -525,7 +525,7 @@ const DemoProgressionPanel: React.FC = () => {
               Multi-year progression (FTP · weight · W/kg)
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Based on 12 curated rides (solo), with weather and “Precision Watt” from the pipeline.
+              Based on 12 curated rides (solo), with weather and "Precision Watt" from the pipeline.
             </p>
           </div>
 
@@ -957,41 +957,21 @@ const DemoProgressionPanel: React.FC = () => {
   );
 };
 
+// ========================================
+// 🎨 NEW REAL MODE DASHBOARD (Redesigned)
+// ========================================
+
 export default function DashboardPage() {
   const demo = isDemoMode();
 
   async function onLogout() {
     try {
       await fetch(`${cgApi.baseUrl()}/api/auth/logout`, { method: "POST", credentials: "include" });
-
     } finally {
       // hard redirect to re-mount AuthGateProvider and avoid stale auth state
       window.location.replace("/login");
     }
   }
-
-  // Reusable brand header for real mode too
-  const BrandHeader = () => (
-    <div className="flex items-center justify-between">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50"
-        title="Back to landing"
-      >
-        <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
-        <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
-      </Link>
-
-      <button
-        type="button"
-        onClick={onLogout}
-        className="px-3 py-2 rounded-2xl border border-slate-200 bg-white text-sm font-medium shadow-sm hover:bg-slate-50"
-        title="Logg ut"
-      >
-        Logg ut
-      </button>
-    </div>
-  );
 
   if (demo) {
     return (
@@ -1001,80 +981,274 @@ export default function DashboardPage() {
     );
   }
 
+  // ========================================
+  // 🚀 REAL MODE - COMPLETELY REDESIGNED
+  // ========================================
   return (
-    <div className="flex flex-col gap-8">
-      <BrandHeader />
+    <div 
+      className="min-h-screen"
+      style={{
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      }}
+    >
+      <div className="max-w-5xl mx-auto px-4 py-8">
+        {/* HEADER with Logo + Logout */}
+        <header className="flex items-center justify-between mb-8">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-3 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-sm px-4 py-2 shadow-lg hover:bg-white/20 transition-all"
+            title="Back to landing"
+          >
+            <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
+            <span className="text-sm font-semibold text-white">CycleGraph</span>
+          </Link>
 
-      <section className="max-w-xl">
-        <AccountStatus />
-      </section>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="px-4 py-2 rounded-2xl border border-white/20 bg-white/10 backdrop-blur-sm text-sm font-medium text-white shadow-lg hover:bg-white/20 transition-all"
+            title="Logg ut"
+          >
+            Logg ut
+          </button>
+        </header>
 
-      <section>
-        <h1 className="text-2xl font-semibold tracking-tight mb-2">Dashboard</h1>
-        <p className="text-slate-600 max-w-xl">
-          Overview of your training, calibration, and analysis accuracy.
-        </p>
-      </section>
+        {/* HERO CARD */}
+        <section className="mb-8">
+          <div className="rounded-3xl bg-white/95 backdrop-blur-sm p-8 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
+            <div className="flex items-start gap-4 mb-6">
+              <div className="flex-none text-5xl">👋</div>
+              <div className="flex-1">
+                <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+                  Welcome to CycleGraph
+                </h1>
+                <p className="mt-2 text-slate-600 text-lg">
+                  Your precision power analysis dashboard
+                </p>
+              </div>
+            </div>
 
-      <section className="max-w-xl">
-        <StravaImportCard />
-      </section>
-
-      <section className="flex flex-col md:flex-row gap-6 justify-between max-w-xl">
-        <div className="flex flex-col items-center">
-          <div className="h-32 w-32 rounded-full border-4 border-slate-300 flex items-center justify-center">
-            <span className="text-xl font-semibold">75%</span>
+            {/* Account Status Card - Integrated */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5">
+              <AccountStatus />
+            </div>
           </div>
-          <p className="text-sm text-slate-600 mt-2">Calibration completeness</p>
-        </div>
+        </section>
 
-        <div className="flex flex-col items-center">
-          <div className="h-32 w-32 rounded-full border-4 border-slate-300 flex items-center justify-center">
-            <span className="text-xl font-semibold">90%</span>
+        {/* MAIN GRID - 2 Columns on desktop */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* LEFT COLUMN */}
+          <div className="space-y-6">
+            
+            {/* Strava Import Card */}
+            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="text-2xl">🚴‍♂️</div>
+                <h2 className="text-xl font-bold text-slate-900">Import Rides</h2>
+              </div>
+              <StravaImportCard />
+            </section>
+
+            {/* Quick Stats - Calibration & Accuracy */}
+            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="text-2xl">📊</div>
+                <h2 className="text-xl font-bold text-slate-900">Your Stats</h2>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col items-center p-4 rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200">
+                  <div className="relative h-24 w-24">
+                    {/* SVG Circle Progress */}
+                    <svg className="transform -rotate-90 h-24 w-24">
+                      <circle
+                        cx="48"
+                        cy="48"
+                        r="40"
+                        stroke="currentColor"
+                        strokeWidth="8"
+                        fill="none"
+                        className="text-emerald-200"
+                      />
+                      <circle
+                        cx="48"
+                        cy="48"
+                        r="40"
+                        stroke="currentColor"
+                        strokeWidth="8"
+                        fill="none"
+                        strokeDasharray={`${2 * Math.PI * 40}`}
+                        strokeDashoffset={`${2 * Math.PI * 40 * (1 - 0.75)}`}
+                        className="text-emerald-600"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-2xl font-bold text-emerald-900">75%</span>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium text-emerald-900 mt-3 text-center">
+                    Calibration completeness
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-center p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200">
+                  <div className="relative h-24 w-24">
+                    {/* SVG Circle Progress */}
+                    <svg className="transform -rotate-90 h-24 w-24">
+                      <circle
+                        cx="48"
+                        cy="48"
+                        r="40"
+                        stroke="currentColor"
+                        strokeWidth="8"
+                        fill="none"
+                        className="text-blue-200"
+                      />
+                      <circle
+                        cx="48"
+                        cy="48"
+                        r="40"
+                        stroke="currentColor"
+                        strokeWidth="8"
+                        fill="none"
+                        strokeDasharray={`${2 * Math.PI * 40}`}
+                        strokeDashoffset={`${2 * Math.PI * 40 * (1 - 0.90)}`}
+                        className="text-blue-600"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-2xl font-bold text-blue-900">90%</span>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium text-blue-900 mt-3 text-center">
+                    Estimated power accuracy
+                  </p>
+                </div>
+              </div>
+            </section>
+
           </div>
-          <p className="text-sm text-slate-600 mt-2">Estimated power accuracy</p>
+
+          {/* RIGHT COLUMN */}
+          <div className="space-y-6">
+            
+            {/* Explore Your Data */}
+            <section className="rounded-3xl bg-white/95 backdrop-blur-sm p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)]">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="text-2xl">🗺️</div>
+                <h2 className="text-xl font-bold text-slate-900">Explore Your Data</h2>
+              </div>
+
+              <nav className="space-y-2">
+                <Link
+                  to="/how-it-works"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-gradient-to-r hover:from-indigo-50 hover:to-purple-50 hover:border-indigo-300 transition-all"
+                >
+                  <span className="text-2xl">⚙️</span>
+                  <div className="flex-1">
+                    <div className="font-semibold text-slate-900 group-hover:text-indigo-900">
+                      How CycleGraph Works
+                    </div>
+                    <div className="text-xs text-slate-500 group-hover:text-indigo-700">
+                      Learn about our physics model
+                    </div>
+                  </div>
+                  <span className="text-slate-400 group-hover:text-indigo-600">→</span>
+                </Link>
+
+                <Link
+                  to="/rides"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:border-emerald-300 transition-all"
+                >
+                  <span className="text-2xl">🚴‍♂️</span>
+                  <div className="flex-1">
+                    <div className="font-semibold text-slate-900 group-hover:text-emerald-900">
+                      Rides
+                    </div>
+                    <div className="text-xs text-slate-500 group-hover:text-emerald-700">
+                      View all your analyzed rides
+                    </div>
+                  </div>
+                  <span className="text-slate-400 group-hover:text-emerald-600">→</span>
+                </Link>
+
+                <Link
+                  to="/trends"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-gradient-to-r hover:from-blue-50 hover:to-cyan-50 hover:border-blue-300 transition-all"
+                >
+                  <span className="text-2xl">📈</span>
+                  <div className="flex-1">
+                    <div className="font-semibold text-slate-900 group-hover:text-blue-900">
+                      Trends
+                    </div>
+                    <div className="text-xs text-slate-500 group-hover:text-blue-700">
+                      Track your progress over time
+                    </div>
+                  </div>
+                  <span className="text-slate-400 group-hover:text-blue-600">→</span>
+                </Link>
+
+                <Link
+                  to="/goals"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-gradient-to-r hover:from-amber-50 hover:to-orange-50 hover:border-amber-300 transition-all"
+                >
+                  <span className="text-2xl">🎯</span>
+                  <div className="flex-1">
+                    <div className="font-semibold text-slate-900 group-hover:text-amber-900">
+                      Goals
+                    </div>
+                    <div className="text-xs text-slate-500 group-hover:text-amber-700">
+                      Set and track your targets
+                    </div>
+                  </div>
+                  <span className="text-slate-400 group-hover:text-amber-600">→</span>
+                </Link>
+
+                <Link
+                  to="/profile"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 hover:border-purple-300 transition-all"
+                >
+                  <span className="text-2xl">👤</span>
+                  <div className="flex-1">
+                    <div className="font-semibold text-slate-900 group-hover:text-purple-900">
+                      Profile
+                    </div>
+                    <div className="text-xs text-slate-500 group-hover:text-purple-700">
+                      Manage your settings
+                    </div>
+                  </div>
+                  <span className="text-slate-400 group-hover:text-purple-600">→</span>
+                </Link>
+              </nav>
+            </section>
+
+            {/* What's Next Teaser */}
+            <section className="rounded-3xl bg-gradient-to-br from-indigo-500 to-purple-600 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.3)] text-white">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="text-2xl">✨</div>
+                <h3 className="text-lg font-bold">Coming Soon</h3>
+              </div>
+              <p className="text-white/90 text-sm leading-relaxed">
+                Leaderboards, advanced analytics, and goal tracking are on the way. 
+                Keep riding and we'll notify you when these features launch!
+              </p>
+            </section>
+
+          </div>
+
         </div>
-      </section>
 
-      <section className="flex flex-col gap-3 max-w-md">
-        <h2 className="text-lg font-semibold">Explore your data</h2>
-        <div className="flex flex-col gap-2">
-          <Link
-            to="/how-it-works"
-            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
-          >
-            ⚙️ How CycleGraph Works <span className="ml-1 text-slate-500">Learn more →</span>
-          </Link>
+        {/* Footer Attribution */}
+        <footer className="mt-12 text-center">
+          <p className="text-white/60 text-sm">
+            Built with precision physics modeling · No power meter required
+          </p>
+        </footer>
 
-          <Link
-            to="/rides"
-            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
-          >
-            🚴‍♂️ Rides
-          </Link>
-
-          <Link
-            to="/trends"
-            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
-          >
-            📈 Trends
-          </Link>
-
-          <Link
-            to="/goals"
-            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
-          >
-            🎯 Goals
-          </Link>
-
-          <Link
-            to="/profile"
-            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
-          >
-            👤 Profile
-          </Link>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }

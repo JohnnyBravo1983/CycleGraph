@@ -1,0 +1,117 @@
+🟥 ENGINEER WORK LOG — Sprint Week 1, Day 1
+
+Focus: Signup form enhancement (demographic fields persisted to auth.json)
+Deploy target: Fly (direct deploy, no local dev server)
+
+✅ Features Implemented
+
+Utvidet signup-skjema med:
+
+gender (dropdown: male / female)
+country (text input)
+city (text input)
+age (number input, min 13, max 100)
+Frontend-validering oppdatert slik at nye felter er obligatoriske.
+Backend /api/auth/signup oppdatert til å akseptere nye felter.
+Demografiske felter persisteres direkte i state/users/<uid>/auth.json.
+Bakoverkompatibilitet beholdt for eksisterende brukere.
+
+🔧 Technical Changes Made
+Frontend
+frontend/src/routes/SignupPage.tsx
+La til nye useState-felter for gender, country, city, age.
+Oppdatert canContinue-logikk for å inkludere:
+Gyldig alder (13–100)
+Ikke-tomme country/city
+Gyldig gender
+Oppdatert onSubmit() slik at authSignup() nå sender:
+
+{
+  email,
+  password,
+  gender,
+  country,
+  city,
+  age
+}
+
+frontend/src/lib/cgApi.ts
+Utvidet AuthBody-type med:
+gender?: string
+country?: string
+city?: string
+age?: number
+Oppdatert authSignup() til å sende komplett payload.
+
+Backend
+server/routes/auth_local.py
+SignupIn utvidet med:
+gender: str
+country: str
+city: str
+age: int
+
+Signup-endepunktet videresender nye felter til signup_for_uid.
+server/auth/local_auth.py
+signup_for_uid() utvidet til å inkludere nye felter i doc før save_auth():
+"gender": gender,
+"country": country,
+"city": city,
+"age": age,
+
+Ingen endring i email-index eller session-logikk.
+⚠ Issues Encountered
+.fly/config.yml var korrupt (100% control characters).
+Forårsaket yaml: control characters are not allowed.
+
+Løst ved:
+Backup av .fly/config.yml
+fly auth logout
+fly auth login
+Depot build feilet midlertidig pga DNS / lookup issue.
+Ikke relatert til kode.
+Manglende .dockerignore førte til 500MB build context.
+Lagt til .dockerignore for:
+node_modules
+.venv
+cache-mapper
+lock-filer
+System stabil etter deploy.
+🔍 Verification Performed
+fly deploy fullført uten YAML-feil.
+Ny bruker opprettet via produksjonsmiljø.
+SSH-verifisering:
+fly ssh console
+cat /app/state/users/<uid>/auth.json
+
+Bekreftet:
+gender
+country
+city
+age
+eksisterende felter (email, password_hash, created_at)
+Eksisterende brukere:
+Login fungerer.
+Ingen påvirkning på session- eller SSOT-struktur.
+Ingen 422/validation-feil.
+
+🧠 Technical Notes
+Demografi lagres direkte i auth.json.
+Ingen ny schema-mekanisme introdusert.
+Ingen refaktorering utenfor Day 1 scope.
+Ingen endring i session storage eller SSOT-arkitektur.
+Payload er bakoverkompatibel siden nye felt kun brukes ved signup.
+
+🚀 Impact on Next Workday
+Systemet kan nå:
+Opprette brukere med komplett demografisk profil.
+Gå videre til:
+Dashboard-visning av profil
+Profilredigering
+Profilversjonering (weight change logic)
+Trend/goal basert på alder/kjønn/land (senere)
+Day 1 fullført innen scope.
+System stabil.
+
+
+
