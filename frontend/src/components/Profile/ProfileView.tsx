@@ -207,7 +207,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* LEFT: Realistic Cyclist Silhouette (2 columns) */}
           <div className="lg:col-span-2">
-            <div className="aspect-square bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-6 relative overflow-hidden">
+            <div className="aspect-square bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-6 pb-20 relative overflow-hidden">
               {/* Subtle grid */}
               <div
                 className="absolute inset-0 opacity-[0.03]"
@@ -609,19 +609,33 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                 </g>
 
                 {/* FTP Badge */}
-                <g
+                 {/* FTP Badge - BIGGER */}
+                <g 
                   transform="translate(420, 50)"
                   className="transition-all duration-300"
                   style={{
-                    filter: hoveredZone === "ftp" ? "drop-shadow(0 0 20px #14b8a6)" : "none",
+                    filter: hoveredZone === 'ftp' ? 'drop-shadow(0 0 20px #14b8a6)' : 'none',
                   }}
                 >
-                  <rect x="-35" y="-15" width="70" height="30" rx="8" fill="url(#ftpGradient)" />
-                  <text x="0" y="5" textAnchor="middle" fill="white" fontSize="11" fontWeight="bold">
-                    {profile?.ftp_watts ? `${profile.ftp_watts}W` : "FTP: —"}
+                  <rect
+                    x="-50"
+                    y="-20"
+                    width="100"
+                    height="40"
+                    rx="10"
+                    fill="url(#ftpGradient)"
+                  />
+                  <text
+                    x="0"
+                    y="7"
+                    textAnchor="middle"
+                    fill="white"
+                    fontSize="16"
+                    fontWeight="bold"
+                  >
+                    {profile?.ftp_watts ? `${profile.ftp_watts}W` : 'FTP: —'}
                   </text>
                 </g>
-              </svg>
 
               {/* Legend - outside SVG */}
               <div className="mt-3 bg-white/95 backdrop-blur-sm rounded-xl p-2.5 border border-slate-200 shadow-lg">
