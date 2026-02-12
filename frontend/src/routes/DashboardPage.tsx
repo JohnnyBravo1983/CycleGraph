@@ -816,10 +816,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-{/* PROFILE (compact peek) */}
-<section id="profile" className="mb-4 scroll-mt-24">
-  <ProfilePeekCard />
-</section>
+
 
 
             <div className="opacity-40">

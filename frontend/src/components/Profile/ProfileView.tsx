@@ -586,20 +586,8 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                   </text>
                 </g>
               </svg>
-
-              <style>{`
-                @keyframes gentleSway {
-                  0%, 100% { 
-                    transform: rotate(-3deg); 
-                  }
-                  50% { 
-                    transform: rotate(3deg); 
-                  }
-                }
-              `}</style>
-
-              {/* Legend */}
-              <div className="absolute bottom-3 left-3 right-3 bg-white/95 backdrop-blur-sm rounded-xl p-2.5 border border-slate-200 shadow-lg">
+  {/* Legend - MOVED OUTSIDE SVG */}
+              <div className="mt-3 bg-white/95 backdrop-blur-sm rounded-xl p-2.5 border border-slate-200 shadow-lg">
                 <div className="text-[10px] font-semibold text-slate-700 mb-1.5">Interactive Physics Model →</div>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[9px]">
                   <span className="inline-flex items-center gap-1">
@@ -622,8 +610,18 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                   </span>
                 </div>
               </div>
-            </div>
-          </div>
+              <style>{`
+                @keyframes gentleSway {
+                  0%, 100% { 
+                    transform: rotate(-3deg); 
+                  }
+                  50% { 
+                    transform: rotate(3deg); 
+                  }
+                }
+              `}</style>
+
+              
 
           {/* RIGHT: All Settings (3 columns) */}
           <div className="lg:col-span-3 space-y-2">
