@@ -65,6 +65,21 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   const [tooltipPos, setTooltipPos] = React.useState({ x: 0, y: 0 }); // kept (future use)
   const [techExpanded, setTechExpanded] = React.useState(false);
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [isMobile, setIsMobile] = React.useState(false);
+
+  // Detect if device is mobile/touch
+  React.useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 1024 || 'ontouchstart' in window);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => {
+      window.removeEventListener('resize', checkMobile);
+    };
+  }, []);
 
   // Cleanup timeout on unmount
   React.useEffect(() => {
@@ -465,6 +480,9 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   ];
 
   const handleMouseEnter = (zone: HoverZone, e: React.MouseEvent) => {
+    // Skip hover behavior on mobile - use click instead
+    if (isMobile) return;
+    
     // Clear any pending timeout
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
@@ -477,6 +495,9 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   };
 
   const handleMouseLeave = () => {
+    // Skip on mobile - use click instead
+    if (isMobile) return;
+    
     // Add a delay before clearing hover
     hoverTimeoutRef.current = setTimeout(() => {
       setHoveredZone(null);
@@ -484,7 +505,27 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     }, 300); // 300ms delay
   };
 
+  const handleClick = (zone: HoverZone, e: React.MouseEvent) => {
+    // Only handle clicks on mobile
+    if (!isMobile) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Toggle: if clicking same zone, close it. Otherwise switch to new zone.
+    if (hoveredZone === zone) {
+      setHoveredZone(null);
+      setTechExpanded(false);
+    } else {
+      setHoveredZone(zone);
+      setTechExpanded(false); // Reset tech expanded when switching
+    }
+  };
+
   const handlePanelMouseEnter = () => {
+    // Skip on mobile
+    if (isMobile) return;
+    
     // Cancel the hide timeout when mouse enters panel
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
@@ -493,10 +534,30 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   };
 
   const handlePanelMouseLeave = () => {
+    // Skip on mobile - panel stays until user taps elsewhere
+    if (isMobile) return;
+    
     // Hide immediately when leaving panel
     setHoveredZone(null);
     setTechExpanded(false);
   };
+
+  // Close panel when clicking outside (mobile only)
+  React.useEffect(() => {
+    if (!isMobile || !hoveredZone) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Check if click is outside the settings list and panel
+      if (!target.closest('[data-settings-item]') && !target.closest('[data-hover-panel]')) {
+        setHoveredZone(null);
+        setTechExpanded(false);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [isMobile, hoveredZone]);
 
   const hoveredSetting = profileSettings.find((s) => s.zone === hoveredZone);
 
@@ -1003,6 +1064,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
             {/* BULLSEYE + TECH DEEP DIVE PANEL - Below cyclist on left */}
             {hoveredSetting && (
               <div
+                data-hover-panel
                 className="rounded-2xl border-2 bg-white shadow-lg overflow-hidden"
                 style={{ borderColor: hoveredSetting.color }}
                 onMouseEnter={handlePanelMouseEnter}
@@ -1197,7 +1259,10 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
           <div className="lg:col-span-3 space-y-2">
             <div className="text-sm font-semibold text-slate-700 mb-2 flex items-center justify-between">
               <span>Physics Model Parameters</span>
-              <span className="text-xs text-slate-500 font-normal">Hover for details</span>
+              <span className="text-xs text-slate-500 font-normal">
+                <span className="hidden lg:inline">Hover for details</span>
+                <span className="lg:hidden">Tap for details</span>
+              </span>
             </div>
 
             {profileSettings
@@ -1206,12 +1271,15 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
               <div
                 key={setting.id}
                 className="group relative"
+                data-settings-item
                 onMouseEnter={(e) => handleMouseEnter(setting.zone, e)}
                 onMouseLeave={handleMouseLeave}
+                onClick={(e) => handleClick(setting.zone, e)}
               >
                 <div
                   className={`
                     rounded-xl p-3 border-2 transition-all duration-300 cursor-pointer
+                    active:scale-[0.98] touch-manipulation
                     ${
                       hoveredZone === setting.zone
                         ? "border-current shadow-lg scale-[1.01]"
