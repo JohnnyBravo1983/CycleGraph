@@ -8,24 +8,24 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    
+
     <!-- FETCH INTERCEPTOR -->
     <script>
-      (function() {
-        const BACKEND = 'https://api.cyclegraph.app';
+      (function () {
+        const BACKEND = "https://api.cyclegraph.app";
         const originalFetch = window.fetch;
-        window.fetch = function(input, init) {
-          if (typeof input === 'string' && input.startsWith('/api/')) {
-            console.log('[INTERCEPTOR] Redirect:', input, '→', BACKEND + input);
+        window.fetch = function (input, init) {
+          if (typeof input === "string" && input.startsWith("/api/")) {
+            console.log("[INTERCEPTOR] Redirect:", input, "→", BACKEND + input);
             input = BACKEND + input;
           }
           return originalFetch(input, init);
         };
-        console.log('[INTERCEPTOR] Loaded');
+        console.log("[INTERCEPTOR] Loaded");
       })();
     </script>
   </head>
-  <body class="bg-gray-50 text-gray-900 antialiased">
+  <body class="bg-gray-50 text-gray-900 antialiased overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

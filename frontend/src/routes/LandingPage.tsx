@@ -5,8 +5,9 @@ import { Link, useNavigate } from "react-router-dom";
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
 
-  const fullBleed =
-    "relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen";
+  // ✅ Fix: avoid full-bleed hack that commonly causes horizontal overflow on Android
+  // (w-screen + -ml/-mr 50vw can create a persistent side-bleed / empty area)
+  const fullBleed = "relative w-full overflow-x-hidden";
 
   return (
     <div className={`${fullBleed} -mt-6`}>
@@ -108,7 +109,8 @@ export const LandingPage: React.FC = () => {
               className="font-bold underline hover:text-amber-700"
             >
               GitHub
-            </a>.
+            </a>
+            .
           </p>
         </div>
       </section>
@@ -116,9 +118,7 @@ export const LandingPage: React.FC = () => {
       {/* FOOTER */}
       <footer className="bg-slate-950 px-6 py-16 text-center text-white border-t border-slate-800">
         <div className="mx-auto max-w-4xl">
-          <p className="text-base text-slate-300 font-medium">
-            Built by a cyclist, for cyclists.
-          </p>
+          <p className="text-base text-slate-300 font-medium">Built by a cyclist, for cyclists.</p>
 
           <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-3 text-base">
             <Link to="/how-it-works" className="text-slate-400 hover:text-white">
