@@ -660,7 +660,7 @@ export default function DashboardPage() {
 
       <div className="max-w-4xl mx-auto px-4 py-6 relative">
         {/* HEADER */}
-        <header className="flex items-center justify-between mb-6">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
           <Link
             to="/"
             className="inline-flex items-center gap-2.5 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md px-3.5 py-2 shadow-lg hover:bg-white/15 transition-all duration-200"
@@ -670,7 +670,7 @@ export default function DashboardPage() {
           </Link>
 
           {/* ✅ PATCH 1.2: add "Profil" anchor link, keep /profile icon link unchanged */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
             <a
               href="#profile"
               className="px-3.5 py-2 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md text-sm font-medium text-white shadow-lg hover:bg-white/15 transition-all duration-200"

@@ -58,7 +58,7 @@ export const LandingPage: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate("/signup")}
-              className="group relative inline-flex items-center justify-center overflow-hidden rounded-full bg-gradient-to-r from-white to-blue-50 px-12 py-5 text-xl font-black text-slate-900 shadow-[0_12px_45px_rgba(0,0,0,0.4)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_18px_60px_rgba(0,0,0,0.5)] active:translate-y-0"
+              className="group relative inline-flex items-center justify-center overflow-hidden rounded-full bg-gradient-to-r from-white to-blue-50 px-6 sm:px-12 py-4 sm:py-5 text-lg sm:text-xl font-black text-slate-900 shadow-[0_12px_45px_rgba(0,0,0,0.4)] transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_18px_60px_rgba(0,0,0,0.5)] active:translate-y-0"
             >
               <span className="relative z-10">Get Started</span>
               <div className="absolute inset-0 -z-0 bg-gradient-to-r from-[#fbbf24] to-[#f59e0b] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
@@ -76,9 +76,7 @@ export const LandingPage: React.FC = () => {
 
             <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-5 py-2 backdrop-blur-md">
               <span className="text-2xl">⚡</span>
-              <p className="text-sm font-bold text-white/95">
-                Powered by Advanced Physics • No Hardware
-              </p>
+              <p className="text-sm font-bold text-white/95">Powered by Advanced Physics • No Hardware</p>
             </div>
           </div>
         </div>
