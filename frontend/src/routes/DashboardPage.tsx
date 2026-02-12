@@ -5,6 +5,8 @@ import { cgApi } from "../lib/cgApi";
 import { StravaImportCard } from "../components/StravaImportCard";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
+import ProfileView from "../components/Profile/ProfileView";
+
 
 // ✅ Patch 4a.2
 import { leaderboardMockData } from "../demo/leaderboardMockData";
@@ -837,6 +839,19 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+
+{/* PROFILE (read-only) */}
+<section
+  id="profile"
+  className="mb-4 scroll-mt-24"
+  style={{
+    animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards",
+  }}
+>
+  <ProfileView />
+</section>
+
+
 
         {/* TWO-COLUMN GRID */}
         <div 
