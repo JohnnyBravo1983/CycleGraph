@@ -624,7 +624,16 @@ export default function DashboardPage() {
             <span className="text-sm font-semibold text-white tracking-tight">CycleGraph</span>
           </Link>
 
+          {/* ✅ PATCH 1.2: add "Profil" anchor link, keep /profile icon link unchanged */}
           <div className="flex items-center gap-3">
+            <a
+              href="#profile"
+              className="px-3.5 py-2 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md text-sm font-medium text-white shadow-lg hover:bg-white/15 transition-all duration-200"
+              title="Gå til profilseksjon"
+            >
+              Profil
+            </a>
+
             <Link
               to="/profile"
               className="group relative h-9 w-9 rounded-full bg-gradient-to-br from-white/20 to-white/5 backdrop-blur-md border border-white/30 flex items-center justify-center shadow-lg hover:scale-105 transition-transform duration-200"
