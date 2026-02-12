@@ -210,6 +210,128 @@ function MiniTrendChart({
   );
 }
 
+// 🎨 NEW: Animated Mini FTP Preview Component
+function AnimatedFTPPreview() {
+  const ftpValues = [210, 225, 245, 260]; // 2022 → 2025
+  const years = ['2022', '2023', '2024', '2025'];
+  
+  // SVG dimensions
+  const width = 160;
+  const height = 80;
+  const padding = 15;
+  
+  // Calculate points
+  const min = 200;
+  const max = 270;
+  const span = max - min;
+  
+  const points = ftpValues.map((val, idx) => ({
+    x: padding + (idx * (width - padding * 2)) / (ftpValues.length - 1),
+    y: padding + (1 - (val - min) / span) * (height - padding * 2),
+    value: val,
+    year: years[idx],
+  }));
+  
+  // Build path
+  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  
+  return (
+    <div className="flex justify-center mb-4">
+      <div className="relative">
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+          {/* Animated gradient path */}
+          <defs>
+            <linearGradient id="ftpGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#10b981" />
+              <stop offset="100%" stopColor="#059669" />
+            </linearGradient>
+          </defs>
+          
+          {/* Path with draw animation */}
+          <path
+            d={pathD}
+            fill="none"
+            stroke="url(#ftpGradient)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              strokeDasharray: 200,
+              strokeDashoffset: 200,
+              animation: 'drawPath 2s ease-out forwards',
+            }}
+          />
+          
+          {/* Animated dots */}
+          {points.map((point, idx) => (
+            <g key={idx}>
+              {/* Outer ring */}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="6"
+                fill="none"
+                stroke="#10b981"
+                strokeWidth="2"
+                opacity="0"
+                style={{
+                  animation: `popDot 0.4s ease-out ${0.5 + idx * 0.3}s forwards`,
+                }}
+              />
+              {/* Inner dot */}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="3"
+                fill="#10b981"
+                opacity="0"
+                style={{
+                  animation: `popDot 0.4s ease-out ${0.5 + idx * 0.3}s forwards`,
+                }}
+              />
+            </g>
+          ))}
+        </svg>
+        
+        {/* Labels */}
+        <div className="absolute -bottom-6 left-0 right-0 flex justify-between px-3 text-[10px] font-semibold text-emerald-700">
+          <span>210W</span>
+          <span>260W</span>
+        </div>
+        
+        {/* Year labels */}
+        <div className="absolute -top-5 left-0 right-0 flex justify-between px-3 text-[9px] text-slate-400">
+          <span>'22</span>
+          <span>'25</span>
+        </div>
+      </div>
+      
+      <style>{`
+        @keyframes drawPath {
+          to {
+            stroke-dashoffset: 0;
+          }
+        }
+        
+        @keyframes popDot {
+          0% {
+            opacity: 0;
+            transform: scale(0);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function DemoInsightBox() {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -448,14 +570,12 @@ const DemoProgressionPanel: React.FC = () => {
           </div>
         </div>
       </section>
-
-      {/* Demo content continues... */}
     </div>
   );
 };
 
 // ========================================
-// 🚀 DASHBOARD V5 - WORLD FIRST MESSAGING
+// 🚀 DASHBOARD V6 FINAL - WITH ANIMATED PREVIEW
 // ========================================
 
 export default function DashboardPage() {
@@ -547,7 +667,7 @@ export default function DashboardPage() {
           }
         `}</style>
 
-        {/* 🔥 TRENDS HERO - WORLD FIRST MESSAGING */}
+        {/* 🔥 TRENDS HERO - WITH ANIMATED PREVIEW */}
         <section 
           className="mb-4"
           style={{
@@ -556,7 +676,7 @@ export default function DashboardPage() {
         >
           <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40 relative overflow-hidden">
             
-            {/* Breakthrough Badge - GOLD SHIMMER */}
+            {/* Breakthrough Badge */}
             <div className="absolute top-4 right-4">
               <div 
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold tracking-wide shadow-lg"
@@ -598,22 +718,14 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Value Prop Box - COMPELLING */}
+            {/* Value Prop Box - WITH ANIMATED PREVIEW */}
             <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-8 relative overflow-hidden">
               {/* Subtle glow */}
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(16,185,129,0.08),transparent_50%)]" />
               
               <div className="relative">
-                {/* Icon */}
-                <div className="flex justify-center mb-4">
-                  <div className="relative">
-                    <svg className="h-20 w-20 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    {/* Pulse ring */}
-                    <div className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-ping opacity-20" />
-                  </div>
-                </div>
+                {/* 🎨 ANIMATED FTP PREVIEW (replaces static icon) */}
+                <AnimatedFTPPreview />
 
                 {/* Headline */}
                 <h3 className="text-center text-xl font-bold text-slate-900 mb-3">
