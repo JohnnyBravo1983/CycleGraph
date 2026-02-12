@@ -713,7 +713,7 @@ export default function DashboardPage() {
                   World-First Physics Power Trends
                 </h1>
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  The only app to deliver <span className="font-semibold text-emerald-600">~3-5% accuracy</span> power analysis without hardware
+                  First consumer app to deliver <span className="font-semibold text-emerald-600">~3-5% accuracy</span> power analysis without a power meter
                 </p>
               </div>
             </div>
@@ -742,7 +742,7 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-900">Multi-year FTP progression</div>
-                      <div className="text-xs text-slate-600 mt-0.5">See exactly how your power has evolved over time</div>
+                      <div className="text-xs text-slate-600 mt-0.5">Never been possible without a power meter before</div>
                     </div>
                   </div>
 
@@ -753,8 +753,8 @@ export default function DashboardPage() {
                       </svg>
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-slate-900">No power meter needed</div>
-                      <div className="text-xs text-slate-600 mt-0.5">Physics modeling delivers power meter-grade precision</div>
+                      <div className="text-sm font-semibold text-slate-900">Full physics modeling</div>
+                      <div className="text-xs text-slate-600 mt-0.5">Wind, air pressure, temperature, elevation - all modeled for precision</div>
                     </div>
                   </div>
 
@@ -765,8 +765,8 @@ export default function DashboardPage() {
                       </svg>
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-slate-900">Never been done before</div>
-                      <div className="text-xs text-slate-600 mt-0.5">First app to achieve this level of accuracy without hardware</div>
+                      <div className="text-sm font-semibold text-slate-900">Breakthrough accuracy</div>
+                      <div className="text-xs text-slate-600 mt-0.5">Sanity tested to ~5% in good conditions - a consumer-app first</div>
                     </div>
                   </div>
                 </div>
