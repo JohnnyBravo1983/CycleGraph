@@ -1,24 +1,23 @@
 // frontend/src/main.tsx
+
 // FETCH INTERCEPTOR - redirect /api/* to backend
-(function() {
-  const BACKEND = 'https://api.cyclegraph.app';
+(function () {
+  const BACKEND = "https://api.cyclegraph.app";
   const originalFetch = window.fetch;
-  
-  window.fetch = function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    if (typeof input === 'string' && input.startsWith('/api/')) {
-      console.log('[INTERCEPTOR] Redirect:', input, '→', BACKEND + input);
+
+  window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    if (typeof input === "string" && input.startsWith("/api/")) {
+      console.log("[INTERCEPTOR] Redirect:", input, "→", BACKEND + input);
       input = BACKEND + input;
     }
     return originalFetch(input, init);
   };
-  
-  console.log('[INTERCEPTOR] Loaded from main.tsx');
+
+  console.log("[INTERCEPTOR] Loaded from main.tsx");
 })();
 
-// frontend/src/main.tsx
 import "./devFetchShim";
 import "./index.css";
-import "./devFetchShim";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
@@ -51,6 +50,23 @@ import SessionView from "./routes/SessionView";
 
 // How it works
 import { HowItWorksPage } from "./routes/HowItWorksPage";
+
+// ✅ Fix Android portrait "font boosting" / autosizing causing layout overflow
+// Must run before first render.
+(function () {
+  try {
+    const style = document.createElement("style");
+    style.setAttribute("data-cg", "text-size-adjust-fix");
+    style.textContent = `
+      html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+      body { overflow-x: hidden; }
+    `;
+    document.head.appendChild(style);
+    console.log("[main.tsx] Applied text-size-adjust fix");
+  } catch (e) {
+    console.warn("[main.tsx] Could not apply text-size-adjust fix", e);
+  }
+})();
 
 // Installer dev-rewrite for axios FØR appen starter (kun i dev)
 if (import.meta.env.DEV) {
