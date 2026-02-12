@@ -363,12 +363,7 @@ function DemoInsightBox() {
   );
 }
 
-function fmtDeltaRow(args: {
-  deltaFtpW: number;
-  deltaFtpPct: number;
-  deltaKg: number;
-  deltaWkgPct: number;
-}) {
+function fmtDeltaRow(args: { deltaFtpW: number; deltaFtpPct: number; deltaKg: number; deltaWkgPct: number }) {
   const { deltaFtpW, deltaFtpPct, deltaKg, deltaWkgPct } = args;
 
   const up = "⬆";
@@ -766,7 +761,7 @@ export default function DashboardPage() {
                   <div className="absolute inset-0 bg-white/20" />
                 </div>
               </div>
-              <div className="flex-1 min-w-0 pr-24">
+              <div className="flex-1 min-w-0 pr-0 sm:pr-24">
                 <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight mb-1">
                   World-First Physics Power Trends
                 </h1>
@@ -841,12 +836,12 @@ export default function DashboardPage() {
 
             {/* 🎯 COMPACT COUNTDOWN BANNER */}
             <div className="bg-yellow-400 border-2 border-yellow-500 rounded-lg p-3 shadow-lg">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2 flex-1">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xl animate-pulse">⚡</span>
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-bold text-gray-800 text-sm">FTP Trend Analysis drops March 1st</p>
-                    <p className="text-xs text-gray-700">
+                    <p className="text-xs text-gray-700 break-words">
                       Your complete history appears automatically.{" "}
                       <a href="/rides" className="underline font-semibold hover:text-gray-900">
                         Check precision analysis →
@@ -855,16 +850,16 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <div className="bg-white rounded px-2 py-1 min-w-[50px] text-center">
+                <div className="flex gap-2 justify-start sm:justify-end">
+                  <div className="bg-white rounded px-2 py-1 min-w-0 w-[44px] sm:w-[50px] text-center">
                     <div className="text-lg font-bold text-gray-800">{timeLeft.days}</div>
                     <div className="text-[10px] text-gray-600 uppercase">days</div>
                   </div>
-                  <div className="bg-white rounded px-2 py-1 min-w-[50px] text-center">
+                  <div className="bg-white rounded px-2 py-1 min-w-0 w-[44px] sm:w-[50px] text-center">
                     <div className="text-lg font-bold text-gray-800">{timeLeft.hours}</div>
                     <div className="text-[10px] text-gray-600 uppercase">hrs</div>
                   </div>
-                  <div className="bg-white rounded px-2 py-1 min-w-[50px] text-center">
+                  <div className="bg-white rounded px-2 py-1 min-w-0 w-[44px] sm:w-[50px] text-center">
                     <div className="text-lg font-bold text-gray-800 animate-pulse">{timeLeft.minutes}</div>
                     <div className="text-[10px] text-gray-600 uppercase">min</div>
                   </div>
