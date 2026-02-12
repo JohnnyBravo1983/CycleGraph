@@ -6,6 +6,8 @@ import { StravaImportCard } from "../components/StravaImportCard";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
 import ProfileView from "../components/Profile/ProfileView";
+import ProfilePeekCard from "../components/Profile/ProfilePeekCard";
+
 
 
 // ✅ Patch 4a.2
@@ -813,6 +815,12 @@ export default function DashboardPage() {
                 <div className="text-xs font-semibold text-slate-900">Launching April 1st</div>
               </div>
             </div>
+
+{/* PROFILE (compact peek) */}
+<section id="profile" className="mb-4 scroll-mt-24">
+  <ProfilePeekCard />
+</section>
+
 
             <div className="opacity-40">
               <div className="flex items-center gap-3 mb-4">
