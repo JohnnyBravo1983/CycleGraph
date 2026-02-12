@@ -6,7 +6,7 @@ import { StravaImportCard } from "../components/StravaImportCard";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
 import ProfileView from "../components/Profile/ProfileView";
-import ProfilePeekCard from "../components/Profile/ProfilePeekCard";
+
 
 
 
