@@ -579,11 +579,42 @@ const DemoProgressionPanel: React.FC = () => {
 };
 
 // ========================================
-// 🚀 DASHBOARD V6 FINAL - WITH ANIMATED PREVIEW
+// 🚀 DASHBOARD V6 FINAL - WITH ANIMATED PREVIEW + COUNTDOWN
 // ========================================
 
 export default function DashboardPage() {
   const demo = isDemoMode();
+
+  // Countdown state for FTP trends banner
+  const [timeLeft, setTimeLeft] = React.useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0
+  });
+
+  React.useEffect(() => {
+    const targetDate = new Date('2026-03-01T00:00:00');
+    
+    const updateCountdown = () => {
+      const now = new Date();
+      const difference = targetDate - now;
+      
+      if (difference > 0) {
+        setTimeLeft({
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+          minutes: Math.floor((difference / 1000 / 60) % 60),
+          seconds: Math.floor((difference / 1000) % 60)
+        });
+      }
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   async function onLogout() {
     try {
@@ -732,18 +763,13 @@ export default function DashboardPage() {
             </div>
 
             {/* Value Prop Box - WITH ANIMATED PREVIEW */}
-            <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-8 relative overflow-hidden">
+            <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-8 mb-6 relative overflow-hidden">
               {/* Subtle glow */}
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(16,185,129,0.08),transparent_50%)]" />
               
               <div className="relative">
                 {/* 🎨 ANIMATED FTP PREVIEW (replaces static icon) */}
                 <AnimatedFTPPreview />
-
-                {/* Headline */}
-                <h3 className="text-center text-xl font-bold text-slate-900 mb-3">
-                  Upload 50 rides, unlock your complete FTP history
-                </h3>
 
                 {/* Value Props */}
                 <div className="space-y-3 max-w-lg mx-auto">
@@ -783,14 +809,34 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
 
-                {/* CTA hint */}
-                <div className="mt-6 text-center">
-                  <div className="inline-flex items-center gap-2 text-sm text-emerald-700">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                    </svg>
-                    <span className="font-medium">Import rides below to get started</span>
+            {/* 🎯 COMPACT COUNTDOWN BANNER */}
+            <div className="bg-yellow-400 border-2 border-yellow-500 rounded-lg p-3 shadow-lg">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-xl animate-pulse">⚡</span>
+                  <div>
+                    <p className="font-bold text-gray-800 text-sm">FTP Trend Analysis drops March 1st</p>
+                    <p className="text-xs text-gray-700">
+                      Your complete history appears automatically. <a href="/rides" className="underline font-semibold hover:text-gray-900">Check precision analysis →</a>
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex gap-2">
+                  <div className="bg-white rounded px-2 py-1 min-w-[50px] text-center">
+                    <div className="text-lg font-bold text-gray-800">{timeLeft.days}</div>
+                    <div className="text-[10px] text-gray-600 uppercase">days</div>
+                  </div>
+                  <div className="bg-white rounded px-2 py-1 min-w-[50px] text-center">
+                    <div className="text-lg font-bold text-gray-800">{timeLeft.hours}</div>
+                    <div className="text-[10px] text-gray-600 uppercase">hrs</div>
+                  </div>
+                  <div className="bg-white rounded px-2 py-1 min-w-[50px] text-center">
+                    <div className="text-lg font-bold text-gray-800 animate-pulse">{timeLeft.minutes}</div>
+                    <div className="text-[10px] text-gray-600 uppercase">min</div>
                   </div>
                 </div>
               </div>

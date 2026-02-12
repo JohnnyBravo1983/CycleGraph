@@ -64,13 +64,14 @@ For Pioneer Beta, users can import ONLY:
 
 **Deliverable:** New users have complete demographic profile  
 **Time estimate:** 4-5 hours  
+**Times Used** 3 Hours
 **Blockers:** None
 
 **Validation:**
-- [ ] Signup form has 4 new fields
-- [ ] Fields are required (can't skip)
-- [ ] Data saves to `auth.json`
-- [ ] Old users still work (backward compatible)
+- [X] Signup form has 4 new fields
+- [X] Fields are required (can't skip)
+- [X] Data saves to `auth.json`
+- [X] Old users still work (backward compatible)
 
 ---
 
@@ -433,102 +434,170 @@ Both must update automatically when user imports new rides.
    - W/kg: "Watts per kilogram - accounts for body weight"
    - Peak efforts: "Your best performances at different durations"
 
-**Day 12 Tasks (Trends Page - FTP Progression):**
-10. Section 2 on Trends page: "FTP Progression" (below Power Profile)
-11. Create `/api/analytics/ftp-progression` endpoint:
-   - Load all rides sorted by date
-   - Calculate timespan (first to last ride)
-   - Group FTP by week (not by ride number!)
-   - Calculate rides per week
-   - If timespan > 6 months: use only last 6 months data
-   - Linear regression: watts per week trend
-   - Project future: +4w, +8w, +12w
-   - Return:
-     ```json
-     {
-       "ftp_by_week": [
-         {"week": "2025-W40", "ftp_watts": 250, "ftp_wkg": 2.5},
-         {"week": "2025-W44", "ftp_watts": 258, "ftp_wkg": 2.6},
-         {"week": "2026-W05", "ftp_watts": 265, "ftp_wkg": 2.7}
-       ],
-       "trend_watts_per_week": 1.9,
-       "rides_per_week": 6.2,
-       "weeks_analyzed": 12,
-       "projections": {
-         "4_weeks": {"watts": 273, "wkg": 2.73},
-         "8_weeks": {"watts": 281, "wkg": 2.81},
-         "12_weeks": {"watts": 289, "wkg": 2.89}
-       },
-       "confidence": "high"
-     }
-     ```
+Day 12 – Physics Update + FTP Progression (Model Freeze Prep)
 
-12. Display FTP progression on Trends page:
-   - Line chart: FTP over time (weeks on x-axis, not ride numbers)
-   - Show activity level: "6.2 rides/week ✅ Great consistency!"
-   - Show trend: "+1.9W per week"
-   - Show projections:
-     ```
-     🔮 IF YOU CONTINUE:
-        4 weeks:  273W (2.73 W/kg)
-        8 weeks:  281W (2.81 W/kg)
-        12 weeks: 289W (2.89 W/kg)
-     ```
-   - Add messaging based on activity:
-     - High activity (3+ rides/week): "Great consistency! 💪"
-     - Medium (1-3 rides/week): "For faster gains: 3-4x per week"
-     - Low (<1 ride/week): "⚠️ Low activity - projection uncertain"
+Primary Focus:
 
-13. Add tip box:
-   ```
-   💡 TO IMPROVE FTP FASTER:
-      • Train 3-4x per week minimum
-      • Include 2-3 sessions above 90% FTP (threshold/intervals)
-      • Keep 1-2 sessions easy (recovery)
-   ```
+Improve physics model (Crr based on tire width)
 
-**CRITICAL - Dynamic Updates:**
-14. Ensure both Dashboard and Trends page RE-FETCH data on every view:
-    - Dashboard key metrics: fetch on page load
-    - Trends page: fetch on page load
-    - After import completes: show message "Analytics updated! Refresh to see latest."
-    - Or: Auto-refresh Dashboard/Trends after import completes
-15. Test: Import 1 new ride → verify FTP/peaks update immediately
+Implement FTP Progression (backend + frontend)
 
-**Deliverable:** Power Analytics live in Dashboard + Trends page, updates dynamically  
-**Time estimate:** 8 hours (2 days)  
-**Blockers:** Backend API must work (Day 9-10)
+Recalculate baseline before Polish & Testing
 
-**Validation:**
-- [ ] **Dashboard has key metrics widget** (FTP, progress, best 5min)
-- [ ] **Trends page exists** (new navigation item)
-- [ ] **Trends page has 2 sections:** Power Profile + FTP Progression
-- [ ] Power Profile displays correctly
-- [ ] FTP progression chart shows time-based data (weeks, not rides)
-- [ ] Projections make sense
-- [ ] Works for users with 50 rides from 1 month AND 2 years
-- [ ] Activity level messaging is appropriate
-- [ ] Tooltips explain terms clearly
-- [ ] **Data updates dynamically:** Import new ride → analytics refresh
-- [ ] Mobile responsive
-- [ ] WOW factor achieved - users excited to see their data!
+🔧 Part 1 – Physics Model Adjustment (Crr Update)
 
----
+Goal: Improve accuracy before E2E freeze.
 
-### **Week 2 Review (Sunday evening)**
+Tasks:
 
-**Checklist:**
-- [ ] Profile versioning verified
-- [ ] Import UX improved
-- [ ] Power Profile backend working
-- [ ] **Dashboard has key metrics**
-- [ ] **Trends page exists with full analytics**
-- [ ] **Analytics update dynamically after imports**
+Add tire width selector in Profile:
 
-**If ANY task incomplete:** Prioritize for Week 3
+25 mm
 
----
+28 mm (default)
 
+30–32 mm
+
+Implement Crr mapping (performance road assumption):
+
+25 mm → 0.0037
+
+28 mm → 0.0034
+
+30–32 mm → 0.0035
+
+Keep fixed defaults:
+
+CdA = 0.300
+
+Crank efficiency = 0.96
+
+Ensure:
+
+Changing tire width updates Crr dynamically
+
+Crr is not directly editable
+
+Existing rides re-use stored result data unless explicitly recalculated
+
+Re-import 50 test rides and verify:
+
+Average power difference reasonable (few watts shift)
+
+FTP change logical
+
+No regression in analytics
+
+Deliverable: Updated physics baseline locked before Week 3.
+
+📈 Part 2 – FTP Progression Backend
+
+Create endpoint:
+
+/api/analytics/ftp-progression
+
+Backend Logic:
+
+Load all rides sorted by date
+
+Calculate timespan (first → last ride)
+
+If timespan > 6 months:
+
+Use last 6 months only
+
+Group by week (ISO week format YYYY-Wxx)
+
+Calculate:
+
+Weekly FTP (best estimate in that week)
+
+W/kg (using profile weight snapshot)
+
+Rides per week (average)
+
+Compute:
+
+Linear regression (watts per week trend)
+
+Weeks analyzed
+
+Generate projections:
+
++4 weeks
+
++8 weeks
+
++12 weeks
+
+Return structure:
+{
+  "ftp_by_week": [
+    {"week": "2025-W40", "ftp_watts": 250, "ftp_wkg": 2.5},
+    {"week": "2025-W44", "ftp_watts": 258, "ftp_wkg": 2.6},
+    {"week": "2026-W05", "ftp_watts": 265, "ftp_wkg": 2.7}
+  ],
+  "trend_watts_per_week": 1.9,
+  "rides_per_week": 6.2,
+  "weeks_analyzed": 12,
+  "projections": {
+    "4_weeks": {"watts": 273, "wkg": 2.73},
+    "8_weeks": {"watts": 281, "wkg": 2.81},
+    "12_weeks": {"watts": 289, "wkg": 2.89}
+  },
+  "confidence": "high"
+}
+
+📊 Part 3 – Trends Page Frontend
+
+Under Power Profile, add:
+
+Section 2: FTP Progression
+
+Display:
+
+Line chart (weeks on X-axis)
+
+Weekly FTP (not ride numbers)
+
+Rides per week:
+
+“6.2 rides/week ✅ Great consistency!”
+
+Trend:
+
+“+1.9W per week”
+
+Projections block:
+
+🔮 IF YOU CONTINUE:
+4 weeks:  273W (2.73 W/kg)
+8 weeks:  281W (2.81 W/kg)
+12 weeks: 289W (2.89 W/kg)
+
+
+Activity messaging:
+3+ rides/week → “Great consistency! 💪”
+1–3 rides/week → “For faster gains: 3–4x per week”
+<1 ride/week → “⚠️ Low activity – projection uncertain”
+🧪 Validation Before Freeze
+
+Crr updates when tire width changes
+CdA and crank remain fixed defaults
+FTP progression correct for:
+
+50 rides / 1 month
+50 rides / 1 year
+10 rides only
+ Projections reasonable (not explosive/unrealistic)
+ No major performance slowdown
+ Analytics update after new ride import
+
+🎯 Outcome of Day 12
+Physics model improved and frozen
+FTP progression fully implemented
+Baseline recalculated
+Ready to enter Week 3 (Polish & Testing) with stable model
 ## 📅 Week 3: Polish & Testing (Feb 25 - Mar 1)
 
 ### **Day 13-14 - Tuesday-Wednesday, Feb 25-26** 🟢
