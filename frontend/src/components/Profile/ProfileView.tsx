@@ -186,13 +186,13 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
       value: formatValue("tire_quality"),
       zone: "tire",
       color: "#a855f7",
-      editable: true,
+      editable: false,
       bullseye: {
         simple:
-          "Tire rubber compound matters! Premium tires (GP5000, Corsa) have special rubber that bends/recovers faster = less energy lost. Budget tires can cost you 10-20W at speed. It's like running shoes - cheap ones make you work harder!",
-        whyEditable:
-          "Tire quality affects Crr dramatically. Premium (Crr ~0.0030) vs Budget (Crr ~0.0055) = 45% difference! We use your tire quality to adjust Crr calculation.",
-        variance: "Very High - biggest Crr factor after tire width",
+          "We default to 'Performance' tires as this is most common for serious cyclists and matches our target accuracy. For precise watt calculations, avoid cheap trainer tires - they can add 10-20W of rolling resistance!",
+        whyLocked:
+          "Defaulted to Performance quality to ensure baseline accuracy. Most cyclists use mid-to-high quality tires (GP5000, Corsa, etc). Cheap trainer tires would significantly impact precision.",
+        variance: "Optimized - Performance tires assumed for ~3-5% accuracy target",
       },
       techDeepDive: {
         formula: "Crr = f(tire_compound, tire_construction, tread_pattern)",
@@ -301,10 +301,10 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
       editable: false,
       bullseye: {
         simple:
-          "Crr measures how much energy is lost as your tire deforms and un-deforms as it rolls. Lower Crr = less energy wasted. We calculate your Crr based on the tire width and quality you specified - no need to enter it manually!",
+          "Crr measures how much energy is lost as your tire deforms and un-deforms as it rolls. Lower Crr = less energy wasted. Not fully default: adjusts dynamically based on your tire width to avoid large impact on precision watt calculations.",
         whyLocked:
-          "Crr is derived from your tire inputs (width + quality). Since you already told us your tire specs, we calculate the appropriate Crr scientifically. Manual entry would be redundant and error-prone.",
-        variance: "Covered by tire width + tire quality inputs",
+          "Partially dynamic - calculated from tire width + quality. We adjust Crr based on your tire width to maintain accuracy without requiring manual tuning.",
+        variance: "Optimized - Dynamically adjusted based on tire width",
       },
       techDeepDive: {
         formula: "Frr = Crr × N (where N = normal force = mg on flats)",
@@ -490,11 +490,11 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
           {/* Parameter summary */}
           <div className="flex items-center gap-4 text-xs">
             <div className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
-              <span className="font-bold text-emerald-700">✏️ 4 Customizable</span>
+              <span className="font-bold text-emerald-700">✏️ 3 Customizable</span>
               <span className="text-emerald-600">→ Highest impact on accuracy</span>
             </div>
             <div className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">
-              <span className="font-bold text-blue-700">🔒 5 Optimized</span>
+              <span className="font-bold text-blue-700">🔒 6 Optimized</span>
               <span className="text-blue-600">→ Smart defaults for road cycling</span>
             </div>
           </div>
@@ -502,8 +502,8 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
 
         {/* Main Grid: Cyclist + Settings */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* LEFT: Realistic Cyclist Silhouette (2 columns) */}
-          <div className="lg:col-span-2">
+          {/* LEFT: Realistic Cyclist Silhouette + Hover Info (2 columns) */}
+          <div className="lg:col-span-2 space-y-4">
             <div className="aspect-square bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-6 pb-20 relative overflow-hidden">
               {/* Subtle grid */}
               <div
@@ -961,6 +961,196 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                 </span>
               </div>
             </div>
+
+            {/* BULLSEYE + TECH DEEP DIVE PANEL - Below cyclist on left */}
+            {hoveredSetting && (
+              <div
+                className="rounded-2xl border-2 bg-white shadow-lg overflow-hidden"
+                style={{ borderColor: hoveredSetting.color }}
+              >
+                {/* Bullseye Section - Always visible */}
+                <div className="p-6" style={{ backgroundColor: `${hoveredSetting.color}05` }}>
+                  <div className="flex items-start gap-3 mb-4">
+                    <div
+                      className="flex-none w-10 h-10 rounded-xl flex items-center justify-center text-2xl"
+                      style={{ backgroundColor: `${hoveredSetting.color}20` }}
+                    >
+                      🎯
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-bold text-slate-900 mb-1">
+                        {hoveredSetting.label}
+                        {hoveredSetting.editable ? (
+                          <span className="ml-2 text-sm font-bold text-emerald-700">✏️ Customizable</span>
+                        ) : (
+                          <span className="ml-2 text-sm font-bold text-blue-700">🔒 Optimized Default</span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-slate-700 leading-relaxed">{hoveredSetting.bullseye.simple}</p>
+                    </div>
+                  </div>
+
+                  {/* Why editable/locked */}
+                  <div
+                    className="rounded-xl bg-white border-2 p-4"
+                    style={{ borderColor: `${hoveredSetting.color}40` }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-none text-lg">💡</div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
+                          {hoveredSetting.editable ? "Why You Customize This" : "Why This is Locked"}
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed">
+                          {hoveredSetting.editable
+                            ? hoveredSetting.bullseye.whyEditable
+                            : hoveredSetting.bullseye.whyLocked}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tech Deep Dive - Collapsible */}
+                <div className="border-t-2" style={{ borderColor: hoveredSetting.color }}>
+                  <button
+                    onClick={() => setTechExpanded(!techExpanded)}
+                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                    type="button"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🔬</span>
+                      <span className="text-sm font-bold text-slate-900">Technical Deep Dive</span>
+                      <span className="text-xs text-slate-500">(for nerds)</span>
+                    </div>
+                    <svg
+                      className={`w-5 h-5 text-slate-600 transition-transform ${
+                        techExpanded ? "rotate-180" : ""
+                      }`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {techExpanded && (
+                    <div className="px-6 pb-6 space-y-4 bg-slate-50">
+                      {/* Formula */}
+                      <div className="rounded-lg bg-slate-900 p-4 font-mono">
+                        <div className="text-xs font-bold text-emerald-400 mb-2">FORMULA:</div>
+                        <div className="text-sm text-white">{hoveredSetting.techDeepDive.formula}</div>
+                      </div>
+
+                      {/* Variables */}
+                      <div>
+                        <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
+                          Variables:
+                        </div>
+                        <div className="space-y-1">
+                          {hoveredSetting.techDeepDive.variables.map((v, idx) => (
+                            <div
+                              key={idx}
+                              className="text-sm text-slate-700 font-mono bg-white rounded px-3 py-1.5 border border-slate-200"
+                            >
+                              {v}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Impact */}
+                      <div>
+                        <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
+                          Real-World Impact:
+                        </div>
+                        <div className="space-y-1">
+                          {hoveredSetting.techDeepDive.impact.map((imp, idx) => (
+                            <div
+                              key={idx}
+                              className="text-sm text-slate-700 bg-white rounded px-3 py-1.5 border border-slate-200"
+                            >
+                              {imp}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Edge Cases */}
+                      <div>
+                        <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
+                          Edge Cases:
+                        </div>
+                        <div className="space-y-1">
+                          {hoveredSetting.techDeepDive.edgeCases.map((edge, idx) => (
+                            <div
+                              key={idx}
+                              className="text-sm text-slate-700 bg-amber-50 rounded px-3 py-1.5 border border-amber-200"
+                            >
+                              ⚠️ {edge}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Accuracy Impact */}
+                      <div
+                        className="rounded-lg p-4"
+                        style={{
+                          backgroundColor: `${hoveredSetting.color}15`,
+                          borderLeft: `4px solid ${hoveredSetting.color}`,
+                        }}
+                      >
+                        <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
+                          Accuracy Impact:
+                        </div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {hoveredSetting.techDeepDive.accuracyImpact}
+                        </div>
+                      </div>
+
+                      {/* Future Feature / Calculation / Assumption (if exists) */}
+                      {hoveredSetting.techDeepDive.futureFeature && (
+                        <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                          <div className="flex items-start gap-2">
+                            <span className="text-lg">🚀</span>
+                            <div>
+                              <div className="text-xs font-bold text-blue-700 mb-1">COMING SOON:</div>
+                              <div className="text-sm text-blue-900">{hoveredSetting.techDeepDive.futureFeature}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {hoveredSetting.techDeepDive.calculation && (
+                        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3">
+                          <div className="flex items-start gap-2">
+                            <span className="text-lg">⚙️</span>
+                            <div>
+                              <div className="text-xs font-bold text-emerald-700 mb-1">HOW WE CALCULATE:</div>
+                              <div className="text-sm text-emerald-900">{hoveredSetting.techDeepDive.calculation}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {hoveredSetting.techDeepDive.assumption && (
+                        <div className="rounded-lg bg-purple-50 border border-purple-200 p-3">
+                          <div className="flex items-start gap-2">
+                            <span className="text-lg">📋</span>
+                            <div>
+                              <div className="text-xs font-bold text-purple-700 mb-1">ASSUMPTION:</div>
+                              <div className="text-sm text-purple-900">{hoveredSetting.techDeepDive.assumption}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* RIGHT: All Settings (3 columns) */}
@@ -970,7 +1160,9 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
               <span className="text-xs text-slate-500 font-normal">Hover for details</span>
             </div>
 
-            {profileSettings.map((setting) => (
+            {profileSettings
+              .filter((setting) => setting.id !== "bike-type")
+              .map((setting) => (
               <div
                 key={setting.id}
                 className="group relative"
@@ -1026,196 +1218,6 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
             ))}
           </div>
         </div>
-
-        {/* BULLSEYE + TECH DEEP DIVE PANEL - Below everything */}
-        {hoveredSetting && (
-          <div
-            className="mt-6 rounded-2xl border-2 bg-white shadow-lg overflow-hidden"
-            style={{ borderColor: hoveredSetting.color }}
-          >
-            {/* Bullseye Section - Always visible */}
-            <div className="p-6" style={{ backgroundColor: `${hoveredSetting.color}05` }}>
-              <div className="flex items-start gap-3 mb-4">
-                <div
-                  className="flex-none w-10 h-10 rounded-xl flex items-center justify-center text-2xl"
-                  style={{ backgroundColor: `${hoveredSetting.color}20` }}
-                >
-                  🎯
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-bold text-slate-900 mb-1">
-                    {hoveredSetting.label}
-                    {hoveredSetting.editable ? (
-                      <span className="ml-2 text-sm font-bold text-emerald-700">✏️ Customizable</span>
-                    ) : (
-                      <span className="ml-2 text-sm font-bold text-blue-700">🔒 Optimized Default</span>
-                    )}
-                  </h3>
-                  <p className="text-sm text-slate-700 leading-relaxed">{hoveredSetting.bullseye.simple}</p>
-                </div>
-              </div>
-
-              {/* Why editable/locked */}
-              <div
-                className="rounded-xl bg-white border-2 p-4"
-                style={{ borderColor: `${hoveredSetting.color}40` }}
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex-none text-lg">💡</div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                      {hoveredSetting.editable ? "Why You Customize This" : "Why This is Locked"}
-                    </div>
-                    <p className="text-sm text-slate-700 leading-relaxed">
-                      {hoveredSetting.editable
-                        ? hoveredSetting.bullseye.whyEditable
-                        : hoveredSetting.bullseye.whyLocked}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Tech Deep Dive - Collapsible */}
-            <div className="border-t-2" style={{ borderColor: hoveredSetting.color }}>
-              <button
-                onClick={() => setTechExpanded(!techExpanded)}
-                className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
-                type="button"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🔬</span>
-                  <span className="text-sm font-bold text-slate-900">Technical Deep Dive</span>
-                  <span className="text-xs text-slate-500">(for nerds)</span>
-                </div>
-                <svg
-                  className={`w-5 h-5 text-slate-600 transition-transform ${
-                    techExpanded ? "rotate-180" : ""
-                  }`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {techExpanded && (
-                <div className="px-6 pb-6 space-y-4 bg-slate-50">
-                  {/* Formula */}
-                  <div className="rounded-lg bg-slate-900 p-4 font-mono">
-                    <div className="text-xs font-bold text-emerald-400 mb-2">FORMULA:</div>
-                    <div className="text-sm text-white">{hoveredSetting.techDeepDive.formula}</div>
-                  </div>
-
-                  {/* Variables */}
-                  <div>
-                    <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
-                      Variables:
-                    </div>
-                    <div className="space-y-1">
-                      {hoveredSetting.techDeepDive.variables.map((v, idx) => (
-                        <div
-                          key={idx}
-                          className="text-sm text-slate-700 font-mono bg-white rounded px-3 py-1.5 border border-slate-200"
-                        >
-                          {v}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Impact */}
-                  <div>
-                    <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
-                      Real-World Impact:
-                    </div>
-                    <div className="space-y-1">
-                      {hoveredSetting.techDeepDive.impact.map((imp, idx) => (
-                        <div
-                          key={idx}
-                          className="text-sm text-slate-700 bg-white rounded px-3 py-1.5 border border-slate-200"
-                        >
-                          {imp}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Edge Cases */}
-                  <div>
-                    <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
-                      Edge Cases:
-                    </div>
-                    <div className="space-y-1">
-                      {hoveredSetting.techDeepDive.edgeCases.map((edge, idx) => (
-                        <div
-                          key={idx}
-                          className="text-sm text-slate-700 bg-amber-50 rounded px-3 py-1.5 border border-amber-200"
-                        >
-                          ⚠️ {edge}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Accuracy Impact */}
-                  <div
-                    className="rounded-lg p-4"
-                    style={{
-                      backgroundColor: `${hoveredSetting.color}15`,
-                      borderLeft: `4px solid ${hoveredSetting.color}`,
-                    }}
-                  >
-                    <div className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                      Accuracy Impact:
-                    </div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      {hoveredSetting.techDeepDive.accuracyImpact}
-                    </div>
-                  </div>
-
-                  {/* Future Feature / Calculation / Assumption (if exists) */}
-                  {hoveredSetting.techDeepDive.futureFeature && (
-                    <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
-                      <div className="flex items-start gap-2">
-                        <span className="text-lg">🚀</span>
-                        <div>
-                          <div className="text-xs font-bold text-blue-700 mb-1">COMING SOON:</div>
-                          <div className="text-sm text-blue-900">{hoveredSetting.techDeepDive.futureFeature}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {hoveredSetting.techDeepDive.calculation && (
-                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3">
-                      <div className="flex items-start gap-2">
-                        <span className="text-lg">⚙️</span>
-                        <div>
-                          <div className="text-xs font-bold text-emerald-700 mb-1">HOW WE CALCULATE:</div>
-                          <div className="text-sm text-emerald-900">{hoveredSetting.techDeepDive.calculation}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {hoveredSetting.techDeepDive.assumption && (
-                    <div className="rounded-lg bg-purple-50 border border-purple-200 p-3">
-                      <div className="flex items-start gap-2">
-                        <span className="text-lg">📋</span>
-                        <div>
-                          <div className="text-xs font-bold text-purple-700 mb-1">ASSUMPTION:</div>
-                          <div className="text-sm text-purple-900">{hoveredSetting.techDeepDive.assumption}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
