@@ -449,16 +449,13 @@ const DemoProgressionPanel: React.FC = () => {
         </div>
       </section>
 
-      {/* Demo content continues... (keeping existing demo mode content) */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        {/* ... rest of demo mode ... */}
-      </section>
+      {/* Demo content continues... */}
     </div>
   );
 };
 
 // ========================================
-// 🎨 DASHBOARD V4 - POLISHED TO PERFECTION
+// 🚀 DASHBOARD V5 - WORLD FIRST MESSAGING
 // ========================================
 
 export default function DashboardPage() {
@@ -487,7 +484,7 @@ export default function DashboardPage() {
         background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       }}
     >
-      {/* Subtle noise texture overlay */}
+      {/* Subtle noise texture */}
       <div 
         className="fixed inset-0 opacity-[0.015] pointer-events-none"
         style={{
@@ -496,7 +493,8 @@ export default function DashboardPage() {
       />
 
       <div className="max-w-4xl mx-auto px-4 py-6 relative">
-        {/* HEADER with Profile Avatar */}
+        
+        {/* HEADER */}
         <header className="flex items-center justify-between mb-6">
           <Link
             to="/"
@@ -515,9 +513,6 @@ export default function DashboardPage() {
               <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
-              <span className="absolute -bottom-8 right-0 bg-slate-900 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                Profile
-              </span>
             </Link>
 
             <button
@@ -530,58 +525,6 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {/* 🔥 TRENDS HERO - Refined */}
-        <section className="mb-4">
-          <div 
-            className="rounded-2xl bg-white/98 backdrop-blur-xl p-7 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40"
-            style={{
-              animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
-            }}
-          >
-            <div className="flex items-start gap-4 mb-5">
-              <div className="flex-none">
-                <div 
-                  className="h-12 w-12 rounded-xl flex items-center justify-center shadow-lg relative overflow-hidden"
-                  style={{
-                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                  }}
-                >
-                  <svg className="h-6 w-6 text-white relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                  <div className="absolute inset-0 bg-white/20" />
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight">
-                  Your Power Journey
-                </h1>
-                <p className="mt-0.5 text-sm text-slate-600 leading-relaxed">
-                  Physics-based power estimation · ~3-5% accuracy
-                </p>
-              </div>
-            </div>
-
-            {/* Trends Placeholder - More refined */}
-            <div className="rounded-xl border-2 border-dashed border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100/50 p-10 text-center relative overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(16,185,129,0.05),transparent_50%)]" />
-              
-              <div className="relative">
-                <svg className="h-16 w-16 mx-auto mb-3 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                
-                <h3 className="text-base font-semibold text-slate-700 mb-1.5">
-                  Upload rides to unlock your trends
-                </h3>
-                <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
-                  Import your last 50 rides for incredible FTP progression analysis, W/kg improvements, and training insights
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <style>{`
           @keyframes slideUp {
             from {
@@ -593,9 +536,144 @@ export default function DashboardPage() {
               transform: translateY(0);
             }
           }
+          
+          @keyframes shimmer {
+            0% {
+              background-position: -200% center;
+            }
+            100% {
+              background-position: 200% center;
+            }
+          }
         `}</style>
 
-        {/* 🎯 GOALS - Refined Locked State */}
+        {/* 🔥 TRENDS HERO - WORLD FIRST MESSAGING */}
+        <section 
+          className="mb-4"
+          style={{
+            animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
+          }}
+        >
+          <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40 relative overflow-hidden">
+            
+            {/* Breakthrough Badge - GOLD SHIMMER */}
+            <div className="absolute top-4 right-4">
+              <div 
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold tracking-wide shadow-lg"
+                style={{
+                  background: "linear-gradient(90deg, #fbbf24 0%, #f59e0b 50%, #fbbf24 100%)",
+                  backgroundSize: "200% 100%",
+                  animation: "shimmer 3s linear infinite",
+                  color: "#78350f",
+                }}
+              >
+                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+                BREAKTHROUGH
+              </div>
+            </div>
+
+            <div className="flex items-start gap-4 mb-6">
+              <div className="flex-none">
+                <div 
+                  className="h-14 w-14 rounded-xl flex items-center justify-center shadow-lg relative overflow-hidden"
+                  style={{
+                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                  }}
+                >
+                  <svg className="h-7 w-7 text-white relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                  <div className="absolute inset-0 bg-white/20" />
+                </div>
+              </div>
+              <div className="flex-1 min-w-0 pr-24">
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight mb-1">
+                  World-First Physics Power Trends
+                </h1>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  The only app to deliver <span className="font-semibold text-emerald-600">~3-5% accuracy</span> power analysis without hardware
+                </p>
+              </div>
+            </div>
+
+            {/* Value Prop Box - COMPELLING */}
+            <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-8 relative overflow-hidden">
+              {/* Subtle glow */}
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(16,185,129,0.08),transparent_50%)]" />
+              
+              <div className="relative">
+                {/* Icon */}
+                <div className="flex justify-center mb-4">
+                  <div className="relative">
+                    <svg className="h-20 w-20 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    {/* Pulse ring */}
+                    <div className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-ping opacity-20" />
+                  </div>
+                </div>
+
+                {/* Headline */}
+                <h3 className="text-center text-xl font-bold text-slate-900 mb-3">
+                  Upload 50 rides, unlock your complete FTP history
+                </h3>
+
+                {/* Value Props */}
+                <div className="space-y-3 max-w-lg mx-auto">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-none mt-0.5">
+                      <svg className="h-5 w-5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Multi-year FTP progression</div>
+                      <div className="text-xs text-slate-600 mt-0.5">See exactly how your power has evolved over time</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex-none mt-0.5">
+                      <svg className="h-5 w-5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">No power meter needed</div>
+                      <div className="text-xs text-slate-600 mt-0.5">Physics modeling delivers power meter-grade precision</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="flex-none mt-0.5">
+                      <svg className="h-5 w-5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Never been done before</div>
+                      <div className="text-xs text-slate-600 mt-0.5">First app to achieve this level of accuracy without hardware</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CTA hint */}
+                <div className="mt-6 text-center">
+                  <div className="inline-flex items-center gap-2 text-sm text-emerald-700">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                    </svg>
+                    <span className="font-medium">Import rides below to get started</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 🎯 GOALS - Refined Lock */}
         <section 
           className="mb-4"
           style={{
@@ -604,21 +682,15 @@ export default function DashboardPage() {
         >
           <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40 relative overflow-hidden">
             
-            {/* Refined Glass Lock Overlay */}
             <div className="absolute inset-0 bg-gradient-to-br from-slate-900/[0.03] via-slate-900/[0.02] to-transparent backdrop-blur-[1px] z-10 flex items-center justify-center">
-              <div className="text-center">
-                <div 
-                  className="inline-flex items-center gap-2 bg-white/95 backdrop-blur-md rounded-full px-4 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-200/50"
-                >
-                  <svg className="h-4 w-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                  <div className="text-xs font-semibold text-slate-900">Launching April 1st</div>
-                </div>
+              <div className="inline-flex items-center gap-2 bg-white/95 backdrop-blur-md rounded-full px-4 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-200/50">
+                <svg className="h-4 w-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                <div className="text-xs font-semibold text-slate-900">Launching April 1st</div>
               </div>
             </div>
 
-            {/* Content (subtle blur) */}
             <div className="opacity-40">
               <div className="flex items-center gap-3 mb-4">
                 <div 
@@ -645,7 +717,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* TWO-COLUMN GRID - Tighter spacing */}
+        {/* TWO-COLUMN GRID */}
         <div 
           className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4"
           style={{
@@ -671,22 +743,18 @@ export default function DashboardPage() {
             <StravaImportCard />
           </div>
 
-          {/* Leaderboards - Refined Lock */}
+          {/* Leaderboards */}
           <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40 relative overflow-hidden">
             
-            {/* Refined Glass Lock */}
             <div className="absolute inset-0 bg-gradient-to-br from-slate-900/[0.03] via-slate-900/[0.02] to-transparent backdrop-blur-[1px] z-10 flex items-center justify-center">
-              <div className="text-center">
-                <div className="inline-flex items-center gap-2 bg-white/95 backdrop-blur-md rounded-full px-4 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-200/50">
-                  <svg className="h-4 w-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                  <div className="text-xs font-semibold text-slate-900">April 1st</div>
-                </div>
+              <div className="inline-flex items-center gap-2 bg-white/95 backdrop-blur-md rounded-full px-4 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-slate-200/50">
+                <svg className="h-4 w-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                <div className="text-xs font-semibold text-slate-900">April 1st</div>
               </div>
             </div>
 
-            {/* Content */}
             <div className="opacity-40">
               <div className="flex items-center gap-3 mb-4">
                 <div 
@@ -737,7 +805,7 @@ export default function DashboardPage() {
         {/* Footer */}
         <footer className="mt-6 text-center">
           <p className="text-white/60 text-xs font-medium tracking-wide">
-            No power meter required · Physics-based precision
+            World's first physics-based power trends · No hardware required
           </p>
         </footer>
 
