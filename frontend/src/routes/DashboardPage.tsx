@@ -582,6 +582,17 @@ const DemoProgressionPanel: React.FC = () => {
 export default function DashboardPage() {
   const demo = isDemoMode();
 
+  // Clear any stale demo mode flag when user is authenticated and on dashboard
+  React.useEffect(() => {
+    const demoFlag = localStorage.getItem("cg_demo");
+    if (demoFlag === "1") {
+      console.warn("[DashboardPage] Removing stale demo mode flag from localStorage");
+      localStorage.removeItem("cg_demo");
+      // Reload to show actual dashboard instead of demo
+      window.location.reload();
+    }
+  }, []);
+
   // Countdown state for FTP trends banner
   const [timeLeft, setTimeLeft] = React.useState({
     days: 0,
@@ -590,23 +601,22 @@ export default function DashboardPage() {
     seconds: 0,
   });
 
+  // ✅ FIX: TS-safe Date arithmetic using getTime()
   React.useEffect(() => {
-    // ✅ FIX: avoid Date arithmetic type errors in TS by using getTime()
     const targetDate = new Date("2026-03-01T00:00:00");
 
     const updateCountdown = () => {
       const now = new Date();
-      const difference = targetDate.getTime() - now.getTime();
+      const differenceMs = targetDate.getTime() - now.getTime();
 
-      if (difference > 0) {
+      if (differenceMs > 0) {
         setTimeLeft({
-          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
-          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-          minutes: Math.floor((difference / 1000 / 60) % 60),
-          seconds: Math.floor((difference / 1000) % 60),
+          days: Math.floor(differenceMs / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((differenceMs / (1000 * 60 * 60)) % 24),
+          minutes: Math.floor((differenceMs / 1000 / 60) % 60),
+          seconds: Math.floor((differenceMs / 1000) % 60),
         });
       } else {
-        // keep stable when passed
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
       }
     };
@@ -806,9 +816,7 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-900">Full physics modeling</div>
-                      <div className="text-xs text-slate-600 mt-0.5">
-                        Wind, air pressure, temperature, elevation - all modeled for precision
-                      </div>
+                      <div className="text-xs text-slate-600 mt-0.5">Wind, air pressure, temperature, elevation - all modeled for precision</div>
                     </div>
                   </div>
 
@@ -824,9 +832,7 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-900">Breakthrough accuracy</div>
-                      <div className="text-xs text-slate-600 mt-0.5">
-                        Sanity tested to ~5% in good conditions - a consumer-app first
-                      </div>
+                      <div className="text-xs text-slate-600 mt-0.5">Sanity tested to ~5% in good conditions - a consumer-app first</div>
                     </div>
                   </div>
                 </div>
