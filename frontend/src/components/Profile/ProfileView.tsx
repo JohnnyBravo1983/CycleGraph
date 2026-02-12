@@ -64,6 +64,16 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   const [hoveredZone, setHoveredZone] = React.useState<HoverZone>(null);
   const [tooltipPos, setTooltipPos] = React.useState({ x: 0, y: 0 }); // kept (future use)
   const [techExpanded, setTechExpanded] = React.useState(false);
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  React.useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Format values from backend data
   const formatValue = (key: keyof ProfileData, suffix = ""): string => {
@@ -455,9 +465,37 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   ];
 
   const handleMouseEnter = (zone: HoverZone, e: React.MouseEvent) => {
+    // Clear any pending timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    
     setHoveredZone(zone);
     const rect = e.currentTarget.getBoundingClientRect();
     setTooltipPos({ x: rect.right + 20, y: rect.top });
+  };
+
+  const handleMouseLeave = () => {
+    // Add a delay before clearing hover
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredZone(null);
+      setTechExpanded(false);
+    }, 300); // 300ms delay
+  };
+
+  const handlePanelMouseEnter = () => {
+    // Cancel the hide timeout when mouse enters panel
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+  };
+
+  const handlePanelMouseLeave = () => {
+    // Hide immediately when leaving panel
+    setHoveredZone(null);
+    setTechExpanded(false);
   };
 
   const hoveredSetting = profileSettings.find((s) => s.zone === hoveredZone);
@@ -967,6 +1005,8 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
               <div
                 className="rounded-2xl border-2 bg-white shadow-lg overflow-hidden"
                 style={{ borderColor: hoveredSetting.color }}
+                onMouseEnter={handlePanelMouseEnter}
+                onMouseLeave={handlePanelMouseLeave}
               >
                 {/* Bullseye Section - Always visible */}
                 <div className="p-6" style={{ backgroundColor: `${hoveredSetting.color}05` }}>
@@ -1167,7 +1207,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                 key={setting.id}
                 className="group relative"
                 onMouseEnter={(e) => handleMouseEnter(setting.zone, e)}
-                onMouseLeave={() => setHoveredZone(null)}
+                onMouseLeave={handleMouseLeave}
               >
                 <div
                   className={`
