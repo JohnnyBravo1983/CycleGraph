@@ -1,41 +1,18 @@
-import React from "react";
-import { Link } from "react-router-dom";
-import { getProfile } from "../../api/profile";
-
-type ProfileData = {
-  rider_weight_kg?: number | null;
-  bike_weight_kg?: number | null;
-  cda?: number | null;
-  crr?: number | null;
-  crank_efficiency?: number | null;
-  bike_type?: string | null;
-  tire_width_mm?: number | null;
-  tire_quality?: string | null;
-  ftp_watts?: number | null;
-  profile_version?: number | null;
-};
+// Interactive3DCyclistProfile_V2.tsx
+import React, { useState } from 'react';
 
 type HoverZone = 'rider-weight' | 'wheel' | 'frame' | 'body' | 'drivetrain' | 'tire' | 'crr' | 'bike-type' | 'ftp' | null;
 
-// Interactive 3D Cyclist Component (integrated)
-const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = ({ profile }) => {
-  const [hoveredZone, setHoveredZone] = React.useState<HoverZone>(null);
-  const [tooltipPos, setTooltipPos] = React.useState({ x: 0, y: 0 });
+const Interactive3DCyclistProfile: React.FC = () => {
+  const [hoveredZone, setHoveredZone] = useState<HoverZone>(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
-  // Format values from backend data
-  const formatValue = (key: keyof ProfileData, suffix = ''): string => {
-    const val = profile?.[key];
-    if (val === null || val === undefined) return '—';
-    if (typeof val === 'number') return `${val}${suffix}`;
-    return String(val);
-  };
-
-  // All 9 profile settings with real backend data
+  // All 9 profile settings with educational content
   const profileSettings = [
     {
       id: 'rider-weight',
       label: 'Rider weight',
-      value: formatValue('rider_weight_kg', ' kg'),
+      value: '75 kg',
       zone: 'rider-weight' as const,
       color: '#ec4899',
       tooltip: {
@@ -47,7 +24,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'bike-weight',
       label: 'Bike weight',
-      value: formatValue('bike_weight_kg', ' kg'),
+      value: '8.0 kg',
       zone: 'frame' as const,
       color: '#f59e0b',
       tooltip: {
@@ -59,7 +36,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'wheel',
       label: 'Wheel dimension',
-      value: '700c', // Hardcoded for now (not in backend yet)
+      value: '700c',
       zone: 'wheel' as const,
       color: '#ef4444',
       tooltip: {
@@ -71,7 +48,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'cda',
       label: 'CdA (drag area)',
-      value: formatValue('cda', ' m²'),
+      value: '0.300 m²',
       zone: 'body' as const,
       color: '#10b981',
       tooltip: {
@@ -83,7 +60,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'crr',
       label: 'Crr (rolling resistance)',
-      value: formatValue('crr'),
+      value: '0.0040',
       zone: 'crr' as const,
       color: '#8b5cf6',
       tooltip: {
@@ -95,7 +72,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'tire-width',
       label: 'Tire width',
-      value: formatValue('tire_width_mm', 'mm'),
+      value: '28mm',
       zone: 'tire' as const,
       color: '#a855f7',
       tooltip: {
@@ -107,7 +84,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'tire-quality',
       label: 'Tire quality',
-      value: formatValue('tire_quality'),
+      value: 'High-end',
       zone: 'tire' as const,
       color: '#a855f7',
       tooltip: {
@@ -119,7 +96,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'bike-type',
       label: 'Bike type',
-      value: formatValue('bike_type'),
+      value: 'Road',
       zone: 'bike-type' as const,
       color: '#3b82f6',
       tooltip: {
@@ -131,7 +108,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'drivetrain',
       label: 'Crank efficiency',
-      value: profile?.crank_efficiency ? `${Math.round(profile.crank_efficiency * 100)}%` : '—',
+      value: '96%',
       zone: 'drivetrain' as const,
       color: '#eab308',
       tooltip: {
@@ -143,7 +120,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
     {
       id: 'ftp',
       label: 'FTP',
-      value: profile?.ftp_watts ? `${profile.ftp_watts} W` : 'Not set',
+      value: 'Not set',
       zone: 'ftp' as const,
       color: '#14b8a6',
       tooltip: {
@@ -161,19 +138,12 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   };
 
   return (
-    <div className="w-full">
-      <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-slate-200">
+    <div className="w-full max-w-6xl mx-auto p-8">
+      <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-slate-200">
         
         {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-slate-900">Profile Settings</h2>
-            {profile?.profile_version && (
-              <div className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-full">
-                Profile v{profile.profile_version}
-              </div>
-            )}
-          </div>
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Profile Settings</h2>
           <p className="text-sm text-slate-600">
             Fine-tune your physics model for <span className="font-semibold text-emerald-600">~3-5% accuracy</span>.
             <span className="font-semibold text-blue-600"> Hover over any setting to see how it affects power calculations.</span>
@@ -181,11 +151,11 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
         </div>
 
         {/* Main Grid: Cyclist + Settings */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
           
           {/* LEFT: Realistic Cyclist Silhouette (2 columns) */}
           <div className="lg:col-span-2">
-            <div className="aspect-square bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-6 relative overflow-hidden">
+            <div className="aspect-square bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-8 relative overflow-hidden">
               
               {/* Subtle grid */}
               <div 
@@ -199,7 +169,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                 }}
               />
 
-              {/* Cyclist SVG */}
+              {/* Realistic Cyclist SVG */}
               <svg
                 viewBox="0 0 500 500"
                 className="w-full h-full"
@@ -283,6 +253,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                       opacity="0.4"
                     />
                   ))}
+                  {/* Hub */}
                   <circle cx="0" cy="0" r="8" fill="#334155" />
                   
                   {/* Tire */}
@@ -342,7 +313,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                   />
                 </g>
 
-                {/* Frame - Realistic road bike geometry */}
+                {/* Frame - More realistic road bike geometry */}
                 <g className="transition-all duration-300">
                   {/* Down tube */}
                   <path
@@ -491,7 +462,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                   />
                 </g>
 
-                {/* Rider */}
+                {/* Rider - More realistic proportions */}
                 <g className="transition-all duration-300">
                   {/* Torso - aggressive road position */}
                   <path
@@ -505,7 +476,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                     }}
                   />
                   
-                  {/* Head */}
+                  {/* Head - realistic size */}
                   <circle
                     cx="340"
                     cy="110"
@@ -525,7 +496,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                     strokeLinecap="round"
                   />
                   
-                  {/* Arms */}
+                  {/* Arms - on drops */}
                   <path
                     d="M 280 140 L 320 195"
                     stroke="url(#riderGradient)"
@@ -539,7 +510,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                     strokeLinecap="round"
                   />
 
-                  {/* Legs */}
+                  {/* Legs - realistic cycling position */}
                   <path
                     d="M 240 180 L 235 280 L 225 425"
                     stroke="url(#riderGradient)"
@@ -558,7 +529,7 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                   />
                 </g>
 
-                {/* FTP Badge */}
+                {/* FTP Badge (top right) */}
                 <g 
                   transform="translate(420, 50)"
                   className="transition-all duration-300"
@@ -579,10 +550,10 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                     y="5"
                     textAnchor="middle"
                     fill="white"
-                    fontSize="11"
+                    fontSize="12"
                     fontWeight="bold"
                   >
-                    {profile?.ftp_watts ? `${profile.ftp_watts}W` : 'FTP: —'}
+                    FTP: —
                   </text>
                 </g>
               </svg>
@@ -599,26 +570,26 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
               `}</style>
 
               {/* Legend */}
-              <div className="absolute bottom-3 left-3 right-3 bg-white/95 backdrop-blur-sm rounded-xl p-2.5 border border-slate-200 shadow-lg">
-                <div className="text-[10px] font-semibold text-slate-700 mb-1.5">Interactive Physics Model →</div>
-                <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[9px]">
+              <div className="absolute bottom-4 left-4 right-4 bg-white/95 backdrop-blur-sm rounded-xl p-3 border border-slate-200 shadow-lg">
+                <div className="text-xs font-semibold text-slate-700 mb-2">Interactive Physics Model →</div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span> Rider mass
+                    <span className="w-2 h-2 rounded-full bg-pink-500"></span> Rider mass
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> Wheels
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span> Wheels
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Frame
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span> Frame
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> CdA/Aero
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span> CdA/Aero
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span> Tires/Crr
+                    <span className="w-2 h-2 rounded-full bg-purple-500"></span> Tires/Crr
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500"></span> Drivetrain
+                    <span className="w-2 h-2 rounded-full bg-yellow-500"></span> Drivetrain
                   </span>
                 </div>
               </div>
@@ -626,10 +597,10 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
           </div>
 
           {/* RIGHT: All Settings (3 columns) */}
-          <div className="lg:col-span-3 space-y-2">
-            <div className="text-sm font-semibold text-slate-700 mb-2 flex items-center justify-between">
+          <div className="lg:col-span-3 space-y-2.5">
+            <div className="text-sm font-semibold text-slate-700 mb-3 flex items-center justify-between">
               <span>Physics Model Parameters (9 total)</span>
-              <span className="text-xs text-emerald-600 font-normal">All fields calibrated</span>
+              <span className="text-xs text-emerald-600 font-normal">All fields calibrated for precision</span>
             </div>
 
             {profileSettings.map((setting) => (
@@ -742,6 +713,16 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
                 }
               }
             `}</style>
+
+            {/* Save CTA */}
+            <div className="mt-6 pt-4 border-t border-slate-200">
+              <button className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg hover:shadow-xl hover:scale-[1.01] transition-all duration-200 flex items-center justify-center gap-2">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                Save Profile Settings
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -749,72 +730,4 @@ const Interactive3DCyclistProfile: React.FC<{ profile: ProfileData | null }> = (
   );
 };
 
-// Main ProfileView Component
-export default function ProfileView() {
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const [profile, setProfile] = React.useState<ProfileData | null>(null);
-
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await getProfile();
-        if (!alive) return;
-        setProfile(data as any);
-      } catch (e: any) {
-        if (!alive) return;
-        setError(e?.message || "Kunne ikke hente profilen.");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40">
-        <div className="text-sm text-slate-600">Laster profil …</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40">
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          {error}
-        </div>
-      </div>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
-          <div className="text-sm font-semibold text-slate-900">Ingen profil ennå</div>
-          <div className="mt-1 text-sm text-slate-600">
-            Fullfør onboarding for å sette opp profilen din.
-          </div>
-          <div className="mt-4">
-            <Link
-              to="/onboarding"
-              className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition"
-            >
-              Gå til onboarding
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return <Interactive3DCyclistProfile profile={profile} />;
-}
+export default Interactive3DCyclistProfile;
