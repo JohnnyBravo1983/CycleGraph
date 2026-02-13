@@ -1,19 +1,8 @@
-// frontend/src/components/Profile/ProfileSettingsResponsive.tsx
+// frontend/src/routes/ProfilePage.tsx
 import React from "react";
-import { useProfileStore } from "../../state/profileStore.ts";
+import { useProfileStore, type ProfileDraft } from "../state/profileStore";
 
-type ProfileData = {
-  rider_weight_kg?: number | null;
-  bike_weight_kg?: number | null;
-  cda?: number | null;
-  crr?: number | null;
-  crank_efficiency?: number | null;
-  bike_type?: string | null;
-  tire_width_mm?: number | null;
-  tire_quality?: string | null;
-  ftp_watts?: number | null;
-  profile_version?: number | null;
-};
+type ProfileData = ProfileDraft;
 
 type HoverZone =
   | "rider-weight"
@@ -24,7 +13,6 @@ type HoverZone =
   | "tire"
   | "crr"
   | "bike-type"
-  | "ftp"
   | null;
 
 type TechDeepDive = {
@@ -478,43 +466,7 @@ const Interactive3DCyclistProfile: React.FC<{
         assumption: "We assume proper maintenance (clean, lubed, <2000km on chain)",
       },
     },
-    {
-      id: "ftp",
-      label: "FTP",
-      value: profile?.ftp_watts ? `${profile.ftp_watts} W` : "Not set",
-      zone: "ftp",
-      color: "#14b8a6",
-      editable: false,
-      bullseye: {
-        simple:
-          "FTP (Functional Threshold Power) is the maximum power you can sustain for about an hour. We calculate this automatically from your ride data! No painful FTP test needed.",
-        whyLocked:
-          "FTP is calculated, not input! We analyze your rides using physics-based power modeling to determine your FTP automatically.",
-        variance: "N/A - this is an output, not an input",
-      },
-      techDeepDive: {
-        formula: "FTP calculated from critical power curve modeling across multiple rides",
-        variables: [
-          "Uses 20min, 30min, 60min power efforts from rides",
-          "Applies physiology models: CP (critical power) and W' (anaerobic capacity)",
-          "Typical: 150-400W for recreational to elite cyclists",
-        ],
-        impact: [
-          "FTP is used for:",
-          "• Training zone calculations (Z1-Z7)",
-          "• Fitness tracking over time",
-          "• Power-to-weight ratio (W/kg)",
-          "Not used in power calculation (it's an output!)",
-        ],
-        edgeCases: [
-          "Requires 50+ rides for accurate FTP calculation",
-          "FTP changes with training (track monthly progress)",
-          "Altitude affects FTP: -1% per 1000ft above sea level",
-        ],
-        accuracyImpact: "FTP accuracy depends on ride data quality and quantity",
-        calculation: "Automated using physics-modeled power from all your rides",
-      },
-    },
+
   ];
 
   const handleMouseEnter = (zone: HoverZone, e: React.MouseEvent) => {
@@ -594,11 +546,6 @@ const Interactive3DCyclistProfile: React.FC<{
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-xl font-bold text-slate-900">Profile Settings</h2>
-            {profile?.profile_version != null && (
-              <div className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-full">
-                Profile v{profile.profile_version}
-              </div>
-            )}
           </div>
           <p className="text-sm text-slate-600 mb-3">
             Fine-tune your physics model for{" "}
@@ -733,17 +680,6 @@ const Interactive3DCyclistProfile: React.FC<{
                     <stop
                       offset="100%"
                       stopColor={hoveredZone === "drivetrain" ? "#ca8a04" : "#475569"}
-                    />
-                  </linearGradient>
-
-                  <linearGradient id="ftpGradient">
-                    <stop
-                      offset="0%"
-                      stopColor={hoveredZone === "ftp" ? "#14b8a6" : "#94a3b8"}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor={hoveredZone === "ftp" ? "#0d9488" : "#64748b"}
                     />
                   </linearGradient>
                 </defs>
@@ -1028,27 +964,6 @@ const Interactive3DCyclistProfile: React.FC<{
                     strokeLinejoin="round"
                     fill="none"
                   />
-                </g>
-
-                {/* FTP Badge */}
-                <g
-                  transform="translate(420, 50)"
-                  className="transition-all duration-300"
-                  style={{
-                    filter: hoveredZone === "ftp" ? "drop-shadow(0 0 20px #14b8a6)" : "none",
-                  }}
-                >
-                  <rect x="-50" y="-20" width="100" height="40" rx="10" fill="url(#ftpGradient)" />
-                  <text
-                    x="0"
-                    y="7"
-                    textAnchor="middle"
-                    fill="white"
-                    fontSize="16"
-                    fontWeight="bold"
-                  >
-                    {profile?.ftp_watts ? `${profile.ftp_watts}W` : "FTP: —"}
-                  </text>
                 </g>
               </svg>
 
@@ -1427,4 +1342,3 @@ export default function ProfileSettingsResponsive() {
     />
   );
 }
-
