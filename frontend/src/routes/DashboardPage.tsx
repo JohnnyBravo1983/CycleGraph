@@ -27,10 +27,22 @@ type SessionListItem = {
 
 async function fetchSessionsListAll(): Promise<SessionListItem[]> {
   const url = `${cgApi.baseUrl()}/api/sessions/list/all`;
-  const resp = await fetch(url, { credentials: "include" });
+  const resp = await fetch(url, { credentials: "include", cache: "no-store" });
   if (!resp.ok) throw new Error(`Failed sessions list (HTTP ${resp.status})`);
-  const data = await resp.json();
-  const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+
+  const data = await resp.json().catch(() => null);
+
+  // Be tolerant: backend may return {sessions:[...]}, {items:[...]}, {rows:[...]}, or just [...]
+  const sessions = Array.isArray(data)
+    ? data
+    : Array.isArray((data as any)?.sessions)
+      ? (data as any).sessions
+      : Array.isArray((data as any)?.items)
+        ? (data as any).items
+        : Array.isArray((data as any)?.rows)
+          ? (data as any).rows
+          : [];
+
   return sessions as SessionListItem[];
 }
 
@@ -52,10 +64,12 @@ async function importLatestRideOnce(opts: { days: number }) {
   const resp = await fetch(url, {
     method: "POST",
     credentials: "include",
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: "{}",
   });
 
+  // Some backends return 200 with no JSON body
   const data = await resp.json().catch(() => null);
   return { resp, data };
 }
@@ -187,13 +201,7 @@ function MiniTrendChart({
             if (!locked) setActiveIdx(null);
           }}
         >
-          <path
-            d={pathD}
-            fill="none"
-            stroke="currentColor"
-            className="text-slate-700"
-            strokeWidth="2"
-          />
+          <path d={pathD} fill="none" stroke="currentColor" className="text-slate-700" strokeWidth="2" />
 
           {pts.map((p, idx) => (
             <g key={idx}>
@@ -218,12 +226,7 @@ function MiniTrendChart({
                   setTooltipFromEvent(e, idx);
                 }}
               />
-              <circle
-                cx={p.x}
-                cy={p.y}
-                r={3.2}
-                className={idx === activeIdx ? "fill-slate-900" : "fill-slate-500"}
-              />
+              <circle cx={p.x} cy={p.y} r={3.2} className={idx === activeIdx ? "fill-slate-900" : "fill-slate-500"} />
             </g>
           ))}
         </svg>
@@ -241,13 +244,9 @@ function MiniTrendChart({
 
             <div className="rounded-lg border border-slate-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.15)] px-4 py-3 transition-opacity duration-200 ease-in-out text-slate-800">
               <div className="text-[13px] font-semibold text-slate-500">{active.year}</div>
-              <div className="text-[16px] font-medium text-slate-800 leading-tight mt-0.5">
-                {active.valueLabel}
-              </div>
+              <div className="text-[16px] font-medium text-slate-800 leading-tight mt-0.5">{active.valueLabel}</div>
               {active.deltaLabel ? (
-                <div className={`text-[14px] font-normal mt-0.5 ${deltaStyle(active.deltaSign)}`}>
-                  {active.deltaLabel}
-                </div>
+                <div className={`text-[14px] font-normal mt-0.5 ${deltaStyle(active.deltaSign)}`}>{active.deltaLabel}</div>
               ) : (
                 <div className="text-[14px] font-normal mt-0.5 text-slate-500">Baseline</div>
               )}
@@ -381,21 +380,21 @@ function DemoInsightBox() {
       </div>
       <ul className="mt-3 space-y-1 text-sm text-slate-700">
         <li>
-          • <span className="font-medium">Precision Watt (beta)</span>: a physics-based power model
-          aiming for <span className="font-medium">~3–5% accuracy</span> in good conditions.
+          • <span className="font-medium">Precision Watt (beta)</span>: a physics-based power model aiming for{" "}
+          <span className="font-medium">~3–5% accuracy</span> in good conditions.
         </li>
         <li>
-          • Compared to "estimated power" views, results can be more consistent for training
-          decisions (FTP tracking, pacing, W/kg).
+          • Compared to "estimated power" views, results can be more consistent for training decisions (FTP tracking,
+          pacing, W/kg).
         </li>
         <li>
-          • <span className="font-medium">Roadmap</span>: goals, progress tracking, and friendly
-          competitions (leaderboards) built on the same precision metrics.
+          • <span className="font-medium">Roadmap</span>: goals, progress tracking, and friendly competitions
+          (leaderboards) built on the same precision metrics.
         </li>
       </ul>
       <div className="mt-3 text-xs text-slate-500">
-        Note: accuracy depends on data quality (profile, terrain, weather, device streams). This
-        demo is offline and reproducible.
+        Note: accuracy depends on data quality (profile, terrain, weather, device streams). This demo is offline and
+        reproducible.
       </div>
     </div>
   );
@@ -493,9 +492,7 @@ const DemoProgressionPanel: React.FC = () => {
   const years: YearKey[] = ["2022", "2023", "2024", "2025"];
 
   const ftp = years.map((y) =>
-    "avgFTP" in (progressionSummary[y] as any)
-      ? (progressionSummary[y] as any).avgFTP
-      : (progressionSummary[y] as any).currentFTP
+    "avgFTP" in (progressionSummary[y] as any) ? (progressionSummary[y] as any).avgFTP : (progressionSummary[y] as any).currentFTP
   ) as number[];
 
   const wkg = years.map((y) => safeNum((progressionSummary[y] as any).wkg));
@@ -538,28 +535,13 @@ const DemoProgressionPanel: React.FC = () => {
   });
 
   const yearStrings = years.map((y) => String(y));
-  const ftpTrendPoints = buildTrendPoints(
-    yearStrings,
-    ftp.map((v) => safeNum(v)),
-    (v) => `${Math.round(v)} W`,
-    "W",
-    0
-  );
-  const wkgTrendPoints = buildTrendPoints(
-    yearStrings,
-    wkg.map((v) => safeNum(v)),
-    (v) => `${v.toFixed(2)} W/kg`,
-    "W/kg",
-    2
-  );
+  const ftpTrendPoints = buildTrendPoints(yearStrings, ftp.map((v) => safeNum(v)), (v) => `${Math.round(v)} W`, "W", 0);
+  const wkgTrendPoints = buildTrendPoints(yearStrings, wkg.map((v) => safeNum(v)), (v) => `${v.toFixed(2)} W/kg`, "W/kg", 2);
 
   return (
     <div className="space-y-6">
       <section className="flex items-center justify-between">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50"
-        >
+        <Link to="/" className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50">
           <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
           <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
         </Link>
@@ -569,21 +551,13 @@ const DemoProgressionPanel: React.FC = () => {
       <section className="mb-12">
         <div
           className="relative flex items-center gap-7 overflow-hidden rounded-2xl p-10 shadow-[0_12px_40px_rgba(102,126,234,0.40)] transition-transform duration-300 hover:-translate-y-1 hover:shadow-[0_16px_50px_rgba(102,126,234,0.50)] max-md:flex-col max-md:text-center max-md:p-8"
-          style={{
-            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            color: "white",
-          }}
+          style={{ background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", color: "white" }}
         >
           <div
             className="pointer-events-none absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(circle at top right, rgba(255,255,255,0.10) 0%, transparent 60%)",
-            }}
+            style={{ background: "radial-gradient(circle at top right, rgba(255,255,255,0.10) 0%, transparent 60%)" }}
           />
-          <div className="relative z-10 flex-none text-6xl leading-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.30)] max-md:text-5xl">
-            ⚡
-          </div>
+          <div className="relative z-10 flex-none text-6xl leading-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.30)] max-md:text-5xl">⚡</div>
           <div className="relative z-10 min-w-0 flex-1">
             <h2 className="text-4xl font-extrabold tracking-tight leading-tight max-md:text-3xl">
               Power estimation without the hardware cost
@@ -662,12 +636,14 @@ export default function DashboardPage() {
   const [latestImportBusy, setLatestImportBusy] = useState(false);
   const [latestImportErr, setLatestImportErr] = useState<string | null>(null);
   const [latestImportedSession, setLatestImportedSession] = useState<SessionListItem | null>(null);
+  const [latestImportInfo, setLatestImportInfo] = useState<string | null>(null);
 
   async function onImportLatestRide() {
     if (latestImportBusy) return;
     setLatestImportBusy(true);
     setLatestImportErr(null);
     setLatestImportedSession(null);
+    setLatestImportInfo("Starter import…");
 
     try {
       const before = await fetchSessionsListAll();
@@ -679,9 +655,13 @@ export default function DashboardPage() {
         throw new Error(`Import failed (HTTP ${out.resp.status})`);
       }
 
-      if (out.data && typeof out.data === "object" && out.data.ok === false) {
-        throw new Error(String(out.data.error || out.data.detail || "Import failed"));
+      if (out.data && typeof out.data === "object" && (out.data as any).ok === false) {
+        throw new Error(String((out.data as any).error || (out.data as any).detail || "Import failed"));
       }
+
+      setLatestImportInfo("Import OK. Venter på at analysen skal skrive session-filer…");
+      // Give backend a moment to persist new session(s)
+      await new Promise((r) => setTimeout(r, 1200));
 
       const after = await fetchSessionsListAll();
       after.sort(sortByStartDateDesc);
@@ -690,11 +670,14 @@ export default function DashboardPage() {
 
       if (!newly) {
         setLatestImportErr("Fant ingen nye rides etter import. (Kan være tom Strava-periode de siste 7 dagene.)");
+        setLatestImportInfo(null);
       } else {
         setLatestImportedSession(newly);
+        setLatestImportInfo(`Fant ride: ${newly.session_id ?? "(mangler session_id)"}`);
       }
     } catch (e: any) {
       setLatestImportErr(e?.message ? String(e.message) : "Ukjent feil ved import.");
+      setLatestImportInfo(null);
     } finally {
       setLatestImportBusy(false);
     }
@@ -908,7 +891,11 @@ export default function DashboardPage() {
                 {/* Right: FAT BUTTON */}
                 <div className="flex-none w-full sm:w-auto">
                   <button
-                    onClick={onImportLatestRide}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void onImportLatestRide();
+                    }}
                     disabled={latestImportBusy}
                     aria-disabled={latestImportBusy}
                     className={`
@@ -942,19 +929,8 @@ export default function DashboardPage() {
                     <span className="relative z-10 flex items-center justify-center gap-3">
                       {latestImportBusy ? (
                         <>
-                          <svg
-                            className="h-6 w-6 animate-spin"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              strokeWidth="4"
-                            />
+                          <svg className="h-6 w-6 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path
                               className="opacity-75"
                               fill="currentColor"
@@ -966,12 +942,7 @@ export default function DashboardPage() {
                       ) : (
                         <>
                           <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2.5}
-                              d="M13 10V3L4 14h7v7l9-11h-7z"
-                            />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
                           </svg>
                           Import Latest Ride
                         </>
@@ -980,6 +951,9 @@ export default function DashboardPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Status line (always visible feedback) */}
+              {latestImportInfo && <div className="mt-3 text-xs text-white/80">{latestImportInfo}</div>}
 
               {/* Error message */}
               {latestImportErr && (
@@ -1053,9 +1027,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="flex-1 min-w-0 pr-0 sm:pr-24">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight mb-1">
-                  World-First Physics Power Trends
-                </h1>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight mb-1">World-First Physics Power Trends</h1>
                 <p className="text-sm text-slate-600 leading-relaxed">
                   First consumer app to deliver <span className="font-semibold text-emerald-600">~3-5% accuracy</span>{" "}
                   power analysis without a power meter
@@ -1099,7 +1071,9 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-900">Full physics modeling</div>
-                      <div className="text-xs text-slate-600 mt-0.5">Wind, air pressure, temperature, elevation - all modeled for precision</div>
+                      <div className="text-xs text-slate-600 mt-0.5">
+                        Wind, air pressure, temperature, elevation - all modeled for precision
+                      </div>
                     </div>
                   </div>
 
@@ -1318,32 +1292,20 @@ export default function DashboardPage() {
 
         {/* Footer */}
         <footer className="mt-6 text-center">
-          <p className="text-white/60 text-xs font-medium tracking-wide">
-            World's first physics-based power trends · No hardware required
-          </p>
+          <p className="text-white/60 text-xs font-medium tracking-wide">World's first physics-based power trends · No hardware required</p>
         </footer>
       </div>
 
       {/* ✅ SUCCESS MODAL - Latest Ride Imported */}
       {latestImportedSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setLatestImportedSession(null)}
-          />
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setLatestImportedSession(null)} />
           <div
             className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
-            style={{
-              animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
-            }}
+            style={{ animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}
           >
             {/* Green success header */}
-            <div
-              className="px-6 py-5"
-              style={{
-                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-              }}
-            >
+            <div className="px-6 py-5" style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}>
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
                   <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1364,50 +1326,36 @@ export default function DashboardPage() {
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Dato</div>
                   <div className="text-sm font-bold text-slate-900">
                     {latestImportedSession.start_date
-                      ? new Date(latestImportedSession.start_date).toLocaleDateString("no-NO", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })
+                      ? new Date(latestImportedSession.start_date).toLocaleDateString("no-NO", { day: "numeric", month: "short", year: "numeric" })
                       : "—"}
                   </div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distanse</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.distance_km?.toFixed(1) ?? "—"} km
-                  </div>
+                  <div className="text-sm font-bold text-slate-900">{latestImportedSession.distance_km?.toFixed(1) ?? "—"} km</div>
                 </div>
 
                 <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
                   <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">⚡ PrecisionWatt Avg</div>
-                  <div className="text-lg font-extrabold text-emerald-700">
-                    {latestImportedSession.precision_watt_avg ?? "—"} W
-                  </div>
+                  <div className="text-lg font-extrabold text-emerald-700">{latestImportedSession.precision_watt_avg ?? "—"} W</div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Varighet</div>
                   <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.duration_seconds
-                      ? `${Math.round(latestImportedSession.duration_seconds / 60)} min`
-                      : "—"}
+                    {latestImportedSession.duration_seconds ? `${Math.round(latestImportedSession.duration_seconds / 60)} min` : "—"}
                   </div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Høydemeter</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.elevation_gain_m ?? "—"} m
-                  </div>
+                  <div className="text-sm font-bold text-slate-900">{latestImportedSession.elevation_gain_m ?? "—"} m</div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
                   <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Vær</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.weather_source ?? "—"}
-                  </div>
+                  <div className="text-sm font-bold text-slate-900">{latestImportedSession.weather_source ?? "—"}</div>
                 </div>
               </div>
             </div>
@@ -1422,9 +1370,7 @@ export default function DashboardPage() {
               </button>
               <button
                 className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
-                style={{
-                  background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)",
-                }}
+                style={{ background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" }}
                 onClick={() => window.location.assign("/rides")}
               >
                 Se alle rides →
