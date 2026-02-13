@@ -1,0 +1,70 @@
+###Engineering Summary — Sprint 1 Day 1
+Outcome Status: Completed
+Delivered
+Signup flow støtter nå demografiske felter:
+gender
+country
+city
+age
+Feltene er obligatoriske i frontend.
+Backend /api/auth/signup aksepterer og lagrer feltene.
+Data persisteres i state/users/<uid>/auth.json.
+Full bakoverkompatibilitet for eksisterende brukere.
+Carry-over
+Ingen.
+Key Technical Changes
+Frontend: utvidet signup-form state, validering og payload.
+API-client: utvidet signup payload-typer.
+Backend: Signup schema + persistence utvidet.
+Ingen endringer i sessions, SSOT-strukturer eller auth-indexing.
+New Constraints / Discoveries
+.fly/config.yml korrupsjon kan blokkere deploy (ikke kode-relatert).
+Manglende .dockerignore gir ekstrem build-context.
+Systems Touched
+Signup frontend
+Auth API signup-endepunkt
+auth.json persistence
+Systems Untouched
+Sessions / rides / SSOT
+Strava
+Analyzer / Rust
+Meta-systemer
+###Profilversjonering
+
+###🟥 ENGINEER WORK LOG — Sprint Week 1, Day 2 (Condensed)
+Date: Feb 12, 2026
+Focus: Dashboard Profile (Read-Only)
+
+Objective
+Enable users to view profile data in Dashboard (editing comes Day 3).
+
+Done
+Added Profile anchor in Dashboard header
+Implemented compact Profile Peek Card under Goals
+Fetches from GET /api/profile/get
+Handles loading, error, and defensive empty state
+Displays key rider/bike metrics + profile version
+FTP shows “Not set” when null
+Desktop: hover reveal • Mobile: tap reveal
+Styling aligned with Dashboard glass-card system
+Architecture
+
+/profile remains edit/settings page
+Dashboard card is strictly read-only
+profile.json remains SSOT
+No backend or data model changes
+Clean separation: Settings (write) → API → Dashboard (read)
+
+Testing
+Verified render for existing user
+Null handling confirmed
+No console errors
+Anchor scroll works
+Responsive behavior OK
+Defensive fallback present (onboarding normally guarantees profile)
+
+Files
+frontend/src/routes/DashboardPage.tsx
+frontend/src/components/Profile/ProfilePeekCard.tsx
+frontend/src/api/profile.ts
+Backend: unchanged

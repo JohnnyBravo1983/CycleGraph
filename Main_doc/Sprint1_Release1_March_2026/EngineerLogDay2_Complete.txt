@@ -1,0 +1,106 @@
+🟥 ENGINEER WORK LOG — Sprint Week 1, Day 2
+
+Date: February 12, 2026
+Focus: Profile in Dashboard – Read-Only Display
+
+🎯 Objective
+
+Enable users to view their profile data directly in the Dashboard.
+No editing functionality (edit comes Day 3).
+
+✅ Features Implemented
+
+Added Profile access in Dashboard header (anchor navigation).
+
+Implemented compact Profile Peek Card under Goals section.
+
+Card fetches data from GET /api/profile/get.
+
+Supports:
+
+Loading state
+
+Error state
+
+Defensive “No profile yet” state
+
+Displays:
+
+Rider weight
+
+Bike weight
+
+CdA
+
+Crr
+
+Crank efficiency
+
+Bike type
+
+Tire width
+
+Tire quality
+
+FTP (shows “Not set” if null)
+
+Profile version number
+
+Desktop: hover reveals details
+
+Mobile: tap reveals details
+
+Styling aligned with existing Dashboard aesthetic (rounded glass cards, shadow depth, spacing consistency)
+
+🧱 Architectural Notes
+
+/profile route remains edit/settings page.
+
+Dashboard Profile card is strictly read-only.
+
+profile.json remains SSOT.
+
+No backend changes made.
+
+No data structure modifications.
+
+No impact on Strava, rides, or analysis pipeline.
+
+Clear separation maintained:
+Settings (write) → API → Dashboard (read).
+
+🧪 Testing Performed
+
+Verified profile renders correctly for existing user.
+
+Confirmed proper handling of null values (FTP → “Not set”).
+
+Confirmed no console errors.
+
+Verified anchor navigation scrolls correctly.
+
+Confirmed responsive behavior (hover desktop / tap mobile).
+
+Defensive fallback for missing profile in place (though onboarding currently guarantees existence).
+
+🎨 UX Refinement
+
+Instead of large static profile block:
+
+Implemented compact, contextual card.
+
+Keeps dashboard hierarchy intact.
+
+Avoids visual disruption of main value flow.
+
+Preserves professional presentation.
+
+📦 Files Touched
+
+frontend/src/routes/DashboardPage.tsx
+
+frontend/src/components/Profile/ProfilePeekCard.tsx
+
+frontend/src/api/profile.ts
+
+Backend untouched.

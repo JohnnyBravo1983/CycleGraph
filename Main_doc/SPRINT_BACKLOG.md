@@ -95,10 +95,10 @@ For Pioneer Beta, users can import ONLY:
 **Blockers:** None (API already exists)
 
 **Validation:**
-- [ ] Profile section visible in Dashboard
-- [ ] All profile fields display correctly
-- [ ] Shows "No profile yet" if user hasn't done onboarding
-- [ ] Looks professional
+- [X] Profile section visible in Dashboard
+- [X] All profile fields display correctly
+- [X] Shows "No profile yet" if user hasn't done onboarding
+- [X] Looks professional
 
 ---
 
