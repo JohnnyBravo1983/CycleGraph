@@ -1,7 +1,7 @@
 // frontend/src/routes/DashboardPage.tsx
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { cgApi } from "../lib/cgApi";
+import { cgApi, type SessionListItem as ApiSessionListItem } from "../lib/cgApi";
 import { StravaImportCard } from "../components/StravaImportCard";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
@@ -11,21 +11,13 @@ type YearKey = "2022" | "2023" | "2024" | "2025";
 
 // --- Latest Ride Import (Dashboard button) --------------------
 
-type SessionListItem = {
-  session_id: string;
-  start_date?: string;
-  distance_km?: number;
-  precision_watt_avg?: number;
-  precision_watt_max?: number;
-  duration_seconds?: number;
-  elevation_gain_m?: number;
-  weather_source?: string;
-};
+function sortByStartDateDesc(a: ApiSessionListItem, b: ApiSessionListItem) {
+  const sa = typeof a.start_date === "string" ? a.start_date : "";
+  const sb = typeof b.start_date === "string" ? b.start_date : "";
 
+  const ta = sa ? Date.parse(sa) : 0;
+  const tb = sb ? Date.parse(sb) : 0;
 
-function sortByStartDateDesc(a: SessionListItem, b: SessionListItem) {
-  const ta = a.start_date ? Date.parse(a.start_date) : 0;
-  const tb = b.start_date ? Date.parse(b.start_date) : 0;
   return tb - ta;
 }
 
@@ -353,7 +345,7 @@ function DemoInsightBox() {
       <div className="text-sm font-semibold text-slate-900">What this demo shows</div>
       <div className="mt-2 text-sm text-slate-700 leading-relaxed">
         The metrics below are based on <span className="font-medium">real rides</span>{" "}
-        (curated demo set, 2022–2025) analyzed through CycleGraph's own pipeline.
+        (curated demo set, 2022–2025) analyzed through CycleGraph&apos;s own pipeline.
       </div>
       <ul className="mt-3 space-y-1 text-sm text-slate-700">
         <li>
@@ -361,7 +353,7 @@ function DemoInsightBox() {
           <span className="font-medium">~3–5% accuracy</span> in good conditions.
         </li>
         <li>
-          • Compared to "estimated power" views, results can be more consistent for training decisions (FTP tracking,
+          • Compared to &quot;estimated power&quot; views, results can be more consistent for training decisions (FTP tracking,
           pacing, W/kg).
         </li>
         <li>
@@ -374,25 +366,6 @@ function DemoInsightBox() {
         reproducible.
       </div>
     </div>
-  );
-}
-
-function fmtDeltaRow(args: { deltaFtpW: number; deltaFtpPct: number; deltaKg: number; deltaWkgPct: number }) {
-  const { deltaFtpW, deltaFtpPct, deltaKg, deltaWkgPct } = args;
-
-  const up = "⬆";
-  const down = "⬇";
-
-  const kgIcon = deltaKg <= 0 ? down : up;
-  const ftpIcon = deltaFtpW >= 0 ? up : down;
-  const wkgIcon = deltaWkgPct >= 0 ? up : down;
-
-  return (
-    <span className="text-xs text-slate-700">
-      {ftpIcon} {fmtSigned(deltaFtpW, 0)}W ({fmtSigned(deltaFtpPct, 0)}%){" "}
-      <span className="text-slate-300">|</span> {kgIcon} {fmtSigned(deltaKg, 1)} kg{" "}
-      <span className="text-slate-300">|</span> {wkgIcon} {fmtSigned(deltaWkgPct, 0)}% W/kg
-    </span>
   );
 }
 
@@ -435,41 +408,13 @@ function buildTrendPoints(
   });
 }
 
-type LbEntry = {
-  name: string;
-  ftp: number;
-  weight: number;
-  wkg: number;
-  isCurrentUser?: boolean;
-};
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const a = parts[0]?.[0] ?? "?";
-  const b = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return (a + b).toUpperCase();
-}
-
-function sortByMetric(rows: LbEntry[], metric: "ftp" | "wkg") {
-  return [...rows].sort((a, b) => (metric === "ftp" ? b.ftp - a.ftp : b.wkg - a.wkg));
-}
-
-function topWithCurrent(rows: LbEntry[], metric: "ftp" | "wkg", n = 5) {
-  const sorted = sortByMetric(rows, metric).map((r, idx) => ({ ...r, _rank: idx + 1 }));
-  const top = sorted.slice(0, n);
-  const me = sorted.find((r) => r.isCurrentUser);
-
-  const inTop = me ? top.some((r) => r.name === me.name) : false;
-  if (!me || inTop) return { rows: top, showEllipsis: false };
-
-  return { rows: [...top, me], showEllipsis: true };
-}
-
 const DemoProgressionPanel: React.FC = () => {
   const years: YearKey[] = ["2022", "2023", "2024", "2025"];
 
   const ftp = years.map((y) =>
-    "avgFTP" in (progressionSummary[y] as any) ? (progressionSummary[y] as any).avgFTP : (progressionSummary[y] as any).currentFTP
+    "avgFTP" in (progressionSummary[y] as any)
+      ? (progressionSummary[y] as any).avgFTP
+      : (progressionSummary[y] as any).currentFTP
   ) as number[];
 
   const wkg = years.map((y) => safeNum((progressionSummary[y] as any).wkg));
@@ -489,26 +434,11 @@ const DemoProgressionPanel: React.FC = () => {
     .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")))
     .slice(0, 6);
 
-  const computedDeltas: Record<string, any> = {};
-  years.forEach((y, idx) => {
-    if (idx === 0) {
-      computedDeltas[y] = { deltaFtpW: 0, deltaFtpPct: 0, deltaKg: 0, deltaWkgPct: 0 };
-      return;
-    }
-    const ftpPrev = safeNum(ftp[idx - 1]);
-    const ftpNow = safeNum(ftp[idx]);
-    const wkgPrev = safeNum(wkg[idx - 1]);
-    const wkgNow = safeNum(wkg[idx]);
-    const kgPrev = safeNum(weight[idx - 1]);
-    const kgNow = safeNum(weight[idx]);
-
-    const deltaFtpW = ftpNow - ftpPrev;
-    const deltaFtpPct = ftpPrev !== 0 ? (deltaFtpW / ftpPrev) * 100 : 0;
-    const deltaKg = kgNow - kgPrev;
-    const deltaWkgPct = wkgPrev !== 0 ? ((wkgNow - wkgPrev) / wkgPrev) * 100 : 0;
-
-    computedDeltas[y] = { deltaFtpW, deltaFtpPct, deltaKg, deltaWkgPct };
-  });
+  // keep these computed values (even if not rendered yet) without breaking lint
+  void setYearFilter;
+  void rideYears;
+  void newest6;
+  void weight;
 
   const yearStrings = years.map((y) => String(y));
   const ftpTrendPoints = buildTrendPoints(yearStrings, ftp.map((v) => safeNum(v)), (v) => `${Math.round(v)} W`, "W", 0);
@@ -555,7 +485,6 @@ const DemoProgressionPanel: React.FC = () => {
         </div>
       </section>
 
-      {/* (Optional) Put more demo UI here later */}
       <DemoInsightBox />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -619,7 +548,7 @@ export default function DashboardPage() {
   // --- Import Latest Ride state ---
   const [latestImportBusy, setLatestImportBusy] = useState(false);
   const [latestImportErr, setLatestImportErr] = useState<string | null>(null);
-  const [latestImportedSession, setLatestImportedSession] = useState<SessionListItem | null>(null);
+  const [latestImportedSession, setLatestImportedSession] = useState<ApiSessionListItem | null>(null);
   const [latestImportInfo, setLatestImportInfo] = useState<string | null>(null);
 
   async function onImportLatestRide() {
@@ -630,7 +559,7 @@ export default function DashboardPage() {
     setLatestImportInfo("Starter import…");
 
     try {
-      const before = (await cgApi.sessionsListAll()) as SessionListItem[]
+      const before = await cgApi.listAll();
       const beforeIds = new Set(before.map((s) => s.session_id));
 
       const out = await importLatestRideOnce({ days: 7 });
@@ -647,12 +576,13 @@ export default function DashboardPage() {
       // Give backend a moment to persist new session(s)
       await new Promise((r) => setTimeout(r, 1200));
 
-      const after = (await cgApi.sessionsListAll()) as SessionListItem[];
+      const after = await cgApi.listAll();
       after.sort(sortByStartDateDesc);
 
       const newly = after.find((s) => !beforeIds.has(s.session_id)) || after[0] || null;
       console.log("[Dashboard] before count:", before.length);
       console.log("[Dashboard] after count:", after.length);
+
       if (!newly) {
         setLatestImportErr("Fant ingen nye rides etter import. (Kan være tom Strava-periode de siste 7 dagene.)");
         setLatestImportInfo(null);
@@ -1283,133 +1213,138 @@ export default function DashboardPage() {
         {/* Footer */}
         <footer className="mt-6 text-center">
           <p className="text-white/60 text-xs font-medium tracking-wide">
-            World's first physics-based power trends · No hardware required
+            World&apos;s first physics-based power trends · No hardware required
           </p>
         </footer>
       </div>
 
       {/* ✅ SUCCESS MODAL - Latest Ride Imported */}
-      {latestImportedSession && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setLatestImportedSession(null)}
-          />
-          <div
-            className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
-            style={{ animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Latest ride imported"
-          >
-            {/* Green success header */}
+      {latestImportedSession ? (() => {
+        const s = latestImportedSession as any;
+
+        const sessionId = s?.session_id != null ? String(s.session_id) : "";
+        const startDateStr = typeof s?.start_date === "string" ? s.start_date : "";
+        const distanceKm = typeof s?.distance_km === "number" ? s.distance_km : null;
+        const pwAvg = typeof s?.precision_watt_avg === "number" ? s.precision_watt_avg : null;
+        const durSec = typeof s?.duration_seconds === "number" ? s.duration_seconds : null;
+        const elevM = typeof s?.elevation_gain_m === "number" ? s.elevation_gain_m : null;
+        const weatherSrc = s?.weather_source != null ? String(s.weather_source) : "";
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
-              className="px-6 py-5"
-              style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setLatestImportedSession(null)}
+            />
+
+            <div
+              className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
+              style={{ animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Latest ride imported"
             >
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
-                  <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-
-                <div className="min-w-0">
-                  <h3 className="text-xl font-bold text-white">Ride imported!</h3>
-                  <p className="text-sm text-white/80">Analyzed with PrecisionWatt™</p>
-
-                  {latestImportedSession.session_id ? (
-                    <p className="mt-1 text-[11px] text-white/70 break-all">
-                      Session ID: {latestImportedSession.session_id}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            {/* Ride details */}
-            <div className="px-6 py-5">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Date</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.start_date
-                      ? new Date(latestImportedSession.start_date).toLocaleDateString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })
-                      : "—"}
+              {/* Green success header */}
+              <div
+                className="px-6 py-5"
+                style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
+                    <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
                   </div>
-                </div>
 
-                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distance</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {typeof latestImportedSession.distance_km === "number"
-                      ? `${latestImportedSession.distance_km.toFixed(1)} km`
-                      : "—"}
-                  </div>
-                </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xl font-bold text-white">Ride imported!</h3>
+                    <p className="text-sm text-white/80">Analyzed with PrecisionWatt™</p>
 
-                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
-                  <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">
-                    ⚡ PrecisionWatt Avg
-                  </div>
-                  <div className="text-lg font-extrabold text-emerald-700">
-                    {typeof latestImportedSession.precision_watt_avg === "number"
-                      ? `${latestImportedSession.precision_watt_avg} W`
-                      : "—"}
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Duration</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {typeof latestImportedSession.duration_seconds === "number"
-                      ? `${Math.round(latestImportedSession.duration_seconds / 60)} min`
-                      : "—"}
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Elevation gain</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {typeof latestImportedSession.elevation_gain_m === "number"
-                      ? `${latestImportedSession.elevation_gain_m} m`
-                      : "—"}
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Weather</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.weather_source ? String(latestImportedSession.weather_source) : "—"}
+                    {sessionId ? (
+                      <p className="mt-1 text-[11px] text-white/70 break-all">
+                        Session ID: {sessionId}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Actions */}
-            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 justify-end">
-              <button
-                className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                onClick={() => setLatestImportedSession(null)}
-              >
-                Close
-              </button>
+              {/* Ride details */}
+              <div className="px-6 py-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Date</div>
+                    <div className="text-sm font-bold text-slate-900">
+                      {startDateStr
+                        ? new Date(startDateStr).toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "—"}
+                    </div>
+                  </div>
 
-              <button
-                className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
-                style={{ background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" }}
-                onClick={() => window.location.assign("/rides")}
-              >
-                View all rides →
-              </button>
+                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distance</div>
+                    <div className="text-sm font-bold text-slate-900">
+                      {distanceKm != null ? `${distanceKm.toFixed(1)} km` : "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
+                    <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">
+                      ⚡ PrecisionWatt Avg
+                    </div>
+                    <div className="text-lg font-extrabold text-emerald-700">
+                      {pwAvg != null ? `${pwAvg} W` : "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Duration</div>
+                    <div className="text-sm font-bold text-slate-900">
+                      {durSec != null ? `${Math.round(durSec / 60)} min` : "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Elevation gain</div>
+                    <div className="text-sm font-bold text-slate-900">
+                      {elevM != null ? `${elevM} m` : "—"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Weather</div>
+                    <div className="text-sm font-bold text-slate-900">
+                      {weatherSrc ? weatherSrc : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 justify-end">
+                <button
+                  className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  onClick={() => setLatestImportedSession(null)}
+                >
+                  Close
+                </button>
+
+                <button
+                  className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
+                  style={{ background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" }}
+                  onClick={() => window.location.assign("/rides")}
+                >
+                  View all rides →
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })() : null}
     </div>
   );
 }
