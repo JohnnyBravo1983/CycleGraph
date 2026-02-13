@@ -447,7 +447,10 @@ const DemoProgressionPanel: React.FC = () => {
   return (
     <div className="space-y-6">
       <section className="flex items-center justify-between">
-        <Link to="/" className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50"
+        >
           <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
           <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
         </Link>
@@ -463,7 +466,9 @@ const DemoProgressionPanel: React.FC = () => {
             className="pointer-events-none absolute inset-0"
             style={{ background: "radial-gradient(circle at top right, rgba(255,255,255,0.10) 0%, transparent 60%)" }}
           />
-          <div className="relative z-10 flex-none text-6xl leading-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.30)] max-md:text-5xl">⚡</div>
+          <div className="relative z-10 flex-none text-6xl leading-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.30)] max-md:text-5xl">
+            ⚡
+          </div>
           <div className="relative z-10 min-w-0 flex-1">
             <h2 className="text-4xl font-extrabold tracking-tight leading-tight max-md:text-3xl">
               Power estimation without the hardware cost
@@ -556,7 +561,7 @@ export default function DashboardPage() {
     setLatestImportBusy(true);
     setLatestImportErr(null);
     setLatestImportedSession(null);
-    setLatestImportInfo("Starter import…");
+    setLatestImportInfo("Starting import…");
 
     try {
       const before = await cgApi.listAll();
@@ -572,7 +577,7 @@ export default function DashboardPage() {
         throw new Error(String((out.data as any).error || (out.data as any).detail || "Import failed"));
       }
 
-      setLatestImportInfo("Import OK. Venter på at analysen skal skrive session-filer…");
+      setLatestImportInfo("Import OK. Waiting for analysis to write session files…");
       // Give backend a moment to persist new session(s)
       await new Promise((r) => setTimeout(r, 1200));
 
@@ -584,14 +589,14 @@ export default function DashboardPage() {
       console.log("[Dashboard] after count:", after.length);
 
       if (!newly) {
-        setLatestImportErr("Fant ingen nye rides etter import. (Kan være tom Strava-periode de siste 7 dagene.)");
+        setLatestImportErr("No new rides found after import. (Your Strava activity may be empty for the last 7 days.)");
         setLatestImportInfo(null);
       } else {
         setLatestImportedSession(newly);
-        setLatestImportInfo(`Fant ride: ${newly.session_id ?? "(mangler session_id)"}`);
+        setLatestImportInfo(`Found ride: ${newly.session_id ?? "(missing session_id)"}`);
       }
     } catch (e: any) {
-      setLatestImportErr(e?.message ? String(e.message) : "Ukjent feil ved import.");
+      setLatestImportErr(e?.message ? String(e.message) : "Unknown import error.");
       setLatestImportInfo(null);
     } finally {
       setLatestImportBusy(false);
@@ -644,9 +649,9 @@ export default function DashboardPage() {
             <a
               href="#profile"
               className="px-3.5 py-2 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md text-sm font-medium text-white shadow-lg hover:bg-white/15 transition-all duration-200"
-              title="Gå til profilseksjon"
+              title="Jump to profile section"
             >
-              Profil
+              Profile
             </a>
 
             <Link
@@ -669,7 +674,7 @@ export default function DashboardPage() {
               onClick={onLogout}
               className="px-3.5 py-2 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md text-sm font-medium text-white shadow-lg hover:bg-white/15 transition-all duration-200"
             >
-              Logg ut
+              Log out
             </button>
           </div>
         </header>
@@ -799,11 +804,11 @@ export default function DashboardPage() {
 
                   <div className="min-w-0 text-center sm:text-left">
                     <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight leading-tight drop-shadow-md">
-                      Importer siste tur fra Strava
+                      Import your latest ride from Strava
                     </h2>
                     <p className="mt-1 text-sm sm:text-base text-white/90 leading-relaxed">
-                      Henter og analyserer din siste ride automatisk med{" "}
-                      <span className="font-bold text-yellow-200">PrecisionWatt™</span> – ett klikk!
+                      Fetches and analyzes your latest ride automatically with{" "}
+                      <span className="font-bold text-yellow-200">PrecisionWatt™</span> — one click!
                     </p>
                   </div>
                 </div>
@@ -857,12 +862,17 @@ export default function DashboardPage() {
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                             />
                           </svg>
-                          Importerer…
+                          Importing…
                         </>
                       ) : (
                         <>
                           <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2.5}
+                              d="M13 10V3L4 14h7v7l9-11h-7z"
+                            />
                           </svg>
                           Import Latest Ride
                         </>
@@ -900,7 +910,7 @@ export default function DashboardPage() {
                     d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <span>Importerer din nyeste Strava-ride fra de siste 7 dagene · Analyseres med full fysikk-modell</span>
+                <span>Imports your newest Strava ride from the last 7 days · Analyzed with the full physics model</span>
               </div>
             </div>
           </div>
@@ -947,9 +957,11 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="flex-1 min-w-0 pr-0 sm:pr-24">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight mb-1">World-First Physics Power Trends</h1>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight mb-1">
+                  World-First Physics Power Trends
+                </h1>
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  First consumer app to deliver <span className="font-semibold text-emerald-600">~3-5% accuracy</span>{" "}
+                  First consumer app to deliver <span className="font-semibold text-emerald-600">~3–5% accuracy</span>{" "}
                   power analysis without a power meter
                 </p>
               </div>
@@ -992,7 +1004,7 @@ export default function DashboardPage() {
                     <div>
                       <div className="text-sm font-semibold text-slate-900">Full physics modeling</div>
                       <div className="text-xs text-slate-600 mt-0.5">
-                        Wind, air pressure, temperature, elevation - all modeled for precision
+                        Wind, air pressure, temperature, elevation — all modeled for precision
                       </div>
                     </div>
                   </div>
@@ -1009,7 +1021,9 @@ export default function DashboardPage() {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-900">Breakthrough accuracy</div>
-                      <div className="text-xs text-slate-600 mt-0.5">Sanity tested to ~5% in good conditions - a consumer-app first</div>
+                      <div className="text-xs text-slate-600 mt-0.5">
+                        Sanity-tested to ~5% in good conditions — a consumer-app first
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1140,7 +1154,7 @@ export default function DashboardPage() {
                   />
                 </svg>
               </div>
-              <h2 className="text-lg font-bold text-slate-900">Import Rides</h2>
+              <h2 className="text-lg font-bold text-slate-900">Import rides</h2>
             </div>
             <StravaImportCard />
           </div>
@@ -1186,7 +1200,7 @@ export default function DashboardPage() {
 
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
                   <div className="bg-slate-50 px-3 py-1.5 border-b border-slate-200">
-                    <div className="text-[11px] font-medium text-slate-600">Your City · Age Group</div>
+                    <div className="text-[11px] font-medium text-slate-600">Your city · Age group</div>
                   </div>
 
                   {[1, 2, 3, "...", "?"].map((rank, idx) => (
@@ -1219,132 +1233,128 @@ export default function DashboardPage() {
       </div>
 
       {/* ✅ SUCCESS MODAL - Latest Ride Imported */}
-      {latestImportedSession ? (() => {
-        const s = latestImportedSession as any;
+      {latestImportedSession
+        ? (() => {
+            const s = latestImportedSession as any;
 
-        const sessionId = s?.session_id != null ? String(s.session_id) : "";
-        const startDateStr = typeof s?.start_date === "string" ? s.start_date : "";
-        const distanceKm = typeof s?.distance_km === "number" ? s.distance_km : null;
-        const pwAvg = typeof s?.precision_watt_avg === "number" ? s.precision_watt_avg : null;
-        const durSec = typeof s?.duration_seconds === "number" ? s.duration_seconds : null;
-        const elevM = typeof s?.elevation_gain_m === "number" ? s.elevation_gain_m : null;
-        const weatherSrc = s?.weather_source != null ? String(s.weather_source) : "";
+            const sessionId = s?.session_id != null ? String(s.session_id) : "";
+            const startDateStr = typeof s?.start_date === "string" ? s.start_date : "";
+            const distanceKm = typeof s?.distance_km === "number" ? s.distance_km : null;
+            const pwAvg = typeof s?.precision_watt_avg === "number" ? s.precision_watt_avg : null;
+            const durSec = typeof s?.duration_seconds === "number" ? s.duration_seconds : null;
+            const elevM = typeof s?.elevation_gain_m === "number" ? s.elevation_gain_m : null;
+            const weatherSrc = s?.weather_source != null ? String(s.weather_source) : "";
 
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => setLatestImportedSession(null)}
-            />
-
-            <div
-              className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
-              style={{ animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Latest ride imported"
-            >
-              {/* Green success header */}
-              <div
-                className="px-6 py-5"
-                style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
-                    <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-
-                  <div className="min-w-0">
-                    <h3 className="text-xl font-bold text-white">Ride imported!</h3>
-                    <p className="text-sm text-white/80">Analyzed with PrecisionWatt™</p>
-
-                    {sessionId ? (
-                      <p className="mt-1 text-[11px] text-white/70 break-all">
-                        Session ID: {sessionId}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              {/* Ride details */}
-              <div className="px-6 py-5">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Date</div>
-                    <div className="text-sm font-bold text-slate-900">
-                      {startDateStr
-                        ? new Date(startDateStr).toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distance</div>
-                    <div className="text-sm font-bold text-slate-900">
-                      {distanceKm != null ? `${distanceKm.toFixed(1)} km` : "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
-                    <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">
-                      ⚡ PrecisionWatt Avg
-                    </div>
-                    <div className="text-lg font-extrabold text-emerald-700">
-                      {pwAvg != null ? `${pwAvg} W` : "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Duration</div>
-                    <div className="text-sm font-bold text-slate-900">
-                      {durSec != null ? `${Math.round(durSec / 60)} min` : "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Elevation gain</div>
-                    <div className="text-sm font-bold text-slate-900">
-                      {elevM != null ? `${elevM} m` : "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                    <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Weather</div>
-                    <div className="text-sm font-bold text-slate-900">
-                      {weatherSrc ? weatherSrc : "—"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 justify-end">
-                <button
-                  className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div
+                  className="absolute inset-0 bg-black/50 backdrop-blur-sm"
                   onClick={() => setLatestImportedSession(null)}
-                >
-                  Close
-                </button>
+                />
 
-                <button
-                  className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
-                  style={{ background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" }}
-                  onClick={() => window.location.assign("/rides")}
+                <div
+                  className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
+                  style={{ animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Latest ride imported"
                 >
-                  View all rides →
-                </button>
+                  {/* Green success header */}
+                  <div
+                    className="px-6 py-5"
+                    style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
+                        <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+
+                      <div className="min-w-0">
+                        <h3 className="text-xl font-bold text-white">Ride imported!</h3>
+                        <p className="text-sm text-white/80">Analyzed with PrecisionWatt™</p>
+
+                        {sessionId ? (
+                          <p className="mt-1 text-[11px] text-white/70 break-all">Session ID: {sessionId}</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ride details */}
+                  <div className="px-6 py-5">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Date</div>
+                        <div className="text-sm font-bold text-slate-900">
+                          {startDateStr
+                            ? new Date(startDateStr).toLocaleDateString("en-GB", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distance</div>
+                        <div className="text-sm font-bold text-slate-900">
+                          {distanceKm != null ? `${distanceKm.toFixed(1)} km` : "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
+                        <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">
+                          ⚡ PrecisionWatt Avg
+                        </div>
+                        <div className="text-lg font-extrabold text-emerald-700">
+                          {pwAvg != null ? `${pwAvg} W` : "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Duration</div>
+                        <div className="text-sm font-bold text-slate-900">
+                          {durSec != null ? `${Math.round(durSec / 60)} min` : "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Elevation gain</div>
+                        <div className="text-sm font-bold text-slate-900">{elevM != null ? `${elevM} m` : "—"}</div>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Weather</div>
+                        <div className="text-sm font-bold text-slate-900">{weatherSrc ? weatherSrc : "—"}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 justify-end">
+                    <button
+                      className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                      onClick={() => setLatestImportedSession(null)}
+                    >
+                      Close
+                    </button>
+
+                    <button
+                      className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
+                      style={{ background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" }}
+                      onClick={() => window.location.assign("/rides")}
+                    >
+                      View all rides →
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        );
-      })() : null}
+            );
+          })()
+        : null}
     </div>
   );
 }
