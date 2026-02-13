@@ -43,7 +43,7 @@ function getStr(obj: unknown, key: string): string | null {
   return typeof v === "string" ? v : null;
 }
 
-// ✅ Velg nyeste session = max(start_time), ellers fallback til høyeste ride_id
+// ✅ Pick newest session = max(start_time), else fallback to highest ride_id
 function pickNewestSessionId(items: unknown[]): string | null {
   let bestByTime: { sid: string; t: number } | null = null;
   let bestByNumericId: { sid: string; n: number } | null = null;
@@ -101,7 +101,7 @@ export default function OnboardingPage() {
     init();
   }, [init]);
 
-  // Auto-check Strava status ved mount + URL-change (OAuth redirect)
+  // Auto-check Strava status on mount + URL-change (OAuth redirect)
   useEffect(() => {
     (async () => {
       setStBusy(true);
@@ -120,7 +120,7 @@ export default function OnboardingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, location.search]);
 
-  // ✅ PATCH 1B: Etter “Fullfør” → re-analyze ALLE økter fra listAll() + refresh list før navigation
+  // ✅ PATCH 1B: After “Finish” → re-analyze ALL rides from listAll() + refresh list before navigation
   const onFinish = async () => {
     if (finishBusy) return;
     setFinishBusy(true);
@@ -128,11 +128,11 @@ export default function OnboardingPage() {
     try {
       console.log("[Onboarding] COMMIT payload", draft);
 
-      // ✅ PATCH: IKKE skriv onboarded inn i profilen
+      // ✅ PATCH: DO NOT write onboarded into the profile
       const ok = await commit({ markOnboarded: true });
       if (!ok) return;
 
-      // Bygg override (kun tall, no-any)
+      // Build override (numbers only, no-any)
       const override: Record<string, number> = {};
       const rw = getNum(draft, "rider_weight_kg");
       const bw = getNum(draft, "bike_weight_kg");
@@ -152,7 +152,7 @@ export default function OnboardingPage() {
         const itemsUnknown = (await cgApi.listAll().catch(() => [])) as unknown;
         const items: unknown[] = Array.isArray(itemsUnknown) ? itemsUnknown : [];
 
-        // sorter på start_time desc (mangler start_time -> sist)
+        // sort by start_time desc (missing start_time -> last)
         const sorted = [...items].sort((a, b) => {
           const sa = isRecord(a)
             ? typeof (a as any).start_time === "string"
@@ -169,7 +169,7 @@ export default function OnboardingPage() {
           return tb - ta;
         });
 
-        // plukk ALLE IDs
+        // pick ALL IDs
         const pickAll = sorted
           .map((x) => {
             if (!isRecord(x)) return "";
@@ -206,7 +206,7 @@ export default function OnboardingPage() {
           }
         }
 
-        // Refresh rides-listen før navigation
+        // Refresh rides list before navigation
         try {
           await useSessionStore.getState().loadSessionsList();
           console.log("[Onboarding] loadSessionsList refreshed before navigation");
@@ -217,7 +217,7 @@ export default function OnboardingPage() {
         console.log("[Onboarding] bulk re-analyze error (ignored):", e);
       }
 
-      // ✅ PATCH: hard reload for å re-mounte AuthGateProvider og få oppdatert onboarding-state
+      // ✅ PATCH: hard reload to re-mount AuthGateProvider and get updated onboarding state
       window.location.assign("/onboarding/import");
       return;
     } finally {
@@ -238,11 +238,10 @@ export default function OnboardingPage() {
 
   return (
     <div className="max-w-xl mx-auto flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Velkommen til CycleGraph</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Welcome to CycleGraph</h1>
 
       <p className="text-slate-600">
-        Før vi starter trenger vi et grovt utgangspunkt for profilen din. Dette kan
-        justeres senere.
+        Before we begin, we need a rough baseline for your profile. You can adjust this later.
       </p>
 
       {error ? <div className="text-red-600 text-sm">{error}</div> : null}
@@ -253,9 +252,9 @@ export default function OnboardingPage() {
       <div className="rounded-lg border bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-semibold">Koble til Strava</h2>
+            <h2 className="font-semibold">Connect Strava</h2>
             <p className="text-sm text-slate-600 mt-1">
-              For å hente turer og bygge din første analyse trenger vi tilgang til Strava.
+              To import rides and build your first analysis, we need access to Strava.
             </p>
             <p className="text-xs text-slate-500 mt-1">
               Backend: <span className="font-mono">{cgApi.baseUrl()}</span>
@@ -265,7 +264,7 @@ export default function OnboardingPage() {
           <div className="shrink-0">
             {tokenValid ? (
               <div className="px-3 py-2 rounded border text-sm text-slate-700 bg-slate-50">
-                Strava er tilkoblet ✅
+                Strava connected ✅
               </div>
             ) : (
               <button
@@ -273,9 +272,9 @@ export default function OnboardingPage() {
                 onClick={connectStrava}
                 disabled={stBusy}
                 className="px-3 py-2 rounded bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
-                title={tokenExpired ? "Token er utløpt – koble til på nytt" : "Koble til Strava"}
+                title={tokenExpired ? "Token expired — connect again" : "Connect Strava"}
               >
-                {stBusy ? "Sjekker…" : tokenExpired ? "Reconnect Strava" : "Connect Strava"}
+                {stBusy ? "Checking…" : tokenExpired ? "Reconnect Strava" : "Connect Strava"}
               </button>
             )}
           </div>
@@ -298,16 +297,16 @@ export default function OnboardingPage() {
 
           {tokenExpired ? (
             <div className="mt-2 text-xs text-amber-700">
-              Strava-token er utløpt. Trykk <b>Reconnect Strava</b> eller importer en tur
-              senere i Dashboard for å trigge refresh.
+              Your Strava token has expired. Click <b>Reconnect Strava</b>, or import a ride later
+              from the Dashboard to trigger a refresh.
             </div>
           ) : null}
 
           {!hasTokens && st ? (
             <div className="mt-2 text-xs text-slate-600">
-              Du har ikke koblet til Strava ennå. Trykk{" "}
-              <span className="font-semibold">Connect Strava</span> og fullfør
-              innlogging – så oppdateres status automatisk når du kommer tilbake.
+              You haven’t connected Strava yet. Click{" "}
+              <span className="font-semibold">Connect Strava</span> and complete the login — the
+              status will update automatically when you return.
             </div>
           ) : null}
 
@@ -324,7 +323,7 @@ export default function OnboardingPage() {
           disabled={loading}
           className="px-4 py-2 rounded border"
         >
-          Bruk standardverdier
+          Use default values
         </button>
 
         <button
@@ -333,7 +332,7 @@ export default function OnboardingPage() {
           disabled={loading || finishBusy}
           className="px-4 py-2 rounded bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
         >
-          {finishBusy ? "Fullfører…" : "Fullfør og gå videre"}
+          {finishBusy ? "Finishing…" : "Finish and continue"}
         </button>
       </div>
     </div>
