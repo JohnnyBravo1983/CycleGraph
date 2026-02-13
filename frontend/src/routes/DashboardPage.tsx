@@ -1,5 +1,5 @@
 // frontend/src/routes/DashboardPage.tsx
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { cgApi } from "../lib/cgApi";
 import { StravaImportCard } from "../components/StravaImportCard";
@@ -11,6 +11,54 @@ import ProfileView from "../components/Profile/ProfileView";
 import { leaderboardMockData } from "../demo/leaderboardMockData";
 
 type YearKey = "2022" | "2023" | "2024" | "2025";
+
+// --- Latest Ride Import (Dashboard button) --------------------
+
+type SessionListItem = {
+  session_id: string;
+  start_date?: string;
+  distance_km?: number;
+  precision_watt_avg?: number;
+  precision_watt_max?: number;
+  duration_seconds?: number;
+  elevation_gain_m?: number;
+  weather_source?: string;
+};
+
+async function fetchSessionsListAll(): Promise<SessionListItem[]> {
+  const url = `${cgApi.baseUrl()}/api/sessions/list/all`;
+  const resp = await fetch(url, { credentials: "include" });
+  if (!resp.ok) throw new Error(`Failed sessions list (HTTP ${resp.status})`);
+  const data = await resp.json();
+  const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+  return sessions as SessionListItem[];
+}
+
+function sortByStartDateDesc(a: SessionListItem, b: SessionListItem) {
+  const ta = a.start_date ? Date.parse(a.start_date) : 0;
+  const tb = b.start_date ? Date.parse(b.start_date) : 0;
+  return tb - ta;
+}
+
+async function importLatestRideOnce(opts: { days: number }) {
+  const qs = new URLSearchParams();
+  qs.set("days", String(opts.days));
+  qs.set("page", "1");
+  qs.set("per_page", "1");
+  qs.set("batch_limit", "1");
+  qs.set("analyze", "1");
+
+  const url = `${cgApi.baseUrl()}/api/strava/sync?${qs.toString()}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+
+  const data = await resp.json().catch(() => null);
+  return { resp, data };
+}
 
 // ----------------------------
 // Trend helpers (for tooltips)
@@ -213,15 +261,13 @@ function MiniTrendChart({
 
 // 🎨 NEW: Animated Mini FTP Preview Component
 function AnimatedFTPPreview() {
-  const ftpValues = [210, 225, 245, 260]; // 2022 → 2025
+  const ftpValues = [210, 225, 245, 260];
   const years = ["2022", "2023", "2024", "2025"];
 
-  // SVG dimensions
   const width = 160;
   const height = 80;
   const padding = 15;
 
-  // Calculate points
   const min = 200;
   const max = 270;
   const span = max - min;
@@ -233,14 +279,12 @@ function AnimatedFTPPreview() {
     year: years[idx],
   }));
 
-  // Build path
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
   return (
     <div className="flex justify-center mb-4">
       <div className="relative">
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-          {/* Animated gradient path */}
           <defs>
             <linearGradient id="ftpGradient" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stopColor="#10b981" />
@@ -248,7 +292,6 @@ function AnimatedFTPPreview() {
             </linearGradient>
           </defs>
 
-          {/* Path with draw animation */}
           <path
             d={pathD}
             fill="none"
@@ -263,10 +306,8 @@ function AnimatedFTPPreview() {
             }}
           />
 
-          {/* Animated dots */}
           {points.map((point, idx) => (
             <g key={idx}>
-              {/* Outer ring */}
               <circle
                 cx={point.x}
                 cy={point.y}
@@ -279,7 +320,6 @@ function AnimatedFTPPreview() {
                   animation: `popDot 0.4s ease-out ${0.5 + idx * 0.3}s forwards`,
                 }}
               />
-              {/* Inner dot */}
               <circle
                 cx={point.x}
                 cy={point.y}
@@ -294,13 +334,11 @@ function AnimatedFTPPreview() {
           ))}
         </svg>
 
-        {/* Labels */}
         <div className="absolute -bottom-6 left-0 right-0 flex justify-between px-3 text-[10px] font-semibold text-emerald-700">
           <span>210W</span>
           <span>260W</span>
         </div>
 
-        {/* Year labels */}
         <div className="absolute -top-5 left-0 right-0 flex justify-between px-3 text-[9px] text-slate-400">
           <span>'22</span>
           <span>'25</span>
@@ -571,7 +609,7 @@ const DemoProgressionPanel: React.FC = () => {
 };
 
 // ========================================
-// 🚀 DASHBOARD V6 FINAL - WITH ANIMATED PREVIEW + COUNTDOWN
+// 🚀 DASHBOARD V6 FINAL - WITH ANIMATED PREVIEW + COUNTDOWN + FAT IMPORT BUTTON
 // ========================================
 
 export default function DashboardPage() {
@@ -583,7 +621,6 @@ export default function DashboardPage() {
     if (demoFlag === "1") {
       console.warn("[DashboardPage] Removing stale demo mode flag from localStorage");
       localStorage.removeItem("cg_demo");
-      // Reload to show actual dashboard instead of demo
       window.location.reload();
     }
   }, []);
@@ -596,7 +633,6 @@ export default function DashboardPage() {
     seconds: 0,
   });
 
-  // ✅ FIX: TS-safe Date arithmetic using getTime()
   React.useEffect(() => {
     const targetDate = new Date("2026-03-01T00:00:00");
 
@@ -621,6 +657,48 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(interval);
   }, []);
+
+  // --- Import Latest Ride state ---
+  const [latestImportBusy, setLatestImportBusy] = useState(false);
+  const [latestImportErr, setLatestImportErr] = useState<string | null>(null);
+  const [latestImportedSession, setLatestImportedSession] = useState<SessionListItem | null>(null);
+
+  async function onImportLatestRide() {
+    if (latestImportBusy) return;
+    setLatestImportBusy(true);
+    setLatestImportErr(null);
+    setLatestImportedSession(null);
+
+    try {
+      const before = await fetchSessionsListAll();
+      const beforeIds = new Set(before.map((s) => s.session_id));
+
+      const out = await importLatestRideOnce({ days: 7 });
+
+      if (!out.resp.ok) {
+        throw new Error(`Import failed (HTTP ${out.resp.status})`);
+      }
+
+      if (out.data && typeof out.data === "object" && out.data.ok === false) {
+        throw new Error(String(out.data.error || out.data.detail || "Import failed"));
+      }
+
+      const after = await fetchSessionsListAll();
+      after.sort(sortByStartDateDesc);
+
+      const newly = after.find((s) => !beforeIds.has(s.session_id)) || after[0] || null;
+
+      if (!newly) {
+        setLatestImportErr("Fant ingen nye rides etter import. (Kan være tom Strava-periode de siste 7 dagene.)");
+      } else {
+        setLatestImportedSession(newly);
+      }
+    } catch (e: any) {
+      setLatestImportErr(e?.message ? String(e.message) : "Ukjent feil ved import.");
+    } finally {
+      setLatestImportBusy(false);
+    }
+  }
 
   async function onLogout() {
     try {
@@ -664,7 +742,6 @@ export default function DashboardPage() {
             <span className="text-sm font-semibold text-white tracking-tight">CycleGraph</span>
           </Link>
 
-          {/* ✅ PATCH 1.2: add "Profil" anchor link, keep /profile icon link unchanged */}
           <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2">
             <a
               href="#profile"
@@ -719,13 +796,227 @@ export default function DashboardPage() {
               background-position: 200% center;
             }
           }
+
+          @keyframes pulseGlow {
+            0%, 100% {
+              box-shadow: 0 0 20px rgba(251, 146, 60, 0.4), 0 0 60px rgba(251, 146, 60, 0.1);
+            }
+            50% {
+              box-shadow: 0 0 30px rgba(251, 146, 60, 0.6), 0 0 80px rgba(251, 146, 60, 0.2);
+            }
+          }
+
+          @keyframes spinSlow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
         `}</style>
+
+        {/* 🔥🔥🔥 FAT IMPORT LATEST RIDE BUTTON - HERO PLACEMENT 🔥🔥🔥 */}
+        <section
+          className="mb-4"
+          style={{
+            animation: "slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
+          }}
+        >
+          <div
+            className="relative rounded-2xl overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.3)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_24px_70px_rgba(0,0,0,0.35)]"
+            style={{
+              animation: "pulseGlow 3s ease-in-out infinite",
+            }}
+          >
+            {/* Background gradient */}
+            <div
+              className="absolute inset-0"
+              style={{
+                background: "linear-gradient(135deg, #f97316 0%, #ea580c 40%, #dc2626 100%)",
+              }}
+            />
+
+            {/* Decorative circles */}
+            <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+            <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-yellow-300/15 blur-xl" />
+
+            {/* Strava-style pattern overlay */}
+            <div
+              className="absolute inset-0 opacity-[0.06]"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(45deg, transparent 0px, transparent 20px, white 20px, white 21px)",
+              }}
+            />
+
+            <div className="relative z-10 p-6 sm:p-8">
+              <div className="flex flex-col sm:flex-row items-center gap-5">
+                {/* Left: Icon + Text */}
+                <div className="flex items-center gap-4 flex-1 min-w-0">
+                  {/* Strava-inspired icon */}
+                  <div className="flex-none">
+                    <div className="relative">
+                      <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center shadow-lg">
+                        {latestImportBusy ? (
+                          <svg
+                            className="h-9 w-9 sm:h-10 sm:w-10 text-white"
+                            style={{ animation: "spinSlow 1.5s linear infinite" }}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2.5}
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            className="h-9 w-9 sm:h-10 sm:w-10 text-white drop-shadow-lg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2.5}
+                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                            />
+                          </svg>
+                        )}
+                      </div>
+                      {/* Notification dot */}
+                      {!latestImportBusy && (
+                        <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-yellow-400 border-2 border-orange-500 flex items-center justify-center shadow-md">
+                          <span className="text-[10px] font-bold text-orange-900">!</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 text-center sm:text-left">
+                    <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight leading-tight drop-shadow-md">
+                      Importer siste tur fra Strava
+                    </h2>
+                    <p className="mt-1 text-sm sm:text-base text-white/90 leading-relaxed">
+                      Henter og analyserer din siste ride automatisk med{" "}
+                      <span className="font-bold text-yellow-200">PrecisionWatt™</span> – ett klikk!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right: FAT BUTTON */}
+                <div className="flex-none w-full sm:w-auto">
+                  <button
+                    onClick={onImportLatestRide}
+                    disabled={latestImportBusy}
+                    aria-disabled={latestImportBusy}
+                    className={`
+                      group relative w-full sm:w-auto
+                      px-8 py-4 sm:px-10 sm:py-5
+                      rounded-2xl
+                      text-lg sm:text-xl font-extrabold tracking-tight
+                      transition-all duration-200
+                      ${
+                        latestImportBusy
+                          ? "bg-white/30 text-white/70 cursor-wait border-2 border-white/20"
+                          : "bg-white text-orange-600 border-2 border-white shadow-[0_8px_30px_rgba(0,0,0,0.2)] hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.3)] active:translate-y-0 active:shadow-[0_4px_15px_rgba(0,0,0,0.2)]"
+                      }
+                    `}
+                  >
+                    {/* Shine effect on hover */}
+                    {!latestImportBusy && (
+                      <div className="absolute inset-0 rounded-2xl overflow-hidden">
+                        <div
+                          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                          style={{
+                            background:
+                              "linear-gradient(105deg, transparent 40%, rgba(251,146,60,0.1) 45%, rgba(251,146,60,0.2) 50%, rgba(251,146,60,0.1) 55%, transparent 60%)",
+                            backgroundSize: "200% 100%",
+                            animation: "shimmer 2s linear infinite",
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <span className="relative z-10 flex items-center justify-center gap-3">
+                      {latestImportBusy ? (
+                        <>
+                          <svg
+                            className="h-6 w-6 animate-spin"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                          Importerer…
+                        </>
+                      ) : (
+                        <>
+                          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2.5}
+                              d="M13 10V3L4 14h7v7l9-11h-7z"
+                            />
+                          </svg>
+                          Import Latest Ride
+                        </>
+                      )}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Error message */}
+              {latestImportErr && (
+                <div className="mt-4 rounded-xl bg-red-900/40 border border-red-400/30 backdrop-blur-sm px-4 py-3 flex items-start gap-3">
+                  <svg className="h-5 w-5 text-red-300 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+                    />
+                  </svg>
+                  <div className="text-sm text-red-100 font-medium">{latestImportErr}</div>
+                </div>
+              )}
+
+              {/* Bottom hint */}
+              <div className="mt-4 flex items-center justify-center sm:justify-start gap-2 text-white/60 text-xs">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>Importerer din nyeste Strava-ride fra de siste 7 dagene · Analyseres med full fysikk-modell</span>
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* 🔥 TRENDS HERO - WITH ANIMATED PREVIEW */}
         <section
           className="mb-4"
           style={{
-            animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)",
+            animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.05s backwards",
           }}
         >
           <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40 relative overflow-hidden">
@@ -774,14 +1065,11 @@ export default function DashboardPage() {
 
             {/* Value Prop Box - WITH ANIMATED PREVIEW */}
             <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-8 mb-6 relative overflow-hidden">
-              {/* Subtle glow */}
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(16,185,129,0.08),transparent_50%)]" />
 
               <div className="relative">
-                {/* 🎨 ANIMATED FTP PREVIEW (replaces static icon) */}
                 <AnimatedFTPPreview />
 
-                {/* Value Props */}
                 <div className="space-y-3 max-w-lg mx-auto">
                   <div className="flex items-start gap-3">
                     <div className="flex-none mt-0.5">
@@ -1035,6 +1323,116 @@ export default function DashboardPage() {
           </p>
         </footer>
       </div>
+
+      {/* ✅ SUCCESS MODAL - Latest Ride Imported */}
+      {latestImportedSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setLatestImportedSession(null)}
+          />
+          <div
+            className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
+            style={{
+              animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            {/* Green success header */}
+            <div
+              className="px-6 py-5"
+              style={{
+                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
+                  <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">Ride importert!</h3>
+                  <p className="text-sm text-white/80">Analysert med PrecisionWatt™</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Ride details */}
+            <div className="px-6 py-5">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Dato</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {latestImportedSession.start_date
+                      ? new Date(latestImportedSession.start_date).toLocaleDateString("no-NO", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      : "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distanse</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {latestImportedSession.distance_km?.toFixed(1) ?? "—"} km
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
+                  <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">⚡ PrecisionWatt Avg</div>
+                  <div className="text-lg font-extrabold text-emerald-700">
+                    {latestImportedSession.precision_watt_avg ?? "—"} W
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Varighet</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {latestImportedSession.duration_seconds
+                      ? `${Math.round(latestImportedSession.duration_seconds / 60)} min`
+                      : "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Høydemeter</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {latestImportedSession.elevation_gain_m ?? "—"} m
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Vær</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {latestImportedSession.weather_source ?? "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 justify-end">
+              <button
+                className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                onClick={() => setLatestImportedSession(null)}
+              >
+                Lukk
+              </button>
+              <button
+                className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
+                style={{
+                  background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)",
+                }}
+                onClick={() => window.location.assign("/rides")}
+              >
+                Se alle rides →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
