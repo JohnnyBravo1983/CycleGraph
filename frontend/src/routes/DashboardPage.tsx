@@ -22,26 +22,6 @@ type SessionListItem = {
   weather_source?: string;
 };
 
-async function fetchSessionsListAll(): Promise<SessionListItem[]> {
-  const url = `${cgApi.baseUrl()}/api/sessions/list/all`;
-  const resp = await fetch(url, { credentials: "include", cache: "no-store" });
-  if (!resp.ok) throw new Error(`Failed sessions list (HTTP ${resp.status})`);
-
-  const data = await resp.json().catch(() => null);
-
-  // Be tolerant: backend may return {sessions:[...]}, {items:[...]}, {rows:[...]}, or just [...]
-  const sessions = Array.isArray(data)
-    ? data
-    : Array.isArray((data as any)?.sessions)
-      ? (data as any).sessions
-      : Array.isArray((data as any)?.items)
-        ? (data as any).items
-        : Array.isArray((data as any)?.rows)
-          ? (data as any).rows
-          : [];
-
-  return sessions as SessionListItem[];
-}
 
 function sortByStartDateDesc(a: SessionListItem, b: SessionListItem) {
   const ta = a.start_date ? Date.parse(a.start_date) : 0;
@@ -650,7 +630,7 @@ export default function DashboardPage() {
     setLatestImportInfo("Starter import…");
 
     try {
-      const before = await fetchSessionsListAll();
+      const before = (await cgApi.sessionsListAll()) as SessionListItem[]
       const beforeIds = new Set(before.map((s) => s.session_id));
 
       const out = await importLatestRideOnce({ days: 7 });
@@ -667,11 +647,12 @@ export default function DashboardPage() {
       // Give backend a moment to persist new session(s)
       await new Promise((r) => setTimeout(r, 1200));
 
-      const after = await fetchSessionsListAll();
+      const after = (await cgApi.sessionsListAll()) as SessionListItem[];
       after.sort(sortByStartDateDesc);
 
       const newly = after.find((s) => !beforeIds.has(s.session_id)) || after[0] || null;
-
+      console.log("[Dashboard] before count:", before.length);
+      console.log("[Dashboard] after count:", after.length);
       if (!newly) {
         setLatestImportErr("Fant ingen nye rides etter import. (Kan være tom Strava-periode de siste 7 dagene.)");
         setLatestImportInfo(null);
