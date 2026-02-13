@@ -7,9 +7,6 @@ import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
 import ProfileView from "../components/Profile/ProfileView";
 
-// ✅ Patch 4a.2
-import { leaderboardMockData } from "../demo/leaderboardMockData";
-
 type YearKey = "2022" | "2023" | "2024" | "2025";
 
 // --- Latest Ride Import (Dashboard button) --------------------
@@ -498,7 +495,6 @@ const DemoProgressionPanel: React.FC = () => {
   const wkg = years.map((y) => safeNum((progressionSummary[y] as any).wkg));
   const weight = years.map((y) => safeNum((progressionSummary[y] as any).weight));
 
-  const latest = progressionSummary["2025"] as any;
   const [yearFilter, setYearFilter] = React.useState<string>("All");
 
   const all = demoRides as any[];
@@ -578,6 +574,14 @@ const DemoProgressionPanel: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* (Optional) Put more demo UI here later */}
+      <DemoInsightBox />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MiniTrendChart title="FTP trend (demo)" points={ftpTrendPoints} />
+        <MiniTrendChart title="W/kg trend (demo)" points={wkgTrendPoints} />
+      </div>
     </div>
   );
 };
@@ -781,7 +785,8 @@ export default function DashboardPage() {
           }
 
           @keyframes pulseGlow {
-            0%, 100% {
+            0%,
+            100% {
               box-shadow: 0 0 20px rgba(251, 146, 60, 0.4), 0 0 60px rgba(251, 146, 60, 0.1);
             }
             50% {
@@ -790,12 +795,16 @@ export default function DashboardPage() {
           }
 
           @keyframes spinSlow {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+            from {
+              transform: rotate(0deg);
+            }
+            to {
+              transform: rotate(360deg);
+            }
           }
         `}</style>
 
-        {/* 🔥🔥🔥 FAT IMPORT LATEST RIDE BUTTON - HERO PLACEMENT 🔥🔥🔥 */}
+        {/* 🔥 FAT IMPORT LATEST RIDE BUTTON - HERO PLACEMENT 🔥 */}
         <section
           className="mb-4"
           style={{
@@ -1292,29 +1301,47 @@ export default function DashboardPage() {
 
         {/* Footer */}
         <footer className="mt-6 text-center">
-          <p className="text-white/60 text-xs font-medium tracking-wide">World's first physics-based power trends · No hardware required</p>
+          <p className="text-white/60 text-xs font-medium tracking-wide">
+            World's first physics-based power trends · No hardware required
+          </p>
         </footer>
       </div>
 
       {/* ✅ SUCCESS MODAL - Latest Ride Imported */}
       {latestImportedSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setLatestImportedSession(null)} />
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setLatestImportedSession(null)}
+          />
           <div
             className="relative w-full max-w-lg rounded-2xl bg-white shadow-[0_25px_60px_rgba(0,0,0,0.3)] overflow-hidden"
             style={{ animation: "slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1)" }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Latest ride imported"
           >
             {/* Green success header */}
-            <div className="px-6 py-5" style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}>
+            <div
+              className="px-6 py-5"
+              style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
+            >
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center">
                   <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <div>
-                  <h3 className="text-xl font-bold text-white">Ride importert!</h3>
-                  <p className="text-sm text-white/80">Analysert med PrecisionWatt™</p>
+
+                <div className="min-w-0">
+                  <h3 className="text-xl font-bold text-white">Ride imported!</h3>
+                  <p className="text-sm text-white/80">Analyzed with PrecisionWatt™</p>
+
+                  {latestImportedSession.session_id ? (
+                    <p className="mt-1 text-[11px] text-white/70 break-all">
+                      Session ID: {latestImportedSession.session_id}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -1323,39 +1350,61 @@ export default function DashboardPage() {
             <div className="px-6 py-5">
               <div className="grid grid-cols-2 gap-4">
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Dato</div>
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Date</div>
                   <div className="text-sm font-bold text-slate-900">
                     {latestImportedSession.start_date
-                      ? new Date(latestImportedSession.start_date).toLocaleDateString("no-NO", { day: "numeric", month: "short", year: "numeric" })
+                      ? new Date(latestImportedSession.start_date).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
                       : "—"}
                   </div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distanse</div>
-                  <div className="text-sm font-bold text-slate-900">{latestImportedSession.distance_km?.toFixed(1) ?? "—"} km</div>
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Distance</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {typeof latestImportedSession.distance_km === "number"
+                      ? `${latestImportedSession.distance_km.toFixed(1)} km`
+                      : "—"}
+                  </div>
                 </div>
 
                 <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-center">
-                  <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">⚡ PrecisionWatt Avg</div>
-                  <div className="text-lg font-extrabold text-emerald-700">{latestImportedSession.precision_watt_avg ?? "—"} W</div>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Varighet</div>
-                  <div className="text-sm font-bold text-slate-900">
-                    {latestImportedSession.duration_seconds ? `${Math.round(latestImportedSession.duration_seconds / 60)} min` : "—"}
+                  <div className="text-xs font-medium text-emerald-700 uppercase tracking-wide mb-1">
+                    ⚡ PrecisionWatt Avg
+                  </div>
+                  <div className="text-lg font-extrabold text-emerald-700">
+                    {typeof latestImportedSession.precision_watt_avg === "number"
+                      ? `${latestImportedSession.precision_watt_avg} W`
+                      : "—"}
                   </div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Høydemeter</div>
-                  <div className="text-sm font-bold text-slate-900">{latestImportedSession.elevation_gain_m ?? "—"} m</div>
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Duration</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {typeof latestImportedSession.duration_seconds === "number"
+                      ? `${Math.round(latestImportedSession.duration_seconds / 60)} min`
+                      : "—"}
+                  </div>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-3.5 text-center">
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Vær</div>
-                  <div className="text-sm font-bold text-slate-900">{latestImportedSession.weather_source ?? "—"}</div>
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Elevation gain</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {typeof latestImportedSession.elevation_gain_m === "number"
+                      ? `${latestImportedSession.elevation_gain_m} m`
+                      : "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 p-3.5 text-center">
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Weather</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {latestImportedSession.weather_source ? String(latestImportedSession.weather_source) : "—"}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1366,14 +1415,15 @@ export default function DashboardPage() {
                 className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
                 onClick={() => setLatestImportedSession(null)}
               >
-                Lukk
+                Close
               </button>
+
               <button
                 className="px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-md hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
                 style={{ background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)" }}
                 onClick={() => window.location.assign("/rides")}
               >
-                Se alle rides →
+                View all rides →
               </button>
             </div>
           </div>
