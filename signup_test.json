@@ -1,0 +1,8 @@
+﻿{
+  "email": "test@example.com",
+  "password": "Test1234!",
+  "gender": "male",
+  "country": "NO",
+  "city": "Oslo",
+  "age": 30
+}

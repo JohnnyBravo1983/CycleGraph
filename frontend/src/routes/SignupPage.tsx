@@ -12,11 +12,11 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(false);
 
-  // ✅ Day 1: Demografi under signup (lagres i auth.json)
+  // ✅ Day 1: Demographics during signup (stored in auth.json)
   const [gender, setGender] = useState<"" | "male" | "female">("");
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
-  const [age, setAge] = useState<string>(""); // hold som string for input-kontroll
+  const [age, setAge] = useState<string>(""); // keep as string for input control
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,21 +50,35 @@ export default function SignupPage() {
       ageOk,
       consent,
     }),
-    [submitting, fullName, bikeName, email, password, consent, gender, country, city, age, ageOk]
+    [
+      submitting,
+      fullName,
+      bikeName,
+      email,
+      password,
+      consent,
+      gender,
+      country,
+      city,
+      age,
+      ageOk,
+    ]
   );
 
   function mapSignupError(err: unknown): string {
     const anyErr = err as any;
-    const status = typeof anyErr?.status === "number" ? (anyErr.status as number) : null;
+    const status =
+      typeof anyErr?.status === "number" ? (anyErr.status as number) : null;
 
-    if (status === 409) return "E-post er allerede i bruk. Prøv å logge inn.";
-    if (status === 400) return "Ugyldige felt. Sjekk e-post og passord (minst 8 tegn).";
+    if (status === 409) return "That email is already in use. Try logging in.";
+    if (status === 400)
+      return "Invalid fields. Check your email and password (min 8 characters).";
 
     const msg = String(anyErr?.message ?? err ?? "");
-    if (!msg) return "Ukjent feil ved registrering";
+    if (!msg) return "Unknown signup error";
 
     if (msg.toLowerCase().includes("failed to fetch")) {
-      return "Kunne ikke kontakte server. Sjekk at backend kjører.";
+      return "Could not reach the server. Make sure the backend is running.";
     }
 
     return msg;
@@ -75,7 +89,9 @@ export default function SignupPage() {
     setError(null);
 
     if (!canContinue) {
-      setError("Sjekk feltene (minst 8 tegn passord) og samtykke før du fortsetter.");
+      setError(
+        "Please check the fields (password must be at least 8 characters) and consent before continuing."
+      );
       return;
     }
 
@@ -107,7 +123,7 @@ export default function SignupPage() {
         backgroundPosition: "center",
       }}
     >
-      {/* Overlay for bedre lesbarhet */}
+      {/* Overlay for better readability */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
 
       {/* Form Container */}
@@ -130,9 +146,11 @@ export default function SignupPage() {
         <div className="rounded-3xl border-2 border-white/25 bg-white/95 backdrop-blur-2xl shadow-[0_25px_80px_rgba(0,0,0,0.5)] ring-2 ring-white/30 p-8">
           {/* Header */}
           <div className="text-center mb-6">
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">Opprett konto</h1>
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">
+              Create your account
+            </h1>
             <p className="text-sm text-slate-600 font-medium">
-              Lag en konto for å lagre profil og analysere økter
+              Set up your profile and start analyzing your rides
             </p>
           </div>
 
@@ -146,7 +164,9 @@ export default function SignupPage() {
           {/* Form */}
           <form onSubmit={onSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">Fullt navn</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Full name
+              </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={fullName}
@@ -157,7 +177,9 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">Sykkelnavn</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Bike name
+              </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={bikeName}
@@ -166,33 +188,39 @@ export default function SignupPage() {
               />
             </div>
 
-            {/* ✅ Day 1: Demografi */}
+            {/* ✅ Day 1: Demographics */}
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">Kjønn</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Gender
+              </label>
               <select
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={gender}
                 onChange={(e) => setGender(e.target.value as any)}
               >
-                <option value="">Velg…</option>
-                <option value="male">Mann</option>
-                <option value="female">Kvinne</option>
+                <option value="">Select…</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">Land</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Country
+              </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
-                placeholder="Norge"
+                placeholder="Norway"
                 autoComplete="country-name"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">By</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                City
+              </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={city}
@@ -204,7 +232,7 @@ export default function SignupPage() {
 
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">
-                Alder <span className="text-slate-500 font-medium">(13–100)</span>
+                Age <span className="text-slate-500 font-medium">(13–100)</span>
               </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
@@ -216,17 +244,21 @@ export default function SignupPage() {
                 placeholder="41"
               />
               {!submitting && age.length > 0 && !ageOk && (
-                <div className="mt-2 text-xs font-semibold text-red-700">Alder må være mellom 13 og 100.</div>
+                <div className="mt-2 text-xs font-semibold text-red-700">
+                  Age must be between 13 and 100.
+                </div>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">E-post</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                Email
+              </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="deg@epost.no"
+                placeholder="you@email.com"
                 autoComplete="email"
                 type="email"
               />
@@ -234,7 +266,8 @@ export default function SignupPage() {
 
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">
-                Passord <span className="text-slate-500 font-medium">(minst 8 tegn)</span>
+                Password{" "}
+                <span className="text-slate-500 font-medium">(min 8 characters)</span>
               </label>
               <input
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
@@ -255,7 +288,7 @@ export default function SignupPage() {
                 onChange={(e) => setConsent(e.target.checked)}
               />
               <span className="text-sm text-slate-700 font-medium leading-relaxed">
-                Jeg samtykker til at CycleGraph kan bruke mine Strava-aktiviteter for å analysere trening
+                I consent to CycleGraph using my Strava activities to analyze my training
               </span>
             </label>
 
@@ -287,10 +320,10 @@ export default function SignupPage() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
-                  Oppretter...
+                  Creating your account...
                 </span>
               ) : (
-                "Bekreft og gå videre"
+                "Create account and continue"
               )}
             </button>
           </form>
@@ -298,9 +331,12 @@ export default function SignupPage() {
           {/* Login Link */}
           <div className="mt-6 pt-6 border-t-2 border-slate-200 text-center">
             <span className="text-sm text-slate-600 font-medium">
-              Har du konto allerede?{" "}
-              <Link className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors" to="/login">
-                Logg inn
+              Already have an account?{" "}
+              <Link
+                className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors"
+                to="/login"
+              >
+                Log in
               </Link>
             </span>
           </div>
@@ -318,9 +354,14 @@ export default function SignupPage() {
               viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
             </svg>
-            Tilbake til forsiden
+            Back to home
           </Link>
         </div>
 

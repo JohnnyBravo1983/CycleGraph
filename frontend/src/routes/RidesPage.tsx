@@ -40,7 +40,7 @@ const coerceNum = (v: any): number | null => {
 };
 
 // -------------------------------
-// PATCH S6-C: HR + elapsed + distance helpers (robust mot None + ulike shape/typer)
+// PATCH S6-C: HR + elapsed + distance helpers (robust vs None + different shapes/types)
 // -------------------------------
 const fmtMmSs = (sec: number | null | undefined): string => {
   if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return "—";
@@ -75,7 +75,7 @@ const getElapsedS = (row: any): number | null => {
     row?.metrics?.elapsed_s ??
     row?.elapsed ??
     row?.elapsedSec ??
-    row?.moving_time_s; // mulig senere fallback
+    row?.moving_time_s; // possible later fallback
 
   const v = coerceNum(raw);
   if (v != null && v > 0) return v;
@@ -96,12 +96,12 @@ const getHrMax = (row: any): number | null => {
   return null;
 };
 
-// Robust tid parsing: støtt ISO-string, "YYYY-MM-DD", epoch-sek og epoch-ms
+// Robust time parsing: support ISO string, "YYYY-MM-DD", epoch seconds, and epoch ms
 function toMillis(v: any): number | null {
   if (v == null) return null;
 
   if (typeof v === "number" && Number.isFinite(v)) {
-    // heuristikk: < 1e11 => seconds, ellers ms
+    // heuristic: < 1e11 => seconds, otherwise ms
     return v < 1e11 ? Math.round(v * 1000) : Math.round(v);
   }
 
@@ -139,7 +139,7 @@ function weatherBadge(
   src?: string | null
 ): { label: string; tone: "good" | "warn" | "neutral" } {
   const s = (src ?? "").trim();
-  if (!s) return { label: "ukjent", tone: "neutral" };
+  if (!s) return { label: "unknown", tone: "neutral" };
   if (isEra5(s)) return { label: "ERA5", tone: "good" };
   if (s.toLowerCase().includes("neutral")) return { label: "neutral", tone: "warn" };
   return { label: s, tone: "neutral" };
@@ -155,8 +155,8 @@ function minutesBetween(start?: string | number | null, end?: string | number | 
 
 function formatStartDateTime(start?: string | number | null): string {
   const t = toMillis(start);
-  if (t == null) return "Ukjent";
-  return new Date(t).toLocaleString("nb-NO", {
+  if (t == null) return "Unknown";
+  return new Date(t).toLocaleString("en-GB", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -168,7 +168,7 @@ function formatStartDateTime(start?: string | number | null): string {
 function formatEndTime(end?: string | number | null): string | null {
   const t = toMillis(end);
   if (t == null) return null;
-  return new Date(t).toLocaleTimeString("nb-NO", {
+  return new Date(t).toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -218,11 +218,11 @@ const DemoRidesPage: React.FC = () => {
         <section className="mb-8">
           <h1 className="text-4xl font-black tracking-tight text-slate-900 mb-3">Your Rides</h1>
           <p className="text-lg text-slate-600 font-medium max-w-2xl">
-            Demo-visning av dine økter (hardcoded data). Viser {rows.length} økt(er).
+            Demo view of your rides (hardcoded data). Showing {rows.length} session(s).
           </p>
           <div className="mt-3 inline-flex items-center gap-2 rounded-full border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50 px-4 py-1.5 shadow-sm">
             <span className="text-xs font-bold text-indigo-700">
-              Kilde: <span className="font-mono">demoRides.ts</span>
+              Source: <span className="font-mono">demoRides.ts</span>
             </span>
           </div>
         </section>
@@ -247,7 +247,7 @@ const DemoRidesPage: React.FC = () => {
 
                     <div className="flex flex-wrap items-center gap-3 text-sm">
                       <span className="text-slate-600 font-medium">
-                        📅 {new Date(`${r.date}T12:00:00`).toLocaleDateString("nb-NO")}
+                        📅 {new Date(`${r.date}T12:00:00`).toLocaleDateString("en-GB")}
                       </span>
                       <span className="text-slate-400">•</span>
                       <span className="capitalize text-indigo-600 font-bold">
@@ -377,7 +377,9 @@ const RealRidesPage: React.FC = () => {
     const raw = Array.isArray(rawAny) ? rawAny : normalizeSessionsList(rawAny);
     const typed = (raw ?? []) as SessionListItem[];
 
-    return [...typed].sort((a, b) => parseTime((b as any).start_time ?? null) - parseTime((a as any).start_time ?? null));
+    return [...typed].sort(
+      (a, b) => parseTime((b as any).start_time ?? null) - parseTime((a as any).start_time ?? null)
+    );
   }, [sessionsList]);
 
   // PATCH E2.C — expose the *rendered* list to window
@@ -401,7 +403,7 @@ const RealRidesPage: React.FC = () => {
         <div className="mx-auto max-w-5xl">
           <div className="rounded-2xl border-2 border-indigo-200 bg-white p-6 text-center shadow-lg">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-indigo-600 border-r-transparent"></div>
-            <p className="mt-4 text-lg font-bold text-slate-700">Laster økter…</p>
+            <p className="mt-4 text-lg font-bold text-slate-700">Loading rides…</p>
           </div>
         </div>
       </div>
@@ -420,7 +422,7 @@ const RealRidesPage: React.FC = () => {
             onClick={() => loadSessionsList()}
             className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-6 py-3 text-base font-bold text-slate-700 shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-lg"
           >
-            Prøv igjen
+            Try again
           </button>
         </div>
       </div>
@@ -433,12 +435,12 @@ const RealRidesPage: React.FC = () => {
         {/* Header */}
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
-            <h1 className="text-4xl font-black tracking-tight text-slate-900">Økter</h1>
-            <p className="text-lg text-slate-600 font-medium">Viser {rows.length} økt(er)</p>
+            <h1 className="text-4xl font-black tracking-tight text-slate-900">Rides</h1>
+            <p className="text-lg text-slate-600 font-medium">Showing {rows.length} session(s)</p>
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="inline-flex items-center gap-2 rounded-full border-2 border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm">
-                ui profile_version:{" "}
+                UI profile_version:{" "}
                 <span className="font-mono font-bold">{uiProfileVersion || "n/a"}</span>
               </span>
               <button
@@ -446,7 +448,7 @@ const RealRidesPage: React.FC = () => {
                 onClick={() => setShowDev((v) => !v)}
                 className="text-xs font-bold text-indigo-600 underline hover:text-indigo-700"
               >
-                {showDev ? "Skjul DEV" : "Vis DEV"}
+                {showDev ? "Hide DEV" : "Show DEV"}
               </button>
             </div>
           </div>
@@ -464,13 +466,13 @@ const RealRidesPage: React.FC = () => {
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
               />
             </svg>
-            Oppdater
+            Refresh
           </button>
         </header>
 
         {rows.length === 0 ? (
           <div className="rounded-2xl border-2 border-slate-200 bg-white p-8 text-center shadow-lg">
-            <p className="text-lg font-medium text-slate-600">Ingen økter funnet.</p>
+            <p className="text-lg font-medium text-slate-600">No rides found.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -480,7 +482,7 @@ const RealRidesPage: React.FC = () => {
 
               const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
-              // Time range: støtter både ISO og epoch (sek/ms)
+              // Time range: supports both ISO and epoch (sec/ms)
               const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
               const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
@@ -519,19 +521,19 @@ const RealRidesPage: React.FC = () => {
                       {/* Headline */}
                       <div className="flex flex-wrap items-center gap-3">
                         <div className="text-base font-black text-slate-900">{timeRange}</div>
-                        <Badge tone={wx.tone}>Vær: {wx.label}</Badge>
-                        <Badge tone="neutral">Profil: {(s as any).profile_label ?? "ukjent"}</Badge>
+                        <Badge tone={wx.tone}>Weather: {wx.label}</Badge>
+                        <Badge tone="neutral">Profile: {(s as any).profile_label ?? "unknown"}</Badge>
                       </div>
 
                       {/* Metrics */}
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-base">
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-600 font-medium">🚴 Km:</span>
+                          <span className="text-slate-600 font-medium">🚴 Distance:</span>
                           <span className="font-black text-slate-900 tabular-nums">{kmTxt}</span>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-600 font-medium">⏱️ Varighet:</span>
+                          <span className="text-slate-600 font-medium">⏱️ Duration:</span>
                           <span className="font-black text-slate-900 tabular-nums">{durTxt}</span>
                         </div>
 
@@ -607,7 +609,7 @@ const RealRidesPage: React.FC = () => {
                         }}
                         className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-3 text-sm font-black text-white shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
                       >
-                        Åpne
+                        Open
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>

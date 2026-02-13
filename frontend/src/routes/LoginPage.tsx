@@ -20,8 +20,8 @@ export default function LoginPage() {
         typeof (data as any)?.detail === "string"
           ? (data as any).detail
           : typeof (data as any)?.message === "string"
-            ? (data as any).message
-            : "";
+          ? (data as any).message
+          : "";
       return detail || "";
     } catch {
       return "";
@@ -46,15 +46,15 @@ export default function LoginPage() {
         const detail = await tryReadDetail(loginRes);
 
         if (loginRes.status === 401) {
-          setError(detail || "Feil e-post eller passord.");
+          setError(detail || "Incorrect email or password.");
           return;
         }
         if (loginRes.status === 400) {
-          setError(detail || "Ugyldig input. Sjekk e-post og passord.");
+          setError(detail || "Invalid input. Check email and password.");
           return;
         }
 
-        setError(detail || `Innlogging feilet (HTTP ${loginRes.status}).`);
+        setError(detail || `Login failed (HTTP ${loginRes.status}).`);
         return;
       }
 
@@ -66,8 +66,8 @@ export default function LoginPage() {
       if (!meRes.ok) {
         setError(
           meRes.status === 401
-            ? "Login feilet – session ble ikke etablert."
-            : `Kunne ikke verifisere session (HTTP ${meRes.status}).`
+            ? "Login failed – session was not established."
+            : `Could not verify session (HTTP ${meRes.status}).`
         );
         return;
       }
@@ -83,7 +83,8 @@ export default function LoginPage() {
         if (profRes.ok) {
           const data = (await profRes.json()) as any;
           const p = data?.profile;
-          const onboarded = !!p && typeof p === "object" && p.onboarded === true;
+          const onboarded =
+            !!p && typeof p === "object" && p.onboarded === true;
           next = onboarded ? "/dashboard" : "/onboarding";
         }
       } catch {
@@ -92,7 +93,7 @@ export default function LoginPage() {
 
       window.location.replace(next);
     } catch {
-      setError("Network error – kunne ikke kontakte serveren.");
+      setError("Network error – could not reach the server.");
     } finally {
       setSubmitting(false);
     }
@@ -105,7 +106,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div 
+    <div
       className="min-h-screen flex items-center justify-center px-4 py-12 relative overflow-hidden"
       style={{
         backgroundImage:
@@ -138,10 +139,10 @@ export default function LoginPage() {
           {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">
-              Velkommen tilbake
+              Welcome back
             </h1>
             <p className="text-sm text-slate-600 font-medium">
-              Logg inn for å fortsette analysen
+              Log in to continue your analysis
             </p>
           </div>
 
@@ -156,11 +157,11 @@ export default function LoginPage() {
           <div className="space-y-5">
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">
-                E-post
+                Email
               </label>
               <input
                 type="email"
-                placeholder="deg@epost.no"
+                placeholder="you@email.com"
                 className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-900 font-medium placeholder:text-slate-400 transition-all duration-200 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 focus:outline-none"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -171,7 +172,7 @@ export default function LoginPage() {
 
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">
-                Passord
+                Password
               </label>
               <input
                 type="password"
@@ -198,13 +199,25 @@ export default function LoginPage() {
               {submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                      fill="none"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
                   </svg>
-                  Logger inn...
+                  Logging in...
                 </span>
               ) : (
-                "Logg inn"
+                "Log in"
               )}
             </button>
           </div>
@@ -212,12 +225,12 @@ export default function LoginPage() {
           {/* Signup Link */}
           <div className="mt-6 pt-6 border-t-2 border-slate-200 text-center">
             <span className="text-sm text-slate-600 font-medium">
-              Har du ikke konto?{" "}
-              <Link 
-                className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors" 
+              Don’t have an account?{" "}
+              <Link
+                className="text-indigo-600 font-bold hover:text-indigo-700 hover:underline transition-colors"
                 to="/signup"
               >
-                Registrer deg
+                Sign up
               </Link>
             </span>
           </div>
@@ -229,10 +242,20 @@ export default function LoginPage() {
             to="/"
             className="inline-flex items-center gap-2 text-sm font-bold text-white/90 hover:text-white transition-colors group"
           >
-            <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            <svg
+              className="w-4 h-4 transition-transform group-hover:-translate-x-1"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
             </svg>
-            Tilbake til forsiden
+            Back to home
           </Link>
         </div>
       </div>
