@@ -74,6 +74,15 @@ export const useSessionStore = create<SessionState>((set, get) => {
   const runLoadSession = async (id: string, opts?: LoadSessionOpts): Promise<void> => {
     console.log("[sessionStore.loadSession] KALT med id:", id, "opts:", opts);
 
+    // ✅ CACHE CHECK: Skip re-fetch if already loaded (unless force)
+    const state = get();
+    const currentId = (state.currentSession as any)?.session_id || (state.currentSession as any)?.ride_id;
+
+    if (String(currentId) === String(id) && !opts?.forceRecompute && state.currentSession) {
+      console.log("[sessionStore] Using cached data for", id);
+      return; // Already loaded, don't re-fetch
+    }
+
     set({
       loadingSession: true,
       loading: true,
@@ -88,10 +97,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
     } catch (err: any) {
       // ✅ HOTFIX: Strava 429 er forventet – gi UI et "state-signal", ikke fatal feil
       if (isRateLimitedFromThrown(err)) {
-        console.warn(
-          "[sessionStore.loadSession] rate-limited (thrown):",
-          err?.detail ?? err
-        );
+        console.warn("[sessionStore.loadSession] rate-limited (thrown):", err?.detail ?? err);
         set({
           loadingSession: false,
           loading: false,
@@ -147,7 +153,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
 
     console.log(
       "[sessionStore.loadSession] OK – har session-data (source=",
-      result.source,
+      (result as any).source,
       ")"
     );
 
@@ -233,10 +239,7 @@ export const useSessionStore = create<SessionState>((set, get) => {
 
       try {
         const sessions = await fetchSessionsList();
-        console.log(
-          "[sessionStore.loadSessionsList] Ferdig – antall sessions:",
-          sessions.length
-        );
+        console.log("[sessionStore.loadSessionsList] Ferdig – antall sessions:", sessions.length);
         set({
           sessionsList: sessions,
           loadingList: false,
