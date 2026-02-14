@@ -695,11 +695,13 @@ const RealSessionView: React.FC = () => {
               onClick={() => {
                 const override = readLocalProfileOverride();
                 console.log("[SessionView] handleAnalyze override =", override);
-                console.log(
-                  "[SessionView] handleAnalyze rider_weight_kg =",
-                  override?.rider_weight_kg
-                );
-                void handleAnalyze();
+              console.log("[SessionView] handleAnalyze rider_weight_kg =",
+  override?.rider_weight_kg
+);
+
+// ✅ IMPORTANT: do NOT auto-analyze here.
+// Analyze must only happen on explicit user action (button click).
+// void handleAnalyze(); 
               }}
               disabled={analyzing || locked}
               className="ml-2 inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
