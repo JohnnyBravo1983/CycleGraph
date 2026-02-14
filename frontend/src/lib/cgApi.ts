@@ -64,7 +64,9 @@ export type ProfileSaveResp = {
   [k: string]: unknown;
 };
 
-export type ProfileSaveBody = Record<string, unknown> | { profile: Record<string, unknown> };
+export type ProfileSaveBody =
+  | Record<string, unknown>
+  | { profile: Record<string, unknown> };
 
 // ✅ PATCH: auth body
 export type AuthBody = {
@@ -78,10 +80,15 @@ export type AuthBody = {
   age?: number;
 };
 
+// ✅ Prod SSOT: dette domenet skal alltid brukes i prod
+const PROD_API_BASE = "https://api.cyclegraph.app";
+
+// ✅ PROD-SAFE BASE:
+// Hvis Vercel env er tomt/feil, må vi aldri falle tilbake til localhost i prod.
 const BASE =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
   (import.meta.env.VITE_BACKEND_BASE as string | undefined) ??
-  "http://localhost:5175";
+  (import.meta.env.PROD ? PROD_API_BASE : "http://localhost:5175");
 
 /** Fjern trailing slash for robust sammensetting av URL-er */
 function normalizeBase(url?: string): string | undefined {
@@ -105,30 +112,32 @@ function buildApiUrl(base: string, pathStartingWithApi: string): URL {
     effectivePath = pathStartingWithApi.replace(/^\/api/, "");
   }
 
-  const fullPath = effectivePath.startsWith("/") ? effectivePath : "/" + effectivePath;
+  const fullPath = effectivePath.startsWith("/")
+    ? effectivePath
+    : "/" + effectivePath;
   return new URL(cleanBase + fullPath);
 }
 
 /**
  * ✅ FIX:
- * Bruk BACKEND BASE direkte (5175) i dev/test for å unngå "same-origin uten proxy".
- * I prod bruker vi VITE_BACKEND_URL/BASE eller default localhost.
+ * Prod må aldri bruke localhost.
+ * Dev/test kan bruke BASE (typisk localhost).
  */
 function baseUrl(): string {
+  if (import.meta.env.PROD) return PROD_API_BASE;
   const b = normalizeBase(BASE) ?? "http://localhost:5175";
   return b;
 }
 
 /**
- * ✅ PATCH S2.5B-IMPORT-BASEURL:
- * Én SSOT for absolutt URL til backend API.
- * - Dev: BASE (typisk http://localhost:5175)
- * - Prod: kan være https://api.cyclegraph.app (via env), ellers fallback.
+ * ✅ SSOT for absolutt URL til backend API.
+ * - Dev: VITE_BACKEND_URL (typisk http://localhost:5175)
+ * - Prod: alltid PROD_API_BASE
  */
 function apiUrl(pathStartingWithApi: string): string {
   const base = import.meta.env.PROD
-    ? "https://api.cyclegraph.app"
-    : ((import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175");
+    ? PROD_API_BASE
+    : (import.meta.env.VITE_BACKEND_URL as string) || "http://localhost:5175";
   return base + pathStartingWithApi;
 }
 
@@ -138,7 +147,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function extractErrorMessage(json: unknown): unknown {
   if (!isRecord(json)) return null;
-  return (json as any).detail ?? (json as any).reason ?? (json as any).error ?? (json as any).message ?? null;
+  return (
+    (json as any).detail ??
+    (json as any).reason ??
+    (json as any).error ??
+    (json as any).message ??
+    null
+  );
 }
 
 /**
@@ -147,8 +162,12 @@ function extractErrorMessage(json: unknown): unknown {
 function normalizeSessionRow(r: any): SessionListItem {
   const pw =
     (typeof r?.precision_watt_avg === "number" ? r.precision_watt_avg : null) ??
-    (typeof r?.metrics?.precision_watt_avg === "number" ? r.metrics.precision_watt_avg : null) ??
-    (typeof r?.metrics?.precision_watt_pedal === "number" ? r.metrics.precision_watt_pedal : null);
+    (typeof r?.metrics?.precision_watt_avg === "number"
+      ? r.metrics.precision_watt_avg
+      : null) ??
+    (typeof r?.metrics?.precision_watt_pedal === "number"
+      ? r.metrics.precision_watt_pedal
+      : null);
 
   return {
     ...(isRecord(r) ? (r as Record<string, unknown>) : {}),
@@ -196,7 +215,10 @@ class ApiError extends Error {
   }
 }
 
-async function cgFetchJson<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+async function cgFetchJson<T = unknown>(
+  path: string,
+  init?: RequestInit
+): Promise<T> {
   const url = apiUrl(path);
 
   const res = await fetch(url, {
@@ -321,16 +343,21 @@ export const cgApi = {
   },
 
   async importRide(rid: string): Promise<ImportResp> {
-    return cgFetchJson<ImportResp>(`/api/strava/import/${encodeURIComponent(rid)}`, {
-      method: "POST",
-      body: JSON.stringify({}), // backend forventer JSON
-    });
+    return cgFetchJson<ImportResp>(
+      `/api/strava/import/${encodeURIComponent(rid)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({}), // backend forventer JSON
+      }
+    );
   },
 
   // ✅ robust list/all: støtter array eller {value: [...], Count: n}
   // ✅ PATCH A1: also normalizes precision_watt_avg onto top-level for UI SSOT
   async listAll(): Promise<SessionListItem[]> {
-    const json = await cgFetchJson<unknown>("/api/sessions/list/all", { method: "GET" });
+    const json = await cgFetchJson<unknown>("/api/sessions/list/all", {
+      method: "GET",
+    });
     return normalizeListAll(json);
   },
 
@@ -345,4 +372,4 @@ export const cgApi = {
 };
 
 // (Valgfritt) eksportér ApiError hvis du vil mappe 409/400 i UI-lag
-export { ApiError };
+export { ApiError, buildApiUrl };
