@@ -402,12 +402,18 @@ export async function fetchSession(
     };
   }
 
-  // 3) LIVE-kall mot backend (analyze)
+    // 3) LIVE-kall mot backend (analyze)
   const url = buildApiUrl(base, `/api/sessions/${encodeURIComponent(id)}/analyze`);
+
+  // ✅ Default: do NOT recompute on view. Ask backend to return cached if present.
+  if (!opts?.forceRecompute) {
+    url.searchParams.set("use_cached", "1");
+  }
 
   if (opts?.forceRecompute) {
     url.searchParams.set("force_recompute", "1");
   }
+
 
   console.log("[API] fetchSession (LIVE) →", url.toString());
 
