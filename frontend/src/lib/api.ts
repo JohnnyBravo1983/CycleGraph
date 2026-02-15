@@ -413,11 +413,11 @@ export async function fetchSession(
 
   try {
     // ✅ PATCH: backend forventer payload med nøkkel "profile"
-    // Prioritet: opts.profileOverride > localStorage override
+    // Kun send profile når vi eksplisitt ber om det (opts.profileOverride)
     const profile =
-      (opts?.profileOverride as Record<string, any> | undefined) ??
-      (getLocalProfileOverride() as unknown as Record<string, any> | null) ??
-      null;
+  (opts?.profileOverride as Record<string, any> | undefined) ?? null;
+
+
 
     const bodyObj = profile ? { profile } : {};
 
