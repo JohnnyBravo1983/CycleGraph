@@ -3811,6 +3811,7 @@ async def analyze_session(
     user_id: str = Depends(require_auth),  # <-- NY: Bruker auth guard
     no_weather: bool = Query(False),
     force_recompute: bool = Query(False),
+    use_cached: bool = Query(False),  # ✅ NEW
     debug: int = Query(0),
     self_heal: bool = Query(False),
 ):
@@ -3826,6 +3827,53 @@ async def analyze_session(
     # ✅ Owner-protection (SSOT) – samme som GET /{sid}
     _assert_session_owned(base_dir, user_id, sid)
     # ==================== END PATCH 4 ====================
+
+    # ==================== PATCH: CACHED EARLY RETURN (NO COMPUTE) ====================
+    # Goal: prevent implicit recompute when UI is just viewing a historical session.
+    # If use_cached=1 and NOT force_recompute, return persisted SSOT report if it exists.
+    if use_cached and not force_recompute:
+        try:
+            import json  # local import = safe regardless of file import order
+
+            from server.user_state import (
+                maybe_bootstrap_demo_sessions,
+                state_root,
+            )
+
+            uid = str(user_id).strip()
+            sid_s = str(sid).strip()
+
+            # (Demo) ensure demo sessions exist in index (same behavior as GET /{sid})
+            maybe_bootstrap_demo_sessions(base_dir, uid)
+
+            root = state_root()
+            ssot_result_path = root / "users" / uid / "results" / f"result_{sid_s}.json"
+            logs_result_path = (
+                (root.parent / "logs" / "results" / f"result_{sid_s}.json")
+                if (root.name == "state")
+                else None
+            )
+
+            doc = None
+            source = None
+
+            if ssot_result_path.exists():
+                doc = json.loads(ssot_result_path.read_text(encoding="utf-8-sig"))
+                source = "state/users/*/results"
+            elif logs_result_path is not None and logs_result_path.exists():
+                doc = json.loads(logs_result_path.read_text(encoding="utf-8-sig"))
+                source = "logs/results"
+
+            if isinstance(doc, dict):
+                # Hint (optional): won't break anything
+                doc.setdefault("analysis_source", source or "cached")
+                print(f"[SVR] cached-return sid={sid_s} source={source}", file=sys.stderr)
+                return _ensure_contract_shape(doc)
+
+        except Exception as e:
+            print(f"[SVR] cached-return failed sid={sid}: {e!r}", file=sys.stderr)
+            # fall through to normal analyze_session_core()
+    # ==================== END PATCH: CACHED EARLY RETURN ====================
 
     # ==================== PATCH C: WRAPPER FOR ANALYZE_SESSION_CORE ====================
     # Les request body og kall core-funksjonen

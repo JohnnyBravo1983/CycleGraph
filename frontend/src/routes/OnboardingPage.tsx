@@ -1,9 +1,8 @@
 // frontend/src/routes/OnboardingPage.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useProfileStore } from "../state/profileStore";
 import { useSessionStore } from "../state/sessionStore";
-import ProfileForm from "../components/ProfileForm";
 import { cgApi, type StatusResp } from "../lib/cgApi";
 
 function getErrMsg(err: unknown): string {
@@ -26,67 +25,100 @@ function getTokenState(st: StatusResp | null): TokenState {
   return "valid";
 }
 
-// ---------- helpers (eslint-safe, no any) ----------
+// ---------- helpers (eslint-safe) ----------
+type AnyRec = Record<string, any>;
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
-
+function isObj(v: unknown): v is AnyRec {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
 function getNum(obj: unknown, key: string): number | null {
   if (!isRecord(obj)) return null;
   const v = (obj as Record<string, unknown>)[key];
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
-
-function getStr(obj: unknown, key: string): string | null {
-  if (!isRecord(obj)) return null;
-  const v = (obj as Record<string, unknown>)[key];
-  return typeof v === "string" ? v : null;
+function resolveKey(draft: AnyRec, preferred: string, fallbacks: string[]): string {
+  if (preferred in draft) return preferred;
+  for (const k of fallbacks) if (k in draft) return k;
+  return preferred;
+}
+function numOrEmpty(v: unknown): string {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return v;
+  return "";
+}
+function strOrEmpty(v: unknown): string {
+  return typeof v === "string" ? v : "";
 }
 
-// ✅ Pick newest session = max(start_time), else fallback to highest ride_id
-function pickNewestSessionId(items: unknown[]): string | null {
-  let bestByTime: { sid: string; t: number } | null = null;
-  let bestByNumericId: { sid: string; n: number } | null = null;
-
-  for (const it of items) {
-    if (!isRecord(it)) continue;
-
-    const sidRaw = (it as any).session_id ?? (it as any).ride_id;
-    const sid =
-      typeof sidRaw === "string" || typeof sidRaw === "number" ? String(sidRaw) : "";
-    if (!sid) continue;
-
-    const st = getStr(it, "start_time");
-    if (st && st.trim()) {
-      const ms = Date.parse(st);
-      if (!Number.isNaN(ms)) {
-        if (!bestByTime || ms > bestByTime.t) bestByTime = { sid, t: ms };
-      }
-    }
-
-    const idRaw = (it as any).ride_id ?? (it as any).session_id;
-    const idStr =
-      typeof idRaw === "string" || typeof idRaw === "number" ? String(idRaw).trim() : "";
-    if (idStr) {
-      const digits = idStr.replace(/[^\d]/g, "");
-      if (digits) {
-        const n = Number(digits);
-        if (Number.isFinite(n)) {
-          if (!bestByNumericId || n > bestByNumericId.n) bestByNumericId = { sid, n };
-        }
-      }
-    }
-  }
-
-  return bestByTime?.sid ?? bestByNumericId?.sid ?? null;
+function Tooltip({ text }: { text: string }) {
+  return (
+    <span className="relative inline-flex items-center">
+      <span className="group inline-flex items-center">
+        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-white/5 text-xs text-white/80">
+          i
+        </span>
+        <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-white/10 bg-slate-900/95 p-3 text-xs text-white/90 shadow-lg group-hover:block">
+          {text}
+        </span>
+      </span>
+    </span>
+  );
 }
+
+function SectionCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
+      <div className="mb-3">
+        <div className="text-sm font-semibold text-white/95">{title}</div>
+        {subtitle ? <div className="mt-1 text-xs text-white/60">{subtitle}</div> : null}
+      </div>
+      <div className="flex flex-col gap-3">{children}</div>
+    </div>
+  );
+}
+
+function FieldRow({
+  label,
+  required,
+  right,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-white/80">
+          {label} {required ? <span className="text-white/60">*</span> : null}
+        </label>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const inputBase =
+  "w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/10";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const { draft, loading, error, init, setDraft, applyDefaults, commit } = useProfileStore();
-
   const { loadSession } = useSessionStore();
 
   // Strava status UI state
@@ -96,6 +128,9 @@ export default function OnboardingPage() {
 
   // prevent double submit
   const [finishBusy, setFinishBusy] = useState(false);
+
+  // Advanced toggle (keep onboarding non-intimidating)
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     init();
@@ -119,6 +154,74 @@ export default function OnboardingPage() {
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, location.search]);
+
+  // ---------- draft + key mapping ----------
+  const d = useMemo(() => (isObj(draft) ? (draft as AnyRec) : ({} as AnyRec)), [draft]);
+
+  const K = useMemo(() => {
+    return {
+      // Rider
+      weight: resolveKey(d, "rider_weight_kg", ["weight_kg", "weightKg", "weight"]),
+      gender: resolveKey(d, "gender", ["sex"]),
+      age: resolveKey(d, "age", ["age_years", "ageYears"]),
+      country: resolveKey(d, "country", ["country_code", "countryCode"]),
+      city: resolveKey(d, "city", ["town"]),
+
+      // Bike
+      tireWidth: resolveKey(d, "tire_width_mm", ["tireWidthMm", "tire_width", "tireWidth"]),
+
+      // Aero
+      cda: resolveKey(d, "cda", ["CdA", "aero_cda", "aeroCdA"]),
+
+      // Advanced
+      crr: resolveKey(d, "crr", ["Crr", "rolling_crr", "rollingCrr"]),
+      crankEff: resolveKey(d, "crank_efficiency", [
+        "crankEfficiency",
+        "drivetrain_efficiency",
+        "drivetrainEfficiency",
+      ]),
+    };
+  }, [d]);
+
+  function update(key: string, value: any) {
+    setDraft({ ...d, [key]: value });
+  }
+
+  // ✅ Smart defaults (first-time only): only fill missing values once
+  const defaultsAppliedRef = useRef(false);
+  useEffect(() => {
+    if (defaultsAppliedRef.current) return;
+    if (!isObj(draft)) return; // wait until draft exists
+
+    const next = { ...(draft as AnyRec) };
+
+    const has = (k: string) => {
+      const v = next[k];
+      return v !== null && v !== undefined && !(typeof v === "string" && v.trim() === "");
+    };
+
+    let changed = false;
+
+    if (!has(K.cda)) {
+      next[K.cda] = 0.3;
+      changed = true;
+    }
+    if (!has(K.crr)) {
+      next[K.crr] = 0.004;
+      changed = true;
+    }
+    if (!has(K.crankEff)) {
+      next[K.crankEff] = 0.96;
+      changed = true;
+    }
+    if (!has(K.tireWidth)) {
+      next[K.tireWidth] = 28;
+      changed = true;
+    }
+
+    if (changed) setDraft(next);
+    defaultsAppliedRef.current = true;
+  }, [draft, setDraft, K.cda, K.crr, K.crankEff, K.tireWidth]);
 
   // ✅ PATCH 1B: After “Finish” → re-analyze ALL rides from listAll() + refresh list before navigation
   const onFinish = async () => {
@@ -161,7 +264,7 @@ export default function OnboardingPage() {
             : "";
           const sb = isRecord(b)
             ? typeof (b as any).start_time === "string"
-              ? (b as any).start_time
+              ? (a as any).start_time
               : ""
             : "";
           const ta = Date.parse(sa) || 0;
@@ -237,33 +340,177 @@ export default function OnboardingPage() {
   const hasTokens = st?.has_tokens === true;
 
   return (
-    <div className="max-w-xl mx-auto flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Welcome to CycleGraph</h1>
+    <div className="max-w-2xl mx-auto flex flex-col gap-4 p-4">
+      <h1 className="text-2xl font-semibold tracking-tight text-white/95">
+        Welcome to CycleGraph
+      </h1>
 
-      <p className="text-slate-600">
+      <p className="text-sm text-white/60">
         Before we begin, we need a rough baseline for your profile. You can adjust this later.
       </p>
 
       {error ? <div className="text-red-600 text-sm">{error}</div> : null}
 
-      <ProfileForm value={draft} onChange={setDraft} disabled={loading} />
+      {/* Profile baseline form (aligned with /profile) */}
+      <SectionCard title="Rider Info" subtitle="Weight is the most important input.">
+        <FieldRow label="Weight (kg)" required>
+          <input
+            className={inputBase}
+            inputMode="decimal"
+            placeholder="e.g. 78"
+            value={numOrEmpty(d[K.weight])}
+            onChange={(e) => update(K.weight, e.target.value === "" ? null : Number(e.target.value))}
+          />
+          <div className="text-[11px] text-white/40">Required for accurate FTP modeling.</div>
+        </FieldRow>
 
-      {/* Strava Connect section */}
-      <div className="rounded-lg border bg-white p-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FieldRow label="Gender">
+            <select
+              className={inputBase}
+              value={strOrEmpty(d[K.gender])}
+              onChange={(e) => update(K.gender, e.target.value)}
+            >
+              <option value="">Prefer not to say</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="other">Other</option>
+            </select>
+          </FieldRow>
+
+          <FieldRow label="Age">
+            <input
+              className={inputBase}
+              inputMode="numeric"
+              placeholder="e.g. 41"
+              value={numOrEmpty(d[K.age])}
+              onChange={(e) => update(K.age, e.target.value === "" ? null : Number(e.target.value))}
+            />
+          </FieldRow>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FieldRow label="Country">
+            <input
+              className={inputBase}
+              placeholder="e.g. Norway"
+              value={strOrEmpty(d[K.country])}
+              onChange={(e) => update(K.country, e.target.value)}
+            />
+          </FieldRow>
+          <FieldRow label="City">
+            <input
+              className={inputBase}
+              placeholder="e.g. Oslo"
+              value={strOrEmpty(d[K.city])}
+              onChange={(e) => update(K.city, e.target.value)}
+            />
+          </FieldRow>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Bike Setup" subtitle="Used to estimate rolling losses and speed.">
+        <FieldRow label="Tire width (mm)">
+          <input
+            className={inputBase}
+            inputMode="numeric"
+            placeholder="e.g. 28"
+            value={numOrEmpty(d[K.tireWidth])}
+            onChange={(e) =>
+              update(K.tireWidth, e.target.value === "" ? null : Number(e.target.value))
+            }
+          />
+        </FieldRow>
+      </SectionCard>
+
+      <SectionCard title="Aerodynamics" subtitle="Used to estimate aerodynamic drag.">
+        <FieldRow
+          label="CdA"
+          right={
+            <Tooltip text="Aerodynamic drag coefficient (0.250–0.350, lower = faster). Affects FTP modeling." />
+          }
+        >
+          <input
+            className={inputBase}
+            inputMode="decimal"
+            placeholder="e.g. 0.300"
+            value={numOrEmpty(d[K.cda])}
+            onChange={(e) => update(K.cda, e.target.value === "" ? null : Number(e.target.value))}
+          />
+        </FieldRow>
+      </SectionCard>
+
+      {/* Advanced */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((s) => !s)}
+          className="w-full text-left"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-white/95">Advanced settings</div>
+              <div className="mt-1 text-xs text-white/60">
+                Optional — you can leave these as defaults.
+              </div>
+            </div>
+            <div className="text-xs text-white/70">{showAdvanced ? "Hide" : "Show"}</div>
+          </div>
+        </button>
+
+        {showAdvanced ? (
+          <div className="mt-4 flex flex-col gap-3">
+            <FieldRow
+              label="Crr"
+              right={
+                <Tooltip text="Rolling resistance (0.0030–0.0050, lower = faster). Affects FTP modeling." />
+              }
+            >
+              <input
+                className={inputBase}
+                inputMode="decimal"
+                placeholder="e.g. 0.0040"
+                value={numOrEmpty(d[K.crr])}
+                onChange={(e) => update(K.crr, e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </FieldRow>
+
+            <FieldRow
+              label="Crank efficiency"
+              right={
+                <Tooltip text="Power transfer efficiency (typically 96%). Affects FTP modeling." />
+              }
+            >
+              <input
+                className={inputBase}
+                inputMode="decimal"
+                placeholder="e.g. 0.96"
+                value={numOrEmpty(d[K.crankEff])}
+                onChange={(e) =>
+                  update(K.crankEff, e.target.value === "" ? null : Number(e.target.value))
+                }
+              />
+            </FieldRow>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Strava Connect section (kept intact, only visual style aligned lightly) */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-semibold">Connect Strava</h2>
-            <p className="text-sm text-slate-600 mt-1">
+            <h2 className="font-semibold text-white/95">Connect Strava</h2>
+            <p className="text-sm text-white/60 mt-1">
               To import rides and build your first analysis, we need access to Strava.
             </p>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-white/40 mt-1">
               Backend: <span className="font-mono">{cgApi.baseUrl()}</span>
             </p>
           </div>
 
           <div className="shrink-0">
             {tokenValid ? (
-              <div className="px-3 py-2 rounded border text-sm text-slate-700 bg-slate-50">
+              <div className="px-3 py-2 rounded-xl border border-white/10 text-sm text-white/80 bg-slate-950/30">
                 Strava connected ✅
               </div>
             ) : (
@@ -271,7 +518,7 @@ export default function OnboardingPage() {
                 type="button"
                 onClick={connectStrava}
                 disabled={stBusy}
-                className="px-3 py-2 rounded bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
+                className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
                 title={tokenExpired ? "Token expired — connect again" : "Connect Strava"}
               >
                 {stBusy ? "Checking…" : tokenExpired ? "Reconnect Strava" : "Connect Strava"}
@@ -281,10 +528,9 @@ export default function OnboardingPage() {
         </div>
 
         <div className="mt-3 text-sm">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-white/80">
             <div>
-              has_tokens:{" "}
-              <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
+              has_tokens: <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
             </div>
             <div>
               expires_in_sec:{" "}
@@ -296,14 +542,14 @@ export default function OnboardingPage() {
           </div>
 
           {tokenExpired ? (
-            <div className="mt-2 text-xs text-amber-700">
+            <div className="mt-2 text-xs text-amber-300/90">
               Your Strava token has expired. Click <b>Reconnect Strava</b>, or import a ride later
               from the Dashboard to trigger a refresh.
             </div>
           ) : null}
 
           {!hasTokens && st ? (
-            <div className="mt-2 text-xs text-slate-600">
+            <div className="mt-2 text-xs text-white/60">
               You haven’t connected Strava yet. Click{" "}
               <span className="font-semibold">Connect Strava</span> and complete the login — the
               status will update automatically when you return.
@@ -311,17 +557,17 @@ export default function OnboardingPage() {
           ) : null}
 
           {stErr ? (
-            <div className="mt-2 text-xs text-red-600 whitespace-pre-wrap">{stErr}</div>
+            <div className="mt-2 text-xs text-red-400 whitespace-pre-wrap">{stErr}</div>
           ) : null}
         </div>
       </div>
 
-      <div className="flex gap-3 pt-2">
+      <div className="flex flex-wrap gap-3 pt-2">
         <button
           type="button"
           onClick={applyDefaults}
           disabled={loading}
-          className="px-4 py-2 rounded border"
+          className="px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
         >
           Use default values
         </button>
@@ -330,7 +576,7 @@ export default function OnboardingPage() {
           type="button"
           onClick={onFinish}
           disabled={loading || finishBusy}
-          className="px-4 py-2 rounded bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
+          className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
         >
           {finishBusy ? "Finishing…" : "Finish and continue"}
         </button>

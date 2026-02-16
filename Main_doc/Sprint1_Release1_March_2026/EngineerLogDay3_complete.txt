@@ -1,0 +1,87 @@
+🛠 Engineer Worklog – Day 3
+
+Sprint: Profile Isolation / Deterministic History
+Date: Thursday, Feb 13
+Focus: Stop implicit re-analyze and enforce SSOT determinism
+
+🎯 Objective
+Ensure historical sessions remain deterministic and are not implicitly recomputed when profile values (e.g. rider_weight_kg) are changed.
+
+Goal:
+No recompute on session view
+No recompute on profile save
+Explicit recompute only via Analyze button
+
+🔍 Problem
+Changing profile weight caused all historical rides to change in UI.
+
+Findings:
+Backend result files were NOT modified (MD5 + mtime unchanged)
+profile_used snapshot inside result JSON was correct
+UI values still changed
+Root cause:
+POST /api/sessions/{sid}/analyze was being triggered implicitly during session load.
+That endpoint defaulted to compute-path if not explicitly controlled.
+So view-load could recompute with new profile values.
+
+✅ Changes Implemented
+1️⃣ Backend – sessions.py
+Added support for:
+use_cached=1
+New behavior:
+
+If use_cached=1 AND force_recompute != 1
+→ Return cached SSOT result
+→ Skip compute
+→ No persistence
+→ Deterministic return
+
+This converts analyze endpoint into a safe read-path when explicitly requested.
+
+2️⃣ Frontend – api.ts (fetchSession)
+
+Added default behavior:
+
+if (!opts?.forceRecompute) {
+  url.searchParams.set("use_cached", "1");
+}
+
+Result:
+Scenario	Behavior
+Open old session	Cached result returned
+Click Analyze	force_recompute=1 → compute
+New session without cache	Compute fallback
+All session loading now defaults to cached path.
+
+🧠 Architectural Outcome
+We maintain a single canonical endpoint:
+POST /api/sessions/{sid}/analyze
+Behavior controlled via query flags:
+use_cached
+force_recompute
+This keeps system simple and avoids duplicate endpoints.
+System is now:
+Deterministic
+SSOT compliant
+Explicit recompute only
+No implicit analyze during view
+⚠ Guardrails Established
+All session loading must go via fetchSession()
+No direct fetch("/api/sessions/.../analyze") calls
+Analyze button must explicitly set force_recompute=1
+Future profile_version auto-reanalyze must be explicit and controlled
+
+🧪 Verification
+Changed rider weight
+Opened old session → values unchanged
+Clicked Analyze → values updated
+Opened different old session → stable
+No implicit recompute observed.
+
+📌 Status
+✔ Implicit re-analyze eliminated
+✔ Historical sessions frozen
+✔ Recompute controlled and explicit
+✔ System stable
+
+Sprint core blocker resolved.

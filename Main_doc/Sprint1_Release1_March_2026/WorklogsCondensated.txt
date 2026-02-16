@@ -68,3 +68,41 @@ frontend/src/routes/DashboardPage.tsx
 frontend/src/components/Profile/ProfilePeekCard.tsx
 frontend/src/api/profile.ts
 Backend: unchanged
+
+
+###🛠 Engineer Worklog – Day 3 (Condensed)
+Sprint: Profile Isolation
+Focus: Eliminate implicit re-analyze / enforce deterministic history
+
+🎯 Objective
+Prevent historical sessions from being recomputed when profile values change. Ensure deterministic SSOT behavior.
+
+🔍 Root Cause
+Session view implicitly triggered:
+POST /api/sessions/{sid}/analyze
+Without explicit flags, backend entered compute-path, causing historical rides to reflect updated profile values.
+Backend result files were not corrupted, but view-load triggered recompute logic.
+
+✅ Solution Implemented
+Backend
+Added use_cached=1 support in /api/sessions/{sid}/analyze
+If use_cached=1 and no force_recompute, return cached result only
+No compute, no persistence
+
+Frontend
+fetchSession() now defaults to use_cached=1
+Analyze button explicitly sets force_recompute=1
+
+🧠 Resulting Behavior
+Action	Behavior
+Open historical session	Cached result only
+Change profile	No impact on old sessions
+Click Analyze	Explicit recompute
+New session without cache	Compute once
+System is now deterministic and recompute is fully controlled.
+
+🏁 Status
+Implicit re-analyze eliminated.
+Historical sessions are frozen.
+Recompute is explicit only.
+Core sprint blocker resolved.
