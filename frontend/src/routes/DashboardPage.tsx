@@ -573,43 +573,41 @@ function ProfilePeekCard() {
 
             {/* FTP Tooltip */}
             {hoveredParam === "ftp" && (
-              <div className="absolute z-[100] bottom-full left-1/2 -translate-x-1/2 mb-3 w-72 p-3 bg-slate-900 text-white text-[11px] rounded-lg shadow-2xl">
+              <div className="absolute z-[100] right-full top-0 mr-2 w-72 p-3 bg-slate-900 text-white text-[11px] rounded-lg shadow-2xl">
                 <div className="font-bold mb-2 text-xs text-emerald-300">
                   Functional Threshold Power (FTP)
                 </div>
                 <p className="leading-relaxed mb-2 text-[10px]">
-                  Your sustainable power output for ~1 hour. Defines your cycling fitness level.
+                  Your sustainable power for ~1 hour. Defines fitness level.
                 </p>
 
                 <div className="bg-slate-800 rounded p-2 mb-2">
                   <div className="font-semibold mb-1.5 text-[10px] text-emerald-300">FTP levels:</div>
-                  <div className="space-y-0.5 text-[10px] leading-relaxed mb-2">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] mb-2">
                     <div><span className="font-semibold text-white">Beginner:</span> 100-150W</div>
                     <div><span className="font-semibold text-white">Recreational:</span> 150-200W</div>
-                    <div><span className="font-semibold text-white">Serious amateur:</span> 200-280W</div>
-                    <div><span className="font-semibold text-white">Elite amateur:</span> 280-350W</div>
-                    <div><span className="font-semibold text-white">Pro cyclist:</span> 350-420W</div>
+                    <div><span className="font-semibold text-white">Amateur:</span> 200-280W</div>
+                    <div><span className="font-semibold text-white">Elite:</span> 280-350W</div>
+                    <div className="col-span-2"><span className="font-semibold text-white">Pro:</span> 350-420W</div>
                   </div>
                   <div className="pt-2 border-t border-slate-700 text-[10px] leading-relaxed">
-                    <div className="mb-1"><span className="text-yellow-300">💡</span> <span className="font-semibold text-white">FTP = fitness tracker.</span></div>
-                    <div className="text-slate-300">Speed (especially uphill) = W/kg (FTP ÷ weight). Lower weight = faster at same FTP.</div>
+                    <div className="mb-1"><span className="text-yellow-300">💡</span> <span className="font-semibold text-white">FTP = fitness tracker</span></div>
+                    <div className="text-slate-300">Speed (uphill) = W/kg (FTP ÷ weight). Lose weight = faster.</div>
                   </div>
                 </div>
 
                 <div className="bg-slate-800 rounded p-2 mb-2">
                   <div className="font-semibold mb-1 text-[10px] text-emerald-300">Improve FTP:</div>
                   <div className="text-[10px] leading-relaxed space-y-0.5">
-                    <div>• Intervals & tempo rides</div>
-                    <div>• Consistent training (10-20W/year gain)</div>
-                    <div>• Lose weight (improves W/kg)</div>
+                    <div>• Intervals & tempo • 10-20W/year • Lose weight</div>
                   </div>
                 </div>
 
                 <div className="text-[9px] text-slate-300">
-                  ✓ Auto-calculated from your rides using physics modeling
+                  ✓ Auto-calculated from rides
                 </div>
-                {/* Arrow pointing down */}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-[-1px] w-2 h-2 bg-slate-900 rotate-45"></div>
+                {/* Arrow pointing right */}
+                <div className="absolute left-full top-4 ml-[-1px] w-2 h-2 bg-slate-900 rotate-45"></div>
               </div>
             )}
           </div>
