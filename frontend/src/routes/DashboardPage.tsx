@@ -573,7 +573,7 @@ function ProfilePeekCard() {
 
             {/* FTP Tooltip */}
             {hoveredParam === "ftp" && (
-              <div className="absolute z-50 top-full left-1/2 -translate-x-1/2 mt-2 w-80 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+              <div className="absolute z-50 top-full left-1/2 -translate-x-1/2 mt-2 w-80 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl max-h-[500px] overflow-y-auto">
                 <div className="font-bold mb-2 text-sm text-emerald-300">
                   Functional Threshold Power (FTP)
                 </div>
@@ -582,9 +582,9 @@ function ProfilePeekCard() {
                   fitness level.
                 </p>
 
-                <div className="bg-slate-800 rounded p-3 mb-3 space-y-2">
+                <div className="bg-slate-800 rounded p-3 mb-3">
                   <div className="font-semibold mb-2 text-emerald-300">Real-world examples (FTP):</div>
-                  <div className="space-y-1.5 text-[11px] leading-relaxed">
+                  <div className="space-y-1.5 text-[11px] leading-relaxed mb-3">
                     <div>
                       <span className="font-semibold text-white">Beginner:</span> 100-150W
                     </div>
@@ -601,8 +601,9 @@ function ProfilePeekCard() {
                       <span className="font-semibold text-white">Pro cyclist:</span> 350-420W
                     </div>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-slate-700 text-[11px] leading-relaxed">
-                    <span className="text-yellow-300">💡</span> <span className="font-semibold text-white">FTP tracks your fitness progression reliably.</span> However, your speed (especially uphill) depends on W/kg ratio (FTP ÷ weight). Same FTP = better speed if you lose weight.
+                  <div className="pt-3 border-t border-slate-700 text-[11px] leading-relaxed">
+                    <div className="mb-1"><span className="text-yellow-300">💡</span> <span className="font-semibold text-white">FTP tracks your fitness progression reliably.</span></div>
+                    <div className="text-slate-300">However, your speed (especially uphill) depends on W/kg ratio (FTP ÷ weight). Same FTP = better speed if you lose weight.</div>
                   </div>
                 </div>
 
