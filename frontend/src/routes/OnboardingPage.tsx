@@ -45,111 +45,12 @@ function resolveKey(draft: AnyRec, preferred: string, fallbacks: string[]): stri
 }
 function numOrEmpty(v: unknown): string {
   if (typeof v === "number" && Number.isFinite(v)) return String(v);
-  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return v;
+  if (typeof v === "string" && v.trim() !== "") return v;
   return "";
 }
 
-// ✅ Light theme components
-function Tooltip({ text }: { text: string }) {
-  return (
-    <span className="relative inline-flex items-center">
-      <span className="group inline-flex items-center">
-        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-xs text-slate-700">
-          i
-        </span>
-        <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg group-hover:block">
-          {text}
-        </span>
-      </span>
-    </span>
-  );
-}
-
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="mb-3">
-        <div className="text-sm font-semibold text-slate-900">{title}</div>
-        {subtitle ? <div className="mt-1 text-xs text-slate-600">{subtitle}</div> : null}
-      </div>
-      <div className="flex flex-col gap-3">{children}</div>
-    </div>
-  );
-}
-
-function FieldRow({
-  label,
-  required,
-  right,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-slate-700">
-          {label} {required ? <span className="text-slate-500">*</span> : null}
-        </label>
-        {right}
-      </div>
-      {children}
-    </div>
-  );
-}
-
 const inputBase =
-  "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200";
-
-function DefaultValuesBox({
-  cda,
-  crr,
-  crankEff,
-}: {
-  cda: number;
-  crr: number;
-  crankEff: number;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">Default values</div>
-          <div className="mt-1 text-xs text-slate-600">
-            We’ve set sensible defaults for aerodynamic drag, rolling resistance, and drivetrain
-            efficiency. You can fine-tune these later in Profile Settings.
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs font-medium text-slate-700">CdA</div>
-          <div className="text-sm font-semibold text-slate-900">{cda}</div>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs font-medium text-slate-700">Crr</div>
-          <div className="text-sm font-semibold text-slate-900">{crr}</div>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs font-medium text-slate-700">Crank efficiency</div>
-          <div className="text-sm font-semibold text-slate-900">{crankEff}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+  "w-full rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -166,6 +67,9 @@ export default function OnboardingPage() {
   // prevent double submit
   const [finishBusy, setFinishBusy] = useState(false);
 
+  // Hover state for tooltips
+  const [hoveredParam, setHoveredParam] = useState<string | null>(null);
+
   useEffect(() => {
     init();
   }, [init]);
@@ -176,7 +80,7 @@ export default function OnboardingPage() {
       setStBusy(true);
       setStErr(null);
       try {
-        const s = await cgApi.stravaStatus(); // ✅ SSOT for "connected"
+        const s = await cgApi.stravaStatus();
         setSt(s);
       } catch (e: unknown) {
         setSt(null);
@@ -185,8 +89,6 @@ export default function OnboardingPage() {
         setStBusy(false);
       }
     })();
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, location.search]);
 
   // ---------- draft + key mapping ----------
@@ -215,16 +117,37 @@ export default function OnboardingPage() {
     setDraft({ ...d, [key]: value });
   }
 
+  // Handle decimal input - allows both integers and decimals
+  const handleDecimalInput = (key: string, value: string) => {
+    // Allow empty string
+    if (value === "") {
+      update(key, null);
+      return;
+    }
+
+    // Allow partial decimal inputs like "75." or "8."
+    if (value.endsWith('.') && value.split('.').length === 2) {
+      update(key, value);
+      return;
+    }
+
+    // Validate and convert to number
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && isFinite(parsed)) {
+      update(key, parsed);
+    }
+  };
+
   // Defaults we want for March launch
   const DEFAULT_CDA = 0.3;
   const DEFAULT_CRR = 0.004;
   const DEFAULT_CRANK_EFF = 0.96;
 
-  // ✅ Smart defaults (first-time only): only fill missing values once
+  // Smart defaults (first-time only): only fill missing values once
   const defaultsAppliedRef = useRef(false);
   useEffect(() => {
     if (defaultsAppliedRef.current) return;
-    if (!isObj(draft)) return; // wait until draft exists
+    if (!isObj(draft)) return;
 
     const next = { ...(draft as AnyRec) };
 
@@ -256,7 +179,6 @@ export default function OnboardingPage() {
     defaultsAppliedRef.current = true;
   }, [draft, setDraft, K.cda, K.crr, K.crankEff, K.bikeWeight]);
 
-  // ✅ PATCH 1B: After “Finish” → re-analyze ALL rides from listAll() + refresh list before navigation
   const onFinish = async () => {
     if (finishBusy) return;
     setFinishBusy(true);
@@ -264,7 +186,6 @@ export default function OnboardingPage() {
     try {
       console.log("[Onboarding] COMMIT payload", draft);
 
-      // ✅ PATCH: DO NOT write onboarded into the profile
       const ok = await commit({ markOnboarded: true });
       if (!ok) return;
 
@@ -288,7 +209,6 @@ export default function OnboardingPage() {
         const itemsUnknown = (await cgApi.listAll().catch(() => [])) as unknown;
         const items: unknown[] = Array.isArray(itemsUnknown) ? itemsUnknown : [];
 
-        // sort by start_time desc (missing start_time -> last)
         const sorted = [...items].sort((a, b) => {
           const sa = isRecord(a)
             ? typeof (a as any).start_time === "string"
@@ -305,7 +225,6 @@ export default function OnboardingPage() {
           return tb - ta;
         });
 
-        // pick ALL IDs
         const pickAll = sorted
           .map((x) => {
             if (!isRecord(x)) return "";
@@ -319,7 +238,6 @@ export default function OnboardingPage() {
           override,
         });
 
-        // ✅ PATCH 3: stop bulk re-analyze if Strava rate limited/locked
         for (const sid of pickAll) {
           console.log("[Onboarding] re-analyze sid", sid);
           try {
@@ -341,7 +259,6 @@ export default function OnboardingPage() {
           }
         }
 
-        // Refresh rides list before navigation
         try {
           await useSessionStore.getState().loadSessionsList();
           console.log("[Onboarding] loadSessionsList refreshed before navigation");
@@ -371,127 +288,383 @@ export default function OnboardingPage() {
   const hasTokens = st?.has_tokens === true;
 
   return (
-    <div className="max-w-xl mx-auto flex flex-col gap-4 p-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Welcome to CycleGraph</h1>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 py-12 px-4">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome to CycleGraph</h1>
+          <p className="text-slate-600">
+            Before we begin, we need a rough baseline for your profile. You can adjust this later.
+          </p>
+        </div>
 
-      <p className="text-slate-600">
-        Before we begin, we need a rough baseline for your profile. You can adjust this later.
-      </p>
+        {error ? <div className="text-red-600 text-sm mb-4">{error}</div> : null}
 
-      {error ? <div className="text-red-600 text-sm">{error}</div> : null}
-
-      <SectionCard title="Rider Info" subtitle="Weight is the most important input.">
-        <FieldRow label="Weight (kg)" required>
-          <input
-            className={inputBase}
-            inputMode="decimal"
-            placeholder="e.g. 78"
-            value={numOrEmpty(d[K.weight])}
-            onChange={(e) => update(K.weight, e.target.value === "" ? null : Number(e.target.value))}
-          />
-          <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
-        </FieldRow>
-      </SectionCard>
-
-      <SectionCard title="Bike Setup" subtitle="Used for mass modeling and climbing/acceleration.">
-        <FieldRow label="Bike weight (kg)">
-          <input
-            className={inputBase}
-            inputMode="decimal"
-            placeholder="e.g. 8.2"
-            value={numOrEmpty(d[K.bikeWeight])}
-            onChange={(e) =>
-              update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
-            }
-          />
-        </FieldRow>
-      </SectionCard>
-
-      <DefaultValuesBox cda={DEFAULT_CDA} crr={DEFAULT_CRR} crankEff={DEFAULT_CRANK_EFF} />
-
-      {/* Strava Connect section */}
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="font-semibold text-slate-900">Connect Strava</h2>
-            <p className="text-sm text-slate-600 mt-1">
-              To import rides and build your first analysis, we need access to Strava.
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Backend: <span className="font-mono">{cgApi.baseUrl()}</span>
-            </p>
+        {/* Main Card */}
+        <div className="rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden mb-6">
+          {/* Card Header */}
+          <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-4">
+            <div className="flex items-center gap-2 text-white">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+              <h2 className="font-semibold">Your Profile Data</h2>
+            </div>
           </div>
 
-          <div className="shrink-0">
-            {tokenValid ? (
-              <div className="px-3 py-2 rounded-md border border-slate-200 text-sm text-slate-700 bg-slate-50">
-                Strava connected ✅
+          {/* Card Body */}
+          <div className="p-6 space-y-6">
+            {/* Rider Weight */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Rider Weight (kg) <span className="text-red-500">*</span>
+              </label>
+              <input
+                className={inputBase}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
+                placeholder="e.g. 75.5"
+                value={numOrEmpty(d[K.weight])}
+                onChange={(e) => handleDecimalInput(K.weight, e.target.value)}
+              />
+              <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+                <svg
+                  className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>Required for accurate FTP modeling and climbing power calculations.</span>
               </div>
+            </div>
+
+            {/* Bike Weight */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Bike Weight (kg)
+              </label>
+              <input
+                className={inputBase}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
+                placeholder="e.g. 8.2"
+                value={numOrEmpty(d[K.bikeWeight])}
+                onChange={(e) => handleDecimalInput(K.bikeWeight, e.target.value)}
+              />
+              <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+                <svg
+                  className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>
+                  Used for total system mass in climbing and acceleration modeling. Typical road
+                  bikes: 7-9 kg.
+                </span>
+              </div>
+            </div>
+
+            {/* Advanced Parameters Section */}
+            <div className="pt-6 border-t-2 border-slate-100">
+              <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 p-5">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-slate-200 flex items-center justify-center">
+                    <svg
+                      className="w-5 h-5 text-slate-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-bold text-slate-900 mb-1">
+                      Advanced Parameters
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      We've set sensible defaults based on typical road cycling. Hover over each to
+                      see what it means in real terms.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  {/* CdA */}
+                  <div
+                    className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    onMouseEnter={() => setHoveredParam('cda')}
+                    onMouseLeave={() => setHoveredParam(null)}
+                  >
+                    <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
+                    <div className="text-lg font-bold text-slate-900">{DEFAULT_CDA}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Air resistance</div>
+
+                    {/* Tooltip */}
+                    {hoveredParam === 'cda' && (
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                        <div className="font-bold mb-2 text-sm text-emerald-300">
+                          Wind Resistance (CdA)
+                        </div>
+                        <p className="leading-relaxed mb-3">
+                          This measures how much the wind slows you down. Think of it like your
+                          "size" to the wind.
+                        </p>
+                        <div className="bg-slate-800 rounded p-2 mb-3">
+                          <div className="font-semibold mb-1">Real example:</div>
+                          <div className="text-[11px] leading-relaxed">
+                            At 35 km/h, improving from 0.30 to 0.27 (aero position) saves you{' '}
+                            <span className="text-emerald-300 font-bold">~25 seconds per 40km</span>
+                            .
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          ✓ We use 0.30 as default (normal road position with hoods)
+                        </div>
+                        {/* Arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Crr */}
+                  <div
+                    className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    onMouseEnter={() => setHoveredParam('crr')}
+                    onMouseLeave={() => setHoveredParam(null)}
+                  >
+                    <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
+                    <div className="text-lg font-bold text-slate-900">{DEFAULT_CRR}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Tire resistance</div>
+
+                    {/* Tooltip */}
+                    {hoveredParam === 'crr' && (
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                        <div className="font-bold mb-2 text-sm text-emerald-300">
+                          Rolling Resistance (Crr)
+                        </div>
+                        <p className="leading-relaxed mb-3">
+                          How much energy your tires "waste" by squishing against the road. Lower is
+                          faster.
+                        </p>
+                        <div className="bg-slate-800 rounded p-2 mb-3">
+                          <div className="font-semibold mb-1">Real example:</div>
+                          <div className="text-[11px] leading-relaxed">
+                            Upgrading from cheap tires (0.006) to quality tires (0.004) saves you{' '}
+                            <span className="text-emerald-300 font-bold">~1 minute per 40km</span> at
+                            30 km/h.
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          ✓ We use 0.004 as default (modern 28mm road tires, proper pressure)
+                        </div>
+                        {/* Arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Efficiency */}
+                  <div
+                    className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    onMouseEnter={() => setHoveredParam('efficiency')}
+                    onMouseLeave={() => setHoveredParam(null)}
+                  >
+                    <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
+                    <div className="text-lg font-bold text-slate-900">
+                      {(DEFAULT_CRANK_EFF * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1">Power loss</div>
+
+                    {/* Tooltip */}
+                    {hoveredParam === 'efficiency' && (
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                        <div className="font-bold mb-2 text-sm text-emerald-300">
+                          Drivetrain Efficiency
+                        </div>
+                        <p className="leading-relaxed mb-3">
+                          How much power is lost in your chain and gears before it reaches the rear
+                          wheel.
+                        </p>
+                        <div className="bg-slate-800 rounded p-2 mb-3">
+                          <div className="font-semibold mb-1">Real example:</div>
+                          <div className="text-[11px] leading-relaxed">
+                            A dirty chain (93% efficiency) vs clean chain (97% efficiency) means you
+                            lose <span className="text-emerald-300 font-bold">~8 watts</span> at 200W
+                            output. That's ~30 seconds per 40km.
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          ✓ We use 96% as default (clean, well-maintained modern drivetrain)
+                        </div>
+                        {/* Arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Strava Connect Card */}
+        <div className="rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden mb-6">
+          <div className="p-6">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="font-bold text-slate-900 text-lg mb-1">Connect Strava</h2>
+                <p className="text-sm text-slate-600">
+                  To import rides and build your first analysis, we need access to Strava.
+                </p>
+              </div>
+
+              <div className="shrink-0">
+                {tokenValid ? (
+                  <div className="px-4 py-2 rounded-lg border-2 border-emerald-200 text-sm font-semibold text-emerald-700 bg-emerald-50">
+                    ✓ Connected
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={connectStrava}
+                    disabled={stBusy}
+                    className="px-4 py-2 rounded-lg bg-[#FC4C02] text-white text-sm font-bold hover:bg-[#E34402] disabled:bg-slate-400 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+                    title={tokenExpired ? "Token expired — connect again" : "Connect Strava"}
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169" />
+                    </svg>
+                    {stBusy ? "Checking…" : tokenExpired ? "Reconnect" : "Connect Strava"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Status details */}
+            <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                <div>
+                  Status: <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
+                </div>
+                <div>
+                  Expires:{" "}
+                  <span className="font-semibold">{String(st?.expires_in_sec ?? "n/a")}</span>
+                </div>
+                <div>
+                  UID: <span className="font-mono text-[10px]">{String(st?.uid ?? "n/a")}</span>
+                </div>
+              </div>
+
+              {tokenExpired ? (
+                <div className="mt-2 text-xs text-amber-700">
+                  Your Strava token has expired. Click <b>Reconnect</b> to refresh.
+                </div>
+              ) : null}
+
+              {!hasTokens && st ? (
+                <div className="mt-2 text-xs text-slate-600">
+                  Click <span className="font-semibold">Connect Strava</span> and complete the login
+                  — the status will update automatically when you return.
+                </div>
+              ) : null}
+
+              {stErr ? (
+                <div className="mt-2 text-xs text-red-600 whitespace-pre-wrap">{stErr}</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={applyDefaults}
+            disabled={loading}
+            className="px-6 py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-semibold hover:bg-slate-50 disabled:bg-slate-100 transition-all"
+          >
+            Use default values
+          </button>
+
+          <button
+            type="button"
+            onClick={onFinish}
+            disabled={loading || finishBusy}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold shadow-lg hover:shadow-xl hover:from-emerald-600 hover:to-emerald-700 hover:scale-[1.01] transition-all duration-200 disabled:from-slate-400 disabled:to-slate-500 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center gap-2"
+          >
+            {finishBusy ? (
+              <>
+                <svg
+                  className="animate-spin h-5 w-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                Finishing…
+              </>
             ) : (
-              <button
-                type="button"
-                onClick={connectStrava}
-                disabled={stBusy}
-                className="px-3 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
-                title={tokenExpired ? "Token expired — connect again" : "Connect Strava"}
-              >
-                {stBusy ? "Checking…" : tokenExpired ? "Reconnect Strava" : "Connect Strava"}
-              </button>
-            )}
-          </div>
+              <>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M13 7l5 5m0 0l-5 5m5-5H6"
+                  />
+                </svg>
+                Finish and continue
+              </>
+            ))}
+          </button>
         </div>
-
-        <div className="mt-3 text-sm">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
-            <div>
-              has_tokens: <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
-            </div>
-            <div>
-              expires_in_sec:{" "}
-              <span className="font-semibold">{String(st?.expires_in_sec ?? "n/a")}</span>
-            </div>
-            <div>
-              uid: <span className="font-mono text-xs">{String(st?.uid ?? "n/a")}</span>
-            </div>
-          </div>
-
-          {tokenExpired ? (
-            <div className="mt-2 text-xs text-amber-700">
-              Your Strava token has expired. Click <b>Reconnect Strava</b>, or import a ride later
-              from the Dashboard to trigger a refresh.
-            </div>
-          ) : null}
-
-          {!hasTokens && st ? (
-            <div className="mt-2 text-xs text-slate-600">
-              You haven’t connected Strava yet. Click{" "}
-              <span className="font-semibold">Connect Strava</span> and complete the login — the
-              status will update automatically when you return.
-            </div>
-          ) : null}
-
-          {stErr ? <div className="mt-2 text-xs text-red-600 whitespace-pre-wrap">{stErr}</div> : null}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-3 pt-2">
-        <button
-          type="button"
-          onClick={applyDefaults}
-          disabled={loading}
-          className="px-4 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:bg-slate-100"
-        >
-          Use default values
-        </button>
-
-        <button
-          type="button"
-          onClick={onFinish}
-          disabled={loading || finishBusy}
-          className="px-4 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
-        >
-          {finishBusy ? "Finishing…" : "Finish and continue"}
-        </button>
       </div>
     </div>
   );
