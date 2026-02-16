@@ -49,7 +49,7 @@ function numOrEmpty(v: unknown): string {
   return "";
 }
 
-// ✅ PATCH 4D.3 — light theme components
+// ✅ Light theme components
 function Tooltip({ text }: { text: string }) {
   return (
     <span className="relative inline-flex items-center">
@@ -112,6 +112,45 @@ function FieldRow({
 const inputBase =
   "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200";
 
+function DefaultValuesBox({
+  cda,
+  crr,
+  crankEff,
+}: {
+  cda: number;
+  crr: number;
+  crankEff: number;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Default values</div>
+          <div className="mt-1 text-xs text-slate-600">
+            We’ve set sensible defaults for aerodynamic drag, rolling resistance, and drivetrain
+            efficiency. You can fine-tune these later in Profile Settings.
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+          <div className="text-xs font-medium text-slate-700">CdA</div>
+          <div className="text-sm font-semibold text-slate-900">{cda}</div>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+          <div className="text-xs font-medium text-slate-700">Crr</div>
+          <div className="text-sm font-semibold text-slate-900">{crr}</div>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+          <div className="text-xs font-medium text-slate-700">Crank efficiency</div>
+          <div className="text-sm font-semibold text-slate-900">{crankEff}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -126,9 +165,6 @@ export default function OnboardingPage() {
 
   // prevent double submit
   const [finishBusy, setFinishBusy] = useState(false);
-
-  // Advanced toggle (keep onboarding non-intimidating)
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     init();
@@ -162,13 +198,10 @@ export default function OnboardingPage() {
       weight: resolveKey(d, "rider_weight_kg", ["weight_kg", "weightKg", "weight"]),
 
       // Bike
-      tireWidth: resolveKey(d, "tire_width_mm", ["tireWidthMm", "tire_width", "tireWidth"]),
       bikeWeight: resolveKey(d, "bike_weight_kg", ["bikeWeightKg", "bikeWeight"]),
 
-      // Aero
+      // Defaults / model params
       cda: resolveKey(d, "cda", ["CdA", "aero_cda", "aeroCdA"]),
-
-      // Advanced
       crr: resolveKey(d, "crr", ["Crr", "rolling_crr", "rollingCrr"]),
       crankEff: resolveKey(d, "crank_efficiency", [
         "crankEfficiency",
@@ -181,6 +214,11 @@ export default function OnboardingPage() {
   function update(key: string, value: any) {
     setDraft({ ...d, [key]: value });
   }
+
+  // Defaults we want for March launch
+  const DEFAULT_CDA = 0.3;
+  const DEFAULT_CRR = 0.004;
+  const DEFAULT_CRANK_EFF = 0.96;
 
   // ✅ Smart defaults (first-time only): only fill missing values once
   const defaultsAppliedRef = useRef(false);
@@ -198,22 +236,17 @@ export default function OnboardingPage() {
     let changed = false;
 
     if (!has(K.cda)) {
-      next[K.cda] = 0.3;
+      next[K.cda] = DEFAULT_CDA;
       changed = true;
     }
     if (!has(K.crr)) {
-      next[K.crr] = 0.004;
+      next[K.crr] = DEFAULT_CRR;
       changed = true;
     }
     if (!has(K.crankEff)) {
-      next[K.crankEff] = 0.96;
+      next[K.crankEff] = DEFAULT_CRANK_EFF;
       changed = true;
     }
-    if (!has(K.tireWidth)) {
-      next[K.tireWidth] = 28;
-      changed = true;
-    }
-    // ✅ NEW: bike weight default (reasonable baseline)
     if (!has(K.bikeWeight)) {
       next[K.bikeWeight] = 8.0;
       changed = true;
@@ -221,7 +254,7 @@ export default function OnboardingPage() {
 
     if (changed) setDraft(next);
     defaultsAppliedRef.current = true;
-  }, [draft, setDraft, K.cda, K.crr, K.crankEff, K.tireWidth, K.bikeWeight]);
+  }, [draft, setDraft, K.cda, K.crr, K.crankEff, K.bikeWeight]);
 
   // ✅ PATCH 1B: After “Finish” → re-analyze ALL rides from listAll() + refresh list before navigation
   const onFinish = async () => {
@@ -295,7 +328,6 @@ export default function OnboardingPage() {
               profileOverride: override,
             });
           } catch (e: unknown) {
-            // If backend says rate limited -> STOP the loop immediately
             const msg = String((e as any)?.message ?? "");
             if (
               msg.includes("429") ||
@@ -320,7 +352,6 @@ export default function OnboardingPage() {
         console.log("[Onboarding] bulk re-analyze error (ignored):", e);
       }
 
-      // ✅ PATCH: hard reload to re-mount AuthGateProvider and get updated onboarding state
       window.location.assign("/onboarding/import");
       return;
     } finally {
@@ -339,7 +370,6 @@ export default function OnboardingPage() {
   const tokenExpired = tokenState === "expired";
   const hasTokens = st?.has_tokens === true;
 
-  // ✅ PATCH 4D.3 — light wrapper + slate header text
   return (
     <div className="max-w-xl mx-auto flex flex-col gap-4 p-4">
       <h1 className="text-2xl font-semibold tracking-tight">Welcome to CycleGraph</h1>
@@ -350,7 +380,6 @@ export default function OnboardingPage() {
 
       {error ? <div className="text-red-600 text-sm">{error}</div> : null}
 
-      {/* Profile baseline form (aligned with /profile) */}
       <SectionCard title="Rider Info" subtitle="Weight is the most important input.">
         <FieldRow label="Weight (kg)" required>
           <input
@@ -362,103 +391,23 @@ export default function OnboardingPage() {
           />
           <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
         </FieldRow>
-
-        {/* ✅ Removed Gender/Age and Country/City */}
       </SectionCard>
 
-      <SectionCard title="Bike Setup" subtitle="Used to estimate rolling losses and speed.">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <FieldRow label="Tire width">
-            <select
-              className={inputBase}
-              value={String(d[K.tireWidth] ?? 28)}
-              onChange={(e) => update(K.tireWidth, Number(e.target.value))}
-            >
-              <option value="25">25mm</option>
-              <option value="28">28mm</option>
-              <option value="31">30–32mm</option>
-            </select>
-          </FieldRow>
-
-          <FieldRow label="Bike weight (kg)">
-            <input
-              className={inputBase}
-              inputMode="decimal"
-              placeholder="e.g. 8.2"
-              value={numOrEmpty(d[K.bikeWeight])}
-              onChange={(e) =>
-                update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
-              }
-            />
-          </FieldRow>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Aerodynamics" subtitle="Used to estimate aerodynamic drag.">
-        <FieldRow
-          label="CdA"
-          right={
-            <Tooltip text="Aerodynamic drag coefficient (0.250–0.350, lower = faster). Affects FTP modeling." />
-          }
-        >
+      <SectionCard title="Bike Setup" subtitle="Used for mass modeling and climbing/acceleration.">
+        <FieldRow label="Bike weight (kg)">
           <input
             className={inputBase}
             inputMode="decimal"
-            placeholder="e.g. 0.300"
-            value={numOrEmpty(d[K.cda])}
-            onChange={(e) => update(K.cda, e.target.value === "" ? null : Number(e.target.value))}
+            placeholder="e.g. 8.2"
+            value={numOrEmpty(d[K.bikeWeight])}
+            onChange={(e) =>
+              update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
+            }
           />
         </FieldRow>
       </SectionCard>
 
-      {/* Advanced */}
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <button type="button" onClick={() => setShowAdvanced((s) => !s)} className="w-full text-left">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Advanced settings</div>
-              <div className="mt-1 text-xs text-slate-600">
-                Optional — you can leave these as defaults.
-              </div>
-            </div>
-            <div className="text-xs text-slate-600">{showAdvanced ? "Hide" : "Show"}</div>
-          </div>
-        </button>
-
-        {showAdvanced ? (
-          <div className="mt-4 flex flex-col gap-3">
-            <FieldRow
-              label="Crr"
-              right={
-                <Tooltip text="Rolling resistance (0.0030–0.0050, lower = faster). Affects FTP modeling." />
-              }
-            >
-              <input
-                className={inputBase}
-                inputMode="decimal"
-                placeholder="e.g. 0.0040"
-                value={numOrEmpty(d[K.crr])}
-                onChange={(e) => update(K.crr, e.target.value === "" ? null : Number(e.target.value))}
-              />
-            </FieldRow>
-
-            <FieldRow
-              label="Crank efficiency"
-              right={<Tooltip text="Power transfer efficiency (typically 96%). Affects FTP modeling." />}
-            >
-              <input
-                className={inputBase}
-                inputMode="decimal"
-                placeholder="e.g. 0.96"
-                value={numOrEmpty(d[K.crankEff])}
-                onChange={(e) =>
-                  update(K.crankEff, e.target.value === "" ? null : Number(e.target.value))
-                }
-              />
-            </FieldRow>
-          </div>
-        ) : null}
-      </div>
+      <DefaultValuesBox cda={DEFAULT_CDA} crr={DEFAULT_CRR} crankEff={DEFAULT_CRANK_EFF} />
 
       {/* Strava Connect section */}
       <div className="rounded-lg border border-slate-200 bg-white p-4">
