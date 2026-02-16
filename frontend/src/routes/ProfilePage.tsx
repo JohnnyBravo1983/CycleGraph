@@ -1,6 +1,7 @@
 // frontend/src/routes/ProfilePage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useProfileStore } from "../state/profileStore";
+import Interactive3DCyclistProfile from "../components/Interactive3DCyclistProfile";
 
 /**
  * Profile Settings
@@ -32,88 +33,8 @@ function numOrEmpty(v: unknown): string {
   return "";
 }
 
-// ✅ Light theme components (same as onboarding)
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="mb-3">
-        <div className="text-sm font-semibold text-slate-900">{title}</div>
-        {subtitle ? <div className="mt-1 text-xs text-slate-600">{subtitle}</div> : null}
-      </div>
-      <div className="flex flex-col gap-3">{children}</div>
-    </div>
-  );
-}
-
-function FieldRow({
-  label,
-  required,
-  right,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-slate-700">
-          {label} {required ? <span className="text-slate-500">*</span> : null}
-        </label>
-        {right}
-      </div>
-      {children}
-    </div>
-  );
-}
-
 const inputBase =
-  "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200";
-
-function DefaultValuesBox({
-  cda,
-  crr,
-  crankEff,
-}: {
-  cda: number;
-  crr: number;
-  crankEff: number;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <div className="text-sm font-semibold text-slate-900">Default values</div>
-      <div className="mt-1 text-xs text-slate-600">
-        We’ve set sensible defaults for aerodynamic drag, rolling resistance, and drivetrain
-        efficiency. Advanced, more dynamic settings will come later.
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs font-medium text-slate-700">CdA</div>
-          <div className="text-sm font-semibold text-slate-900">{cda}</div>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs font-medium text-slate-700">Crr</div>
-          <div className="text-sm font-semibold text-slate-900">{crr}</div>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <div className="text-xs font-medium text-slate-700">Crank efficiency</div>
-          <div className="text-sm font-semibold text-slate-900">{crankEff}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+  "w-full rounded-lg border-2 border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all";
 
 export default function ProfilePage() {
   const { draft, loading, error, init, setDraft, commit } = useProfileStore();
@@ -199,59 +120,173 @@ export default function ProfilePage() {
   };
 
   if (loading) {
-    return <div className="max-w-xl mx-auto p-4">Loading profile...</div>;
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-slate-600">Loading profile...</div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="max-w-xl mx-auto p-4 text-red-600">{error}</div>;
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-red-600">{error}</div>
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-xl mx-auto flex flex-col gap-4 p-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Profile Settings</h1>
-        <div className="mt-1 text-sm text-slate-600">
-          These values affect your FTP / PrecisionWatt modeling.
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8">
+      <div className="max-w-7xl mx-auto px-4">
+        {/* Interactive 3D Component - Full Width on Desktop, Stack on Mobile */}
+        <div className="mb-6">
+          <Interactive3DCyclistProfile />
         </div>
-      </div>
 
-      <SectionCard title="Rider Info" subtitle="Keep this accurate — weight is the most important input.">
-        <FieldRow label="Weight (kg)" required>
-          <input
-            className={inputBase}
-            inputMode="decimal"
-            placeholder="e.g. 78"
-            value={numOrEmpty(d[K.weight])}
-            onChange={(e) => update(K.weight, e.target.value === "" ? null : Number(e.target.value))}
-          />
-          <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
-        </FieldRow>
-      </SectionCard>
+        {/* Editable Fields Card - Positioned Below Model */}
+        <div className="max-w-2xl mx-auto">
+          <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.15)] border border-slate-200">
+            <div className="mb-6">
+              <h3 className="text-lg font-bold text-slate-900 mb-1">Your Profile Data</h3>
+              <p className="text-sm text-slate-600">
+                Update your actual weight and bike specs. These values feed into the physics model above.
+              </p>
+            </div>
 
-      <SectionCard title="Bike Setup" subtitle="Used for mass modeling and climbing/acceleration.">
-        <FieldRow label="Bike weight (kg)">
-          <input
-            className={inputBase}
-            inputMode="decimal"
-            placeholder="e.g. 8.2"
-            value={numOrEmpty(d[K.bikeWeight])}
-            onChange={(e) =>
-              update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
-            }
-          />
-        </FieldRow>
-      </SectionCard>
+            <div className="space-y-5">
+              {/* Rider Weight */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Rider Weight (kg) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className={inputBase}
+                  inputMode="decimal"
+                  placeholder="e.g. 75"
+                  value={numOrEmpty(d[K.weight])}
+                  onChange={(e) =>
+                    update(K.weight, e.target.value === "" ? null : Number(e.target.value))
+                  }
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Critical for accurate FTP modeling and climbing power calculations.
+                </p>
+              </div>
 
-      <DefaultValuesBox cda={DEFAULT_CDA} crr={DEFAULT_CRR} crankEff={DEFAULT_CRANK_EFF} />
+              {/* Bike Weight */}
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
+                  Bike Weight (kg)
+                </label>
+                <input
+                  className={inputBase}
+                  inputMode="decimal"
+                  placeholder="e.g. 8.0"
+                  value={numOrEmpty(d[K.bikeWeight])}
+                  onChange={(e) =>
+                    update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
+                  }
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Used for total system mass in climbing and acceleration modeling.
+                </p>
+              </div>
 
-      <div className="flex items-center justify-end gap-3">
-        <button
-          onClick={handleSave}
-          disabled={loading || saveBusy}
-          className="px-4 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
-        >
-          {saveBusy ? "Saving…" : "Save Profile"}
-        </button>
+              {/* Default Values Info Box */}
+              <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex-shrink-0">
+                    <svg
+                      className="w-5 h-5 text-slate-600"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-slate-900 mb-2">
+                      Advanced Parameters
+                    </div>
+                    <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                      We've set sensible defaults for CdA, Crr, and drivetrain efficiency. More
+                      granular controls coming in future updates.
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="text-center">
+                        <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
+                        <div className="text-sm font-bold text-slate-900">{DEFAULT_CDA}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
+                        <div className="text-sm font-bold text-slate-900">{DEFAULT_CRR}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
+                        <div className="text-sm font-bold text-slate-900">
+                          {(DEFAULT_CRANK_EFF * 100).toFixed(0)}%
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="mt-6 pt-5 border-t border-slate-200">
+              <button
+                onClick={handleSave}
+                disabled={loading || saveBusy}
+                className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg hover:shadow-xl hover:scale-[1.01] transition-all duration-200 disabled:from-slate-400 disabled:to-slate-500 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
+              >
+                {saveBusy ? (
+                  <>
+                    <svg
+                      className="animate-spin h-5 w-5"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2.5}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                    Save Profile Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
