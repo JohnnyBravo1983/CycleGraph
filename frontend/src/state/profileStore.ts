@@ -1,4 +1,4 @@
-// profileStore.ts
+// frontend/src/state/profileStore.ts
 import { create } from "zustand";
 import { cgApi } from "../lib/cgApi";
 
@@ -216,4 +216,3 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     }
   },
 }));
-

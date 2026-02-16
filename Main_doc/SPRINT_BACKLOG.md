@@ -130,36 +130,102 @@ For Pioneer Beta, users can import ONLY:
 
 ---
 
-### **Day 4 - Friday, Feb 14** 🔴
-**Focus:** Onboarding UI cleanup
+Day 4 - Friday, Feb 14 🔴
 
-**Tasks:**
-1. Improve layout (more spacing, cleaner design)
-2. Add tooltips/help text for technical fields:
-   - CdA: "Aerodynamic drag (0.250-0.350, lower = faster)"
-   - Crr: "Rolling resistance (0.0030-0.0050, lower = faster)"
-   - Crank efficiency: "Power transfer efficiency (typically 96%)"
-3. Set smart defaults:
-   - CdA: 0.300
-   - Crr: 0.0040
-   - Crank efficiency: 0.96
-   - Tire width: 28mm
-4. Mark required vs optional fields clearly
-5. Consider: Hide advanced fields behind toggle?
-6. Test with fresh eyes (pretend you're new user)
+Focus: Profile & Onboarding UI alignment + Dashboard simplification
 
-**Deliverable:** Onboarding is clear and professional  
-**Time estimate:** 5-6 hours  
-**Blockers:** None
+Tasks:
 
-**Validation:**
-- [ ] UI looks clean (not messy)
-- [ ] Help text explains technical terms
-- [ ] Defaults make sense
-- [ ] New user can complete without confusion
-- [ ] No overwhelming fields
+Unify Profile UI:
 
----
+Move current Profile layout/design from Dashboard into Profile Settings page
+
+Ensure Profile Settings becomes the single source of truth for editing all profile values
+
+Align onboarding form layout with Profile Settings (same visual language, spacing, structure)
+
+Improve layout & clarity:
+
+Add more spacing and cleaner grouping of fields
+
+Group fields logically (Rider, Bike, Aero, Advanced)
+
+Mark required vs optional fields clearly
+
+Add tooltips/help text for technical fields:
+
+CdA: "Aerodynamic drag (0.250–0.350, lower = faster)"
+
+Crr: "Rolling resistance (0.0030–0.0050, lower = faster)"
+
+Crank efficiency: "Power transfer efficiency (typically 96%)"
+
+Explain briefly how these affect FTP modeling
+
+Set smart defaults (only on onboarding / first-time setup):
+
+CdA: 0.300
+
+Crr: 0.0040
+
+Crank efficiency: 0.96
+
+Tire width: 28mm
+
+Consider UX simplification:
+
+Optionally hide advanced fields behind “Advanced settings” toggle
+
+Keep first-time user experience non-intimidating
+
+Simplify Dashboard:
+
+Remove full Profile editing UI from Dashboard
+
+Replace with compact “Key Profile Metrics” card
+
+Display:
+
+FTP (current modeled FTP)
+
+Rider weight
+
+CdA
+
+Crr
+
+Make card read-only
+
+Add clear “Edit Profile” button linking to Profile Settings
+
+Test full flow:
+
+Complete onboarding as new user
+
+Verify Profile Settings mirrors onboarding structure
+
+Update profile → verify Dashboard key metrics update correctly
+
+Confirm no impact on historical session determinism
+
+Deliverable:
+Profile Settings is the single, clean editing surface.
+Onboarding and Profile Settings share consistent design.
+Dashboard shows only key metrics (clean + professional).
+
+Time estimate: 6–8 hours
+Blockers: None
+
+Validation:
+
+ Profile Settings replaces editing in Dashboard
+ Onboarding and Profile Settings look consistent
+ Tooltips explain technical fields clearly
+ Defaults applied only on first setup
+ Dashboard shows clean key metrics card
+ FTP displayed clearly and correctly
+ No visual clutter
+ No regression in session behavior
 
 ### **Day 5 - Saturday, Feb 15** 🟡
 **Focus:** Remove duplicate API routes
