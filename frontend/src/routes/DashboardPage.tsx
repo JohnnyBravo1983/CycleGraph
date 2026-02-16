@@ -573,7 +573,7 @@ function ProfilePeekCard() {
 
             {/* FTP Tooltip */}
             {hoveredParam === "ftp" && (
-              <div className="absolute z-50 top-full left-1/2 -translate-x-1/2 mt-2 w-80 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl max-h-[500px] overflow-y-auto">
+              <div className="absolute z-50 left-full top-0 ml-2 w-80 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl max-h-[500px] overflow-y-auto">
                 <div className="font-bold mb-2 text-sm text-emerald-300">
                   Functional Threshold Power (FTP)
                 </div>
@@ -619,7 +619,8 @@ function ProfilePeekCard() {
                 <div className="text-[10px] text-slate-300">
                   ✓ We calculate your FTP automatically from your rides using physics-based power modeling
                 </div>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-[-1px] w-2 h-2 bg-slate-900 rotate-45"></div>
+                {/* Arrow pointing left */}
+                <div className="absolute right-full top-4 mr-[-1px] w-2 h-2 bg-slate-900 rotate-45"></div>
               </div>
             )}
           </div>
