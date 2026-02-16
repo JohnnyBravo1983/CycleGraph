@@ -1,6 +1,6 @@
 // frontend/src/routes/OnboardingPage.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useProfileStore } from "../state/profileStore";
 import { useSessionStore } from "../state/sessionStore";
 import { cgApi, type StatusResp } from "../lib/cgApi";
@@ -53,7 +53,6 @@ const inputBase =
   "w-full rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200";
 
 export default function OnboardingPage() {
-  const navigate = useNavigate();
   const location = useLocation();
 
   const { draft, loading, error, init, setDraft, applyDefaults, commit } = useProfileStore();
@@ -126,14 +125,14 @@ export default function OnboardingPage() {
     }
 
     // Allow partial decimal inputs like "75." or "8."
-    if (value.endsWith('.') && value.split('.').length === 2) {
+    if (value.endsWith(".") && value.split(".").length === 2) {
       update(key, value);
       return;
     }
 
     // Validate and convert to number
     const parsed = parseFloat(value);
-    if (!isNaN(parsed) && isFinite(parsed)) {
+    if (!Number.isNaN(parsed) && Number.isFinite(parsed)) {
       update(key, parsed);
     }
   };
@@ -189,7 +188,7 @@ export default function OnboardingPage() {
       const ok = await commit({ markOnboarded: true });
       if (!ok) return;
 
-      // Build override (numbers only, no-any)
+      // Build override (numbers only)
       const override: Record<string, number> = {};
       const rw = getNum(draft, "rider_weight_kg");
       const bw = getNum(draft, "bike_weight_kg");
@@ -412,9 +411,7 @@ export default function OnboardingPage() {
                     </svg>
                   </div>
                   <div className="flex-1">
-                    <div className="text-sm font-bold text-slate-900 mb-1">
-                      Advanced Parameters
-                    </div>
+                    <div className="text-sm font-bold text-slate-900 mb-1">Advanced Parameters</div>
                     <p className="text-xs text-slate-600 leading-relaxed">
                       We've set sensible defaults based on typical road cycling. Hover over each to
                       see what it means in real terms.
@@ -426,15 +423,14 @@ export default function OnboardingPage() {
                   {/* CdA */}
                   <div
                     className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
-                    onMouseEnter={() => setHoveredParam('cda')}
+                    onMouseEnter={() => setHoveredParam("cda")}
                     onMouseLeave={() => setHoveredParam(null)}
                   >
                     <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
                     <div className="text-lg font-bold text-slate-900">{DEFAULT_CDA}</div>
                     <div className="text-[10px] text-slate-500 mt-1">Air resistance</div>
 
-                    {/* Tooltip */}
-                    {hoveredParam === 'cda' && (
+                    {hoveredParam === "cda" && (
                       <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
                         <div className="font-bold mb-2 text-sm text-emerald-300">
                           Wind Resistance (CdA)
@@ -446,16 +442,14 @@ export default function OnboardingPage() {
                         <div className="bg-slate-800 rounded p-2 mb-3">
                           <div className="font-semibold mb-1">Real example:</div>
                           <div className="text-[11px] leading-relaxed">
-                            At 35 km/h, improving from 0.30 to 0.27 (aero position) saves you{' '}
-                            <span className="text-emerald-300 font-bold">~25 seconds per 40km</span>
-                            .
+                            At 35 km/h, improving from 0.30 to 0.27 (aero position) saves you{" "}
+                            <span className="text-emerald-300 font-bold">~25 seconds per 40km</span>.
                           </div>
                         </div>
                         <div className="text-[10px] text-slate-300">
                           ✓ We use 0.30 as default (normal road position with hoods)
                         </div>
-                        {/* Arrow */}
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45" />
                       </div>
                     )}
                   </div>
@@ -463,15 +457,14 @@ export default function OnboardingPage() {
                   {/* Crr */}
                   <div
                     className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
-                    onMouseEnter={() => setHoveredParam('crr')}
+                    onMouseEnter={() => setHoveredParam("crr")}
                     onMouseLeave={() => setHoveredParam(null)}
                   >
                     <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
                     <div className="text-lg font-bold text-slate-900">{DEFAULT_CRR}</div>
                     <div className="text-[10px] text-slate-500 mt-1">Tire resistance</div>
 
-                    {/* Tooltip */}
-                    {hoveredParam === 'crr' && (
+                    {hoveredParam === "crr" && (
                       <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
                         <div className="font-bold mb-2 text-sm text-emerald-300">
                           Rolling Resistance (Crr)
@@ -483,7 +476,7 @@ export default function OnboardingPage() {
                         <div className="bg-slate-800 rounded p-2 mb-3">
                           <div className="font-semibold mb-1">Real example:</div>
                           <div className="text-[11px] leading-relaxed">
-                            Upgrading from cheap tires (0.006) to quality tires (0.004) saves you{' '}
+                            Upgrading from cheap tires (0.006) to quality tires (0.004) saves you{" "}
                             <span className="text-emerald-300 font-bold">~1 minute per 40km</span> at
                             30 km/h.
                           </div>
@@ -491,8 +484,7 @@ export default function OnboardingPage() {
                         <div className="text-[10px] text-slate-300">
                           ✓ We use 0.004 as default (modern 28mm road tires, proper pressure)
                         </div>
-                        {/* Arrow */}
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45" />
                       </div>
                     )}
                   </div>
@@ -500,7 +492,7 @@ export default function OnboardingPage() {
                   {/* Efficiency */}
                   <div
                     className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
-                    onMouseEnter={() => setHoveredParam('efficiency')}
+                    onMouseEnter={() => setHoveredParam("efficiency")}
                     onMouseLeave={() => setHoveredParam(null)}
                   >
                     <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
@@ -509,8 +501,7 @@ export default function OnboardingPage() {
                     </div>
                     <div className="text-[10px] text-slate-500 mt-1">Power loss</div>
 
-                    {/* Tooltip */}
-                    {hoveredParam === 'efficiency' && (
+                    {hoveredParam === "efficiency" && (
                       <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
                         <div className="font-bold mb-2 text-sm text-emerald-300">
                           Drivetrain Efficiency
@@ -530,8 +521,7 @@ export default function OnboardingPage() {
                         <div className="text-[10px] text-slate-300">
                           ✓ We use 96% as default (clean, well-maintained modern drivetrain)
                         </div>
-                        {/* Arrow */}
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45" />
                       </div>
                     )}
                   </div>
@@ -578,7 +568,8 @@ export default function OnboardingPage() {
             <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200">
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
                 <div>
-                  Status: <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
+                  Status:{" "}
+                  <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
                 </div>
                 <div>
                   Expires:{" "}
@@ -662,7 +653,7 @@ export default function OnboardingPage() {
                 </svg>
                 Finish and continue
               </>
-            ))}
+            )}
           </button>
         </div>
       </div>
