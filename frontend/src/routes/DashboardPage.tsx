@@ -5,9 +5,14 @@ import { cgApi, type SessionListItem as ApiSessionListItem } from "../lib/cgApi"
 import { StravaImportCard } from "../components/StravaImportCard";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
-import ProfilePeekCard from "../components/Profile/ProfilePeekCard";
+import { useProfileStore } from "../state/profileStore";
 
 type YearKey = "2022" | "2023" | "2024" | "2025";
+
+// Default values from ProfilePage
+const DEFAULT_CDA = 0.3;
+const DEFAULT_CRR = 0.004;
+const DEFAULT_CRANK_EFF = 0.96;
 
 // --- Latest Ride Import (Dashboard button) --------------------
 
@@ -38,7 +43,6 @@ async function importLatestRideOnce(opts: { days: number }) {
     body: "{}",
   });
 
-  // Some backends return 200 with no JSON body
   const data = await resp.json().catch(() => null);
   return { resp, data };
 }
@@ -434,7 +438,6 @@ const DemoProgressionPanel: React.FC = () => {
     .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")))
     .slice(0, 6);
 
-  // keep these computed values (even if not rendered yet) without breaking lint
   void setYearFilter;
   void rideYears;
   void newest6;
@@ -500,14 +503,207 @@ const DemoProgressionPanel: React.FC = () => {
   );
 };
 
+// ProfilePeekCard - styled samme som ProfilePage
+function ProfilePeekCard() {
+  const { draft } = useProfileStore();
+  const [hoveredParam, setHoveredParam] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    useProfileStore.getState().init();
+  }, []);
+
+  const d = React.useMemo(() => {
+    return typeof draft === "object" && draft !== null && !Array.isArray(draft)
+      ? (draft as Record<string, any>)
+      : {};
+  }, [draft]);
+
+  const riderWeight = d.rider_weight_kg ?? d.weight_kg ?? d.weightKg ?? d.weight ?? null;
+  const bikeWeight = d.bike_weight_kg ?? d.bikeWeightKg ?? d.bikeWeight ?? null;
+
+  return (
+    <div className="rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden">
+      {/* Card Header */}
+      <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-white">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+            />
+          </svg>
+          <h2 className="font-semibold">Key Profile Metrics</h2>
+        </div>
+        <Link
+          to="/profile"
+          className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold transition-all"
+        >
+          Edit Profile
+        </Link>
+      </div>
+
+      {/* Card Body */}
+      <div className="p-6 space-y-6">
+        {/* Rider & Bike Weight */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-lg border-2 border-slate-200 bg-white p-3 text-center">
+            <div className="text-xs font-medium text-slate-500 mb-1">Rider weight</div>
+            <div className="text-lg font-bold text-slate-900">
+              {typeof riderWeight === "number" ? `${riderWeight} kg` : "—"}
+            </div>
+          </div>
+          <div className="rounded-lg border-2 border-slate-200 bg-white p-3 text-center">
+            <div className="text-xs font-medium text-slate-500 mb-1">Bike weight</div>
+            <div className="text-lg font-bold text-slate-900">
+              {typeof bikeWeight === "number" ? `${bikeWeight} kg` : "—"}
+            </div>
+          </div>
+        </div>
+
+        {/* Advanced Parameters */}
+        <div className="pt-4 border-t-2 border-slate-100">
+          <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 p-5">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-slate-200 flex items-center justify-center">
+                <svg
+                  className="w-5 h-5 text-slate-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-bold text-slate-900 mb-1">Advanced Parameters</div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Sensible defaults. Hover to learn more.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              {/* CdA */}
+              <div
+                className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                onMouseEnter={() => setHoveredParam("cda")}
+                onMouseLeave={() => setHoveredParam(null)}
+              >
+                <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
+                <div className="text-lg font-bold text-slate-900">{DEFAULT_CDA}</div>
+                <div className="text-[10px] text-slate-500 mt-1">Air resistance</div>
+
+                {hoveredParam === "cda" && (
+                  <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                    <div className="font-bold mb-2 text-sm text-emerald-300">Wind Resistance (CdA)</div>
+                    <p className="leading-relaxed mb-3">
+                      This measures how much the wind slows you down. Think of it like your "size" to the wind.
+                    </p>
+                    <div className="bg-slate-800 rounded p-2 mb-3">
+                      <div className="font-semibold mb-1">Real example:</div>
+                      <div className="text-[11px] leading-relaxed">
+                        At 35 km/h, improving from 0.30 to 0.27 (aero position) saves you{" "}
+                        <span className="text-emerald-300 font-bold">~25 seconds per 40km</span>.
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-300">
+                      ✓ We use 0.30 as default (normal road position with hoods)
+                    </div>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                  </div>
+                )}
+              </div>
+
+              {/* Crr */}
+              <div
+                className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                onMouseEnter={() => setHoveredParam("crr")}
+                onMouseLeave={() => setHoveredParam(null)}
+              >
+                <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
+                <div className="text-lg font-bold text-slate-900">{DEFAULT_CRR}</div>
+                <div className="text-[10px] text-slate-500 mt-1">Tire resistance</div>
+
+                {hoveredParam === "crr" && (
+                  <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                    <div className="font-bold mb-2 text-sm text-emerald-300">Rolling Resistance (Crr)</div>
+                    <p className="leading-relaxed mb-3">
+                      How much energy your tires "waste" by squishing against the road. Lower is faster.
+                    </p>
+                    <div className="bg-slate-800 rounded p-2 mb-3">
+                      <div className="font-semibold mb-1">Real example:</div>
+                      <div className="text-[11px] leading-relaxed">
+                        Upgrading from cheap tires (0.006) to quality tires (0.004) saves you{" "}
+                        <span className="text-emerald-300 font-bold">~1 minute per 40km</span> at 30 km/h.
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-300">
+                      ✓ We use 0.004 as default (modern 28mm road tires, proper pressure)
+                    </div>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                  </div>
+                )}
+              </div>
+
+              {/* Efficiency */}
+              <div
+                className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                onMouseEnter={() => setHoveredParam("efficiency")}
+                onMouseLeave={() => setHoveredParam(null)}
+              >
+                <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
+                <div className="text-lg font-bold text-slate-900">{(DEFAULT_CRANK_EFF * 100).toFixed(0)}%</div>
+                <div className="text-[10px] text-slate-500 mt-1">Power loss</div>
+
+                {hoveredParam === "efficiency" && (
+                  <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                    <div className="font-bold mb-2 text-sm text-emerald-300">Drivetrain Efficiency</div>
+                    <p className="leading-relaxed mb-3">
+                      How much power is lost in your chain and gears before it reaches the rear wheel.
+                    </p>
+                    <div className="bg-slate-800 rounded p-2 mb-3">
+                      <div className="font-semibold mb-1">Real example:</div>
+                      <div className="text-[11px] leading-relaxed">
+                        A dirty chain (93% efficiency) vs clean chain (97% efficiency) means you lose{" "}
+                        <span className="text-emerald-300 font-bold">~8 watts</span> at 200W output. That's ~30
+                        seconds per 40km.
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-300">
+                      ✓ We use 96% as default (clean, well-maintained modern drivetrain)
+                    </div>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ========================================
-// 🚀 DASHBOARD V6 FINAL - WITH ANIMATED PREVIEW + COUNTDOWN + FAT IMPORT BUTTON
+// 🚀 DASHBOARD V6 FINAL
 // ========================================
 
 export default function DashboardPage() {
   const demo = isDemoMode();
 
-  // Clear any stale demo mode flag when user is authenticated and on dashboard
   React.useEffect(() => {
     const demoFlag = localStorage.getItem("cg_demo");
     if (demoFlag === "1") {
@@ -517,7 +713,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Countdown state for FTP trends banner
   const [timeLeft, setTimeLeft] = React.useState({
     days: 0,
     hours: 0,
@@ -550,7 +745,6 @@ export default function DashboardPage() {
     return () => window.clearInterval(interval);
   }, []);
 
-  // --- Import Latest Ride state ---
   const [latestImportBusy, setLatestImportBusy] = useState(false);
   const [latestImportErr, setLatestImportErr] = useState<string | null>(null);
   const [latestImportedSession, setLatestImportedSession] = useState<ApiSessionListItem | null>(null);
@@ -578,7 +772,6 @@ export default function DashboardPage() {
       }
 
       setLatestImportInfo("Import OK. Waiting for analysis to write session files…");
-      // Give backend a moment to persist new session(s)
       await new Promise((r) => setTimeout(r, 1200));
 
       const after = await cgApi.listAll();
@@ -626,7 +819,6 @@ export default function DashboardPage() {
         background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       }}
     >
-      {/* Subtle noise texture */}
       <div
         className="fixed inset-0 opacity-[0.015] pointer-events-none"
         style={{
@@ -635,7 +827,6 @@ export default function DashboardPage() {
       />
 
       <div className="max-w-4xl mx-auto px-4 py-6 relative">
-        {/* HEADER */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
           <Link
             to="/"
@@ -720,7 +911,7 @@ export default function DashboardPage() {
           }
         `}</style>
 
-        {/* 🔥 FAT IMPORT LATEST RIDE BUTTON - HERO PLACEMENT 🔥 */}
+        {/* FAT IMPORT LATEST RIDE BUTTON */}
         <section
           className="mb-4"
           style={{
@@ -733,7 +924,6 @@ export default function DashboardPage() {
               animation: "pulseGlow 3s ease-in-out infinite",
             }}
           >
-            {/* Background gradient */}
             <div
               className="absolute inset-0"
               style={{
@@ -741,11 +931,9 @@ export default function DashboardPage() {
               }}
             />
 
-            {/* Decorative circles */}
             <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
             <div className="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-yellow-300/15 blur-xl" />
 
-            {/* Strava-style pattern overlay */}
             <div
               className="absolute inset-0 opacity-[0.06]"
               style={{
@@ -756,9 +944,7 @@ export default function DashboardPage() {
 
             <div className="relative z-10 p-6 sm:p-8">
               <div className="flex flex-col sm:flex-row items-center gap-5">
-                {/* Left: Icon + Text */}
                 <div className="flex items-center gap-4 flex-1 min-w-0">
-                  {/* Strava-inspired icon */}
                   <div className="flex-none">
                     <div className="relative">
                       <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center shadow-lg">
@@ -793,7 +979,6 @@ export default function DashboardPage() {
                           </svg>
                         )}
                       </div>
-                      {/* Notification dot */}
                       {!latestImportBusy && (
                         <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-yellow-400 border-2 border-orange-500 flex items-center justify-center shadow-md">
                           <span className="text-[10px] font-bold text-orange-900">!</span>
@@ -813,7 +998,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Right: FAT BUTTON */}
                 <div className="flex-none w-full sm:w-auto">
                   <button
                     onClick={(e) => {
@@ -836,7 +1020,6 @@ export default function DashboardPage() {
                       }
                     `}
                   >
-                    {/* Shine effect on hover */}
                     {!latestImportBusy && (
                       <div className="absolute inset-0 rounded-2xl overflow-hidden">
                         <div
@@ -882,10 +1065,8 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Status line (always visible feedback) */}
               {latestImportInfo && <div className="mt-3 text-xs text-white/80">{latestImportInfo}</div>}
 
-              {/* Error message */}
               {latestImportErr && (
                 <div className="mt-4 rounded-xl bg-red-900/40 border border-red-400/30 backdrop-blur-sm px-4 py-3 flex items-start gap-3">
                   <svg className="h-5 w-5 text-red-300 flex-none mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -900,7 +1081,6 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Bottom hint */}
               <div className="mt-4 flex items-center justify-center sm:justify-start gap-2 text-white/60 text-xs">
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
@@ -916,7 +1096,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* 🔥 TRENDS HERO - WITH ANIMATED PREVIEW */}
+        {/* TRENDS HERO */}
         <section
           className="mb-4"
           style={{
@@ -924,7 +1104,6 @@ export default function DashboardPage() {
           }}
         >
           <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.25)] border border-white/40 relative overflow-hidden">
-            {/* Breakthrough Badge */}
             <div className="absolute top-4 right-4">
               <div
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold tracking-wide shadow-lg"
@@ -967,7 +1146,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Value Prop Box - WITH ANIMATED PREVIEW */}
             <div className="rounded-xl border-2 border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-8 mb-6 relative overflow-hidden">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(16,185,129,0.08),transparent_50%)]" />
 
@@ -1030,7 +1208,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* 🎯 COMPACT COUNTDOWN BANNER */}
             <div className="bg-yellow-400 border-2 border-yellow-500 rounded-lg p-3 shadow-lg">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
@@ -1065,7 +1242,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* 🎯 GOALS - Refined Lock */}
+        {/* GOALS */}
         <section
           className="mb-4"
           style={{
@@ -1118,17 +1295,16 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* PROFILE (compact, read-only) */}
-<section
-  id="profile"
-  className="mb-4 scroll-mt-24"
-  style={{
-    animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards",
-  }}
->
-  <ProfilePeekCard />
-</section>
-
+        {/* PROFILE */}
+        <section
+          id="profile"
+          className="mb-4 scroll-mt-24"
+          style={{
+            animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards",
+          }}
+        >
+          <ProfilePeekCard />
+        </section>
 
         {/* TWO-COLUMN GRID */}
         <div
@@ -1233,7 +1409,7 @@ export default function DashboardPage() {
         </footer>
       </div>
 
-      {/* ✅ SUCCESS MODAL - Latest Ride Imported */}
+      {/* SUCCESS MODAL */}
       {latestImportedSession
         ? (() => {
             const s = latestImportedSession as any;
@@ -1260,7 +1436,6 @@ export default function DashboardPage() {
                   aria-modal="true"
                   aria-label="Latest ride imported"
                 >
-                  {/* Green success header */}
                   <div
                     className="px-6 py-5"
                     style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
@@ -1283,7 +1458,6 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* Ride details */}
                   <div className="px-6 py-5">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="rounded-xl bg-slate-50 p-3.5 text-center">
@@ -1334,7 +1508,6 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex gap-3 justify-end">
                     <button
                       className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
