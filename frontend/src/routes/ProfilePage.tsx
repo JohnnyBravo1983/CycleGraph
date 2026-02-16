@@ -28,7 +28,7 @@ function resolveKey(draft: AnyRec, preferred: string, fallbacks: string[]): stri
 
 function numOrEmpty(v: unknown): string {
   if (typeof v === "number" && Number.isFinite(v)) return String(v);
-  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return v;
+  if (typeof v === "string" && v.trim() !== "") return v;
   return "";
 }
 
@@ -38,6 +38,7 @@ const inputBase =
 export default function ProfilePage() {
   const { draft, loading, error, init, setDraft, commit } = useProfileStore();
   const [saveBusy, setSaveBusy] = useState(false);
+  const [hoveredParam, setHoveredParam] = useState<string | null>(null);
 
   // March launch defaults (same as onboarding)
   const DEFAULT_CDA = 0.3;
@@ -115,6 +116,20 @@ export default function ProfilePage() {
       await commit();
     } finally {
       setSaveBusy(false);
+    }
+  };
+
+  // Handle decimal input for weight fields
+  const handleWeightChange = (key: string, value: string) => {
+    if (value === "") {
+      update(key, null);
+      return;
+    }
+    
+    // Allow decimal input
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue)) {
+      update(key, numValue);
     }
   };
 
@@ -214,12 +229,11 @@ export default function ProfilePage() {
               </label>
               <input
                 className={inputBase}
+                type="text"
                 inputMode="decimal"
-                placeholder="e.g. 75"
+                placeholder="e.g. 75.5"
                 value={numOrEmpty(d[K.weight])}
-                onChange={(e) =>
-                  update(K.weight, e.target.value === "" ? null : Number(e.target.value))
-                }
+                onChange={(e) => handleWeightChange(K.weight, e.target.value)}
               />
               <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
                 <svg
@@ -249,12 +263,11 @@ export default function ProfilePage() {
               </label>
               <input
                 className={inputBase}
+                type="text"
                 inputMode="decimal"
-                placeholder="e.g. 8.0"
+                placeholder="e.g. 8.2"
                 value={numOrEmpty(d[K.bikeWeight])}
-                onChange={(e) =>
-                  update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
-                }
+                onChange={(e) => handleWeightChange(K.bikeWeight, e.target.value)}
               />
               <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
                 <svg
@@ -308,28 +321,90 @@ export default function ProfilePage() {
                     </div>
                     <p className="text-xs text-slate-600 leading-relaxed">
                       We've set sensible defaults for aerodynamic drag, rolling resistance, and
-                      drivetrain efficiency. More granular controls coming in future updates.
+                      drivetrain efficiency. Hover over each to learn more.
                     </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-white rounded-lg border border-slate-200 p-3 text-center">
+                  {/* CdA */}
+                  <div 
+                    className="relative bg-white rounded-lg border border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    onMouseEnter={() => setHoveredParam('cda')}
+                    onMouseLeave={() => setHoveredParam(null)}
+                  >
                     <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
                     <div className="text-lg font-bold text-slate-900">{DEFAULT_CDA}</div>
                     <div className="text-[10px] text-slate-500 mt-1">Drag area</div>
+                    
+                    {/* Tooltip */}
+                    {hoveredParam === 'cda' && (
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl">
+                        <div className="font-semibold mb-1">Coefficient of Drag Area</div>
+                        <p className="leading-relaxed mb-2">
+                          Represents your aerodynamic resistance. Road position: ~0.30 m². Lower values mean less air resistance.
+                        </p>
+                        <div className="text-[10px] text-emerald-300">
+                          Default chosen for typical road cycling position
+                        </div>
+                        {/* Arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                      </div>
+                    )}
                   </div>
-                  <div className="bg-white rounded-lg border border-slate-200 p-3 text-center">
+
+                  {/* Crr */}
+                  <div 
+                    className="relative bg-white rounded-lg border border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    onMouseEnter={() => setHoveredParam('crr')}
+                    onMouseLeave={() => setHoveredParam(null)}
+                  >
                     <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
                     <div className="text-lg font-bold text-slate-900">{DEFAULT_CRR}</div>
                     <div className="text-[10px] text-slate-500 mt-1">Rolling resistance</div>
+                    
+                    {/* Tooltip */}
+                    {hoveredParam === 'crr' && (
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl">
+                        <div className="font-semibold mb-1">Rolling Resistance Coefficient</div>
+                        <p className="leading-relaxed mb-2">
+                          Energy lost to tire deformation. Modern 28mm tires at optimal pressure: ~0.004. Lower is better.
+                        </p>
+                        <div className="text-[10px] text-emerald-300">
+                          Default based on quality road tires (28mm)
+                        </div>
+                        {/* Arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                      </div>
+                    )}
                   </div>
-                  <div className="bg-white rounded-lg border border-slate-200 p-3 text-center">
+
+                  {/* Efficiency */}
+                  <div 
+                    className="relative bg-white rounded-lg border border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    onMouseEnter={() => setHoveredParam('efficiency')}
+                    onMouseLeave={() => setHoveredParam(null)}
+                  >
                     <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
                     <div className="text-lg font-bold text-slate-900">
                       {(DEFAULT_CRANK_EFF * 100).toFixed(0)}%
                     </div>
                     <div className="text-[10px] text-slate-500 mt-1">Drivetrain</div>
+                    
+                    {/* Tooltip */}
+                    {hoveredParam === 'efficiency' && (
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl">
+                        <div className="font-semibold mb-1">Drivetrain Efficiency</div>
+                        <p className="leading-relaxed mb-2">
+                          Power lost through chain friction. Clean, well-maintained drivetrains: 96-98%. Accounts for ~2-4% loss.
+                        </p>
+                        <div className="text-[10px] text-emerald-300">
+                          Default represents clean, modern drivetrain
+                        </div>
+                        {/* Arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
