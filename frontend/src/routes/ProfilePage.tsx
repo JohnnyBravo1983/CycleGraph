@@ -119,17 +119,25 @@ export default function ProfilePage() {
     }
   };
 
-  // Handle decimal input for weight fields
-  const handleWeightChange = (key: string, value: string) => {
+  // Handle decimal input - allows both integers and decimals
+  const handleDecimalInput = (key: string, value: string) => {
+    // Allow empty string
     if (value === "") {
       update(key, null);
       return;
     }
-    
-    // Allow decimal input
-    const numValue = parseFloat(value);
-    if (!isNaN(numValue)) {
-      update(key, numValue);
+
+    // Allow partial decimal inputs like "75." or "8."
+    if (value.endsWith('.') && value.split('.').length === 2) {
+      // Store as string temporarily to allow typing
+      update(key, value);
+      return;
+    }
+
+    // Validate and convert to number
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && isFinite(parsed)) {
+      update(key, parsed);
     }
   };
 
@@ -231,9 +239,10 @@ export default function ProfilePage() {
                 className={inputBase}
                 type="text"
                 inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
                 placeholder="e.g. 75.5"
                 value={numOrEmpty(d[K.weight])}
-                onChange={(e) => handleWeightChange(K.weight, e.target.value)}
+                onChange={(e) => handleDecimalInput(K.weight, e.target.value)}
               />
               <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
                 <svg
@@ -265,9 +274,10 @@ export default function ProfilePage() {
                 className={inputBase}
                 type="text"
                 inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
                 placeholder="e.g. 8.2"
                 value={numOrEmpty(d[K.bikeWeight])}
-                onChange={(e) => handleWeightChange(K.bikeWeight, e.target.value)}
+                onChange={(e) => handleDecimalInput(K.bikeWeight, e.target.value)}
               />
               <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
                 <svg
@@ -320,8 +330,7 @@ export default function ProfilePage() {
                       Advanced Parameters
                     </div>
                     <p className="text-xs text-slate-600 leading-relaxed">
-                      We've set sensible defaults for aerodynamic drag, rolling resistance, and
-                      drivetrain efficiency. Hover over each to learn more.
+                      We've set sensible defaults based on typical road cycling. Hover over each to see what it means in real terms.
                     </p>
                   </div>
                 </div>
@@ -329,23 +338,29 @@ export default function ProfilePage() {
                 <div className="grid grid-cols-3 gap-4">
                   {/* CdA */}
                   <div 
-                    className="relative bg-white rounded-lg border border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
                     onMouseEnter={() => setHoveredParam('cda')}
                     onMouseLeave={() => setHoveredParam(null)}
                   >
                     <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
                     <div className="text-lg font-bold text-slate-900">{DEFAULT_CDA}</div>
-                    <div className="text-[10px] text-slate-500 mt-1">Drag area</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Air resistance</div>
                     
                     {/* Tooltip */}
                     {hoveredParam === 'cda' && (
-                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl">
-                        <div className="font-semibold mb-1">Coefficient of Drag Area</div>
-                        <p className="leading-relaxed mb-2">
-                          Represents your aerodynamic resistance. Road position: ~0.30 m². Lower values mean less air resistance.
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                        <div className="font-bold mb-2 text-sm text-emerald-300">Wind Resistance (CdA)</div>
+                        <p className="leading-relaxed mb-3">
+                          This measures how much the wind slows you down. Think of it like your "size" to the wind.
                         </p>
-                        <div className="text-[10px] text-emerald-300">
-                          Default chosen for typical road cycling position
+                        <div className="bg-slate-800 rounded p-2 mb-3">
+                          <div className="font-semibold mb-1">Real example:</div>
+                          <div className="text-[11px] leading-relaxed">
+                            At 35 km/h, improving from 0.30 to 0.27 (aero position) saves you <span className="text-emerald-300 font-bold">~25 seconds per 40km</span>.
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          ✓ We use 0.30 as default (normal road position with hoods)
                         </div>
                         {/* Arrow */}
                         <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
@@ -355,23 +370,29 @@ export default function ProfilePage() {
 
                   {/* Crr */}
                   <div 
-                    className="relative bg-white rounded-lg border border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
                     onMouseEnter={() => setHoveredParam('crr')}
                     onMouseLeave={() => setHoveredParam(null)}
                   >
                     <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
                     <div className="text-lg font-bold text-slate-900">{DEFAULT_CRR}</div>
-                    <div className="text-[10px] text-slate-500 mt-1">Rolling resistance</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Tire resistance</div>
                     
                     {/* Tooltip */}
                     {hoveredParam === 'crr' && (
-                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl">
-                        <div className="font-semibold mb-1">Rolling Resistance Coefficient</div>
-                        <p className="leading-relaxed mb-2">
-                          Energy lost to tire deformation. Modern 28mm tires at optimal pressure: ~0.004. Lower is better.
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                        <div className="font-bold mb-2 text-sm text-emerald-300">Rolling Resistance (Crr)</div>
+                        <p className="leading-relaxed mb-3">
+                          How much energy your tires "waste" by squishing against the road. Lower is faster.
                         </p>
-                        <div className="text-[10px] text-emerald-300">
-                          Default based on quality road tires (28mm)
+                        <div className="bg-slate-800 rounded p-2 mb-3">
+                          <div className="font-semibold mb-1">Real example:</div>
+                          <div className="text-[11px] leading-relaxed">
+                            Upgrading from cheap tires (0.006) to quality tires (0.004) saves you <span className="text-emerald-300 font-bold">~1 minute per 40km</span> at 30 km/h.
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          ✓ We use 0.004 as default (modern 28mm road tires, proper pressure)
                         </div>
                         {/* Arrow */}
                         <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
@@ -381,7 +402,7 @@ export default function ProfilePage() {
 
                   {/* Efficiency */}
                   <div 
-                    className="relative bg-white rounded-lg border border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+                    className="relative bg-white rounded-lg border-2 border-slate-200 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
                     onMouseEnter={() => setHoveredParam('efficiency')}
                     onMouseLeave={() => setHoveredParam(null)}
                   >
@@ -389,17 +410,23 @@ export default function ProfilePage() {
                     <div className="text-lg font-bold text-slate-900">
                       {(DEFAULT_CRANK_EFF * 100).toFixed(0)}%
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-1">Drivetrain</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Power loss</div>
                     
                     {/* Tooltip */}
                     {hoveredParam === 'efficiency' && (
-                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-900 text-white text-xs rounded-lg shadow-xl">
-                        <div className="font-semibold mb-1">Drivetrain Efficiency</div>
-                        <p className="leading-relaxed mb-2">
-                          Power lost through chain friction. Clean, well-maintained drivetrains: 96-98%. Accounts for ~2-4% loss.
+                      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                        <div className="font-bold mb-2 text-sm text-emerald-300">Drivetrain Efficiency</div>
+                        <p className="leading-relaxed mb-3">
+                          How much power is lost in your chain and gears before it reaches the rear wheel.
                         </p>
-                        <div className="text-[10px] text-emerald-300">
-                          Default represents clean, modern drivetrain
+                        <div className="bg-slate-800 rounded p-2 mb-3">
+                          <div className="font-semibold mb-1">Real example:</div>
+                          <div className="text-[11px] leading-relaxed">
+                            A dirty chain (93% efficiency) vs clean chain (97% efficiency) means you lose <span className="text-emerald-300 font-bold">~8 watts</span> at 200W output. That's ~30 seconds per 40km.
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-300">
+                          ✓ We use 96% as default (clean, well-maintained modern drivetrain)
                         </div>
                         {/* Arrow */}
                         <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
