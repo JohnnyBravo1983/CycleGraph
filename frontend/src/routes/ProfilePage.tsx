@@ -1,7 +1,6 @@
 // frontend/src/routes/ProfilePage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useProfileStore } from "../state/profileStore";
-import Interactive3DCyclistProfile from "../components/Interactive3DCyclistProfile";
 
 /**
  * Profile Settings
@@ -34,7 +33,7 @@ function numOrEmpty(v: unknown): string {
 }
 
 const inputBase =
-  "w-full rounded-lg border-2 border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all";
+  "w-full rounded-lg border-2 border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200";
 
 export default function ProfilePage() {
   const { draft, loading, error, init, setDraft, commit } = useProfileStore();
@@ -121,81 +120,168 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-        <div className="text-slate-600">Loading profile...</div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <svg
+            className="animate-spin h-6 w-6 text-emerald-600"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            />
+          </svg>
+          <span className="text-slate-600 font-medium">Loading profile...</span>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-        <div className="text-red-600">{error}</div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex items-center justify-center">
+        <div className="max-w-md rounded-xl bg-red-50 border-2 border-red-200 p-6">
+          <div className="flex items-start gap-3">
+            <svg
+              className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <div>
+              <div className="font-semibold text-red-900 mb-1">Error loading profile</div>
+              <div className="text-sm text-red-700">{error}</div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8">
-      <div className="max-w-7xl mx-auto px-4">
-        {/* Interactive 3D Component - Full Width on Desktop, Stack on Mobile */}
-        <div className="mb-6">
-          <Interactive3DCyclistProfile />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 py-12 px-4">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Profile Settings</h1>
+          <p className="text-slate-600">
+            These values affect your FTP and power modeling accuracy. Keep them up to date for best
+            results.
+          </p>
         </div>
 
-        {/* Editable Fields Card - Positioned Below Model */}
-        <div className="max-w-2xl mx-auto">
-          <div className="rounded-2xl bg-white/98 backdrop-blur-xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.15)] border border-slate-200">
-            <div className="mb-6">
-              <h3 className="text-lg font-bold text-slate-900 mb-1">Your Profile Data</h3>
-              <p className="text-sm text-slate-600">
-                Update your actual weight and bike specs. These values feed into the physics model above.
-              </p>
+        {/* Main Card */}
+        <div className="rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden">
+          {/* Card Header */}
+          <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-4">
+            <div className="flex items-center gap-2 text-white">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+              <h2 className="font-semibold">Your Profile Data</h2>
+            </div>
+          </div>
+
+          {/* Card Body */}
+          <div className="p-6 space-y-6">
+            {/* Rider Weight */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Rider Weight (kg) <span className="text-red-500">*</span>
+              </label>
+              <input
+                className={inputBase}
+                inputMode="decimal"
+                placeholder="e.g. 75"
+                value={numOrEmpty(d[K.weight])}
+                onChange={(e) =>
+                  update(K.weight, e.target.value === "" ? null : Number(e.target.value))
+                }
+              />
+              <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+                <svg
+                  className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>
+                  Required for accurate FTP modeling and climbing power calculations. This is the
+                  most important input.
+                </span>
+              </div>
             </div>
 
-            <div className="space-y-5">
-              {/* Rider Weight */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Rider Weight (kg) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  className={inputBase}
-                  inputMode="decimal"
-                  placeholder="e.g. 75"
-                  value={numOrEmpty(d[K.weight])}
-                  onChange={(e) =>
-                    update(K.weight, e.target.value === "" ? null : Number(e.target.value))
-                  }
-                />
-                <p className="mt-1.5 text-xs text-slate-500">
-                  Critical for accurate FTP modeling and climbing power calculations.
-                </p>
+            {/* Bike Weight */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Bike Weight (kg)
+              </label>
+              <input
+                className={inputBase}
+                inputMode="decimal"
+                placeholder="e.g. 8.0"
+                value={numOrEmpty(d[K.bikeWeight])}
+                onChange={(e) =>
+                  update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
+                }
+              />
+              <div className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+                <svg
+                  className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>
+                  Used for total system mass in climbing and acceleration modeling. Typical road
+                  bikes: 7-9 kg.
+                </span>
               </div>
+            </div>
 
-              {/* Bike Weight */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Bike Weight (kg)
-                </label>
-                <input
-                  className={inputBase}
-                  inputMode="decimal"
-                  placeholder="e.g. 8.0"
-                  value={numOrEmpty(d[K.bikeWeight])}
-                  onChange={(e) =>
-                    update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
-                  }
-                />
-                <p className="mt-1.5 text-xs text-slate-500">
-                  Used for total system mass in climbing and acceleration modeling.
-                </p>
-              </div>
-
-              {/* Default Values Info Box */}
-              <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex-shrink-0">
+            {/* Advanced Parameters Section */}
+            <div className="pt-6 border-t-2 border-slate-100">
+              <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-slate-200 p-5">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-slate-200 flex items-center justify-center">
                     <svg
                       className="w-5 h-5 text-slate-600"
                       fill="none"
@@ -206,86 +292,111 @@ export default function ProfilePage() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                       />
                     </svg>
                   </div>
                   <div className="flex-1">
-                    <div className="text-sm font-semibold text-slate-900 mb-2">
+                    <div className="text-sm font-bold text-slate-900 mb-1">
                       Advanced Parameters
                     </div>
-                    <p className="text-xs text-slate-600 mb-3 leading-relaxed">
-                      We've set sensible defaults for CdA, Crr, and drivetrain efficiency. More
-                      granular controls coming in future updates.
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      We've set sensible defaults for aerodynamic drag, rolling resistance, and
+                      drivetrain efficiency. More granular controls coming in future updates.
                     </p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="text-center">
-                        <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
-                        <div className="text-sm font-bold text-slate-900">{DEFAULT_CDA}</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
-                        <div className="text-sm font-bold text-slate-900">{DEFAULT_CRR}</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
-                        <div className="text-sm font-bold text-slate-900">
-                          {(DEFAULT_CRANK_EFF * 100).toFixed(0)}%
-                        </div>
-                      </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-white rounded-lg border border-slate-200 p-3 text-center">
+                    <div className="text-xs font-medium text-slate-500 mb-1">CdA</div>
+                    <div className="text-lg font-bold text-slate-900">{DEFAULT_CDA}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Drag area</div>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 p-3 text-center">
+                    <div className="text-xs font-medium text-slate-500 mb-1">Crr</div>
+                    <div className="text-lg font-bold text-slate-900">{DEFAULT_CRR}</div>
+                    <div className="text-[10px] text-slate-500 mt-1">Rolling resistance</div>
+                  </div>
+                  <div className="bg-white rounded-lg border border-slate-200 p-3 text-center">
+                    <div className="text-xs font-medium text-slate-500 mb-1">Efficiency</div>
+                    <div className="text-lg font-bold text-slate-900">
+                      {(DEFAULT_CRANK_EFF * 100).toFixed(0)}%
                     </div>
+                    <div className="text-[10px] text-slate-500 mt-1">Drivetrain</div>
                   </div>
                 </div>
               </div>
             </div>
-
-            {/* Save Button */}
-            <div className="mt-6 pt-5 border-t border-slate-200">
-              <button
-                onClick={handleSave}
-                disabled={loading || saveBusy}
-                className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg hover:shadow-xl hover:scale-[1.01] transition-all duration-200 disabled:from-slate-400 disabled:to-slate-500 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
-              >
-                {saveBusy ? (
-                  <>
-                    <svg
-                      className="animate-spin h-5 w-5"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2.5}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                    Save Profile Changes
-                  </>
-                )}
-              </button>
-            </div>
           </div>
+
+          {/* Card Footer */}
+          <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
+            <button
+              onClick={handleSave}
+              disabled={loading || saveBusy}
+              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg hover:shadow-xl hover:from-emerald-600 hover:to-emerald-700 hover:scale-[1.01] transition-all duration-200 disabled:from-slate-400 disabled:to-slate-500 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-md flex items-center justify-center gap-2"
+            >
+              {saveBusy ? (
+                <>
+                  <svg
+                    className="animate-spin h-5 w-5"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  Save Profile Changes
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Help Text Footer */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-slate-500">
+            Need help? Check our{" "}
+            <a href="#" className="text-emerald-600 hover:text-emerald-700 font-medium">
+              documentation
+            </a>{" "}
+            or{" "}
+            <a href="#" className="text-emerald-600 hover:text-emerald-700 font-medium">
+              contact support
+            </a>
+            .
+          </p>
         </div>
       </div>
     </div>
