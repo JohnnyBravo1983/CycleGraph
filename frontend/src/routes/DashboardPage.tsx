@@ -5,7 +5,7 @@ import { cgApi, type SessionListItem as ApiSessionListItem } from "../lib/cgApi"
 import { StravaImportCard } from "../components/StravaImportCard";
 import { isDemoMode } from "../demo/demoMode";
 import { demoRides, progressionSummary } from "../demo/demoRides";
-import ProfileView from "../components/Profile/ProfileView";
+import ProfilePeekCard from "../components/Profile/ProfilePeekCard";
 
 type YearKey = "2022" | "2023" | "2024" | "2025";
 
@@ -1118,16 +1118,17 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* PROFILE (read-only) */}
-        <section
-          id="profile"
-          className="mb-4 scroll-mt-24"
-          style={{
-            animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards",
-          }}
-        >
-          <ProfileView />
-        </section>
+        {/* PROFILE (compact, read-only) */}
+<section
+  id="profile"
+  className="mb-4 scroll-mt-24"
+  style={{
+    animation: "slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards",
+  }}
+>
+  <ProfilePeekCard />
+</section>
+
 
         {/* TWO-COLUMN GRID */}
         <div
