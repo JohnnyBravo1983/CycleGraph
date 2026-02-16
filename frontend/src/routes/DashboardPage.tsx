@@ -573,41 +573,72 @@ function ProfilePeekCard() {
 
             {/* FTP Tooltip */}
             {hoveredParam === "ftp" && (
-              <div className="absolute z-[100] right-full top-0 mr-2 w-72 p-3 bg-slate-900 text-white text-[11px] rounded-lg shadow-2xl">
-                <div className="font-bold mb-2 text-xs text-emerald-300">
-                  Functional Threshold Power (FTP)
-                </div>
-                <p className="leading-relaxed mb-2 text-[10px]">
-                  Your sustainable power for ~1 hour. Defines fitness level.
-                </p>
-
-                <div className="bg-slate-800 rounded p-2 mb-2">
-                  <div className="font-semibold mb-1.5 text-[10px] text-emerald-300">FTP levels:</div>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] mb-2">
-                    <div><span className="font-semibold text-white">Beginner:</span> 100-150W</div>
-                    <div><span className="font-semibold text-white">Recreational:</span> 150-200W</div>
-                    <div><span className="font-semibold text-white">Amateur:</span> 200-280W</div>
-                    <div><span className="font-semibold text-white">Elite:</span> 280-350W</div>
-                    <div className="col-span-2"><span className="font-semibold text-white">Pro:</span> 350-420W</div>
+              <div className="absolute z-[100] right-full top-0 mr-3 w-80 p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white text-xs rounded-xl shadow-2xl border-2 border-emerald-500/30">
+                {/* Header with icon */}
+                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-emerald-500/20">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                    <span className="text-lg">⚡</span>
                   </div>
-                  <div className="pt-2 border-t border-slate-700 text-[10px] leading-relaxed">
-                    <div className="mb-1"><span className="text-yellow-300">💡</span> <span className="font-semibold text-white">FTP = fitness tracker</span></div>
-                    <div className="text-slate-300">Speed (uphill) = W/kg (FTP ÷ weight). Lose weight = faster.</div>
+                  <div>
+                    <div className="font-bold text-sm text-emerald-300">Functional Threshold Power</div>
+                    <div className="text-[10px] text-slate-400">Your cycling fitness benchmark</div>
                   </div>
                 </div>
 
-                <div className="bg-slate-800 rounded p-2 mb-2">
-                  <div className="font-semibold mb-1 text-[10px] text-emerald-300">Improve FTP:</div>
-                  <div className="text-[10px] leading-relaxed space-y-0.5">
-                    <div>• Intervals & tempo • 10-20W/year • Lose weight</div>
+                {/* What is FTP */}
+                <div className="mb-3">
+                  <p className="text-[11px] leading-relaxed text-slate-200">
+                    <span className="font-semibold text-white">FTP is the maximum power you can sustain for one hour.</span> Think of it like your "cruising speed" — the harder you can push for a full hour, the fitter you are.
+                  </p>
+                </div>
+
+                {/* Levels */}
+                <div className="bg-slate-800/60 rounded-lg p-3 mb-3 border border-slate-700/50">
+                  <div className="font-semibold mb-2 text-[11px] text-emerald-300">Where do you stand?</div>
+                  <div className="space-y-1.5 text-[11px]">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-300">Beginner</span>
+                      <span className="font-semibold text-white">100-150W</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-300">Recreational</span>
+                      <span className="font-semibold text-white">150-200W</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-300">Serious amateur</span>
+                      <span className="font-semibold text-white">200-280W</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-300">Elite amateur</span>
+                      <span className="font-semibold text-white">280-350W</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-300">Professional</span>
+                      <span className="font-semibold text-emerald-400">350-420W</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="text-[9px] text-slate-300">
-                  ✓ Auto-calculated from rides
+                {/* W/kg note */}
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5 mb-3">
+                  <div className="flex items-start gap-2">
+                    <span className="text-yellow-400 text-sm flex-shrink-0">💡</span>
+                    <div className="text-[10px] leading-relaxed">
+                      <span className="font-semibold text-yellow-200">Important:</span>
+                      <span className="text-slate-300"> Your speed uphill depends on </span>
+                      <span className="font-semibold text-white">W/kg</span>
+                      <span className="text-slate-300"> (FTP ÷ weight). A 70kg rider at 210W climbs faster than 105kg at 265W, despite lower absolute power.</span>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Bottom note */}
+                <div className="text-[10px] text-slate-400 italic">
+                  We calculate your FTP automatically from your ride data
+                </div>
+
                 {/* Arrow pointing right */}
-                <div className="absolute left-full top-4 ml-[-1px] w-2 h-2 bg-slate-900 rotate-45"></div>
+                <div className="absolute left-full top-5 ml-[-1px] w-2 h-2 bg-slate-900 rotate-45 border-r-2 border-t-2 border-emerald-500/30"></div>
               </div>
             )}
           </div>
