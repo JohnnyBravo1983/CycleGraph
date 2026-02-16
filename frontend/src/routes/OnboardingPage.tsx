@@ -48,9 +48,6 @@ function numOrEmpty(v: unknown): string {
   if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return v;
   return "";
 }
-function strOrEmpty(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
 
 // ✅ PATCH 4D.3 — light theme components
 function Tooltip({ text }: { text: string }) {
@@ -163,13 +160,10 @@ export default function OnboardingPage() {
     return {
       // Rider
       weight: resolveKey(d, "rider_weight_kg", ["weight_kg", "weightKg", "weight"]),
-      gender: resolveKey(d, "gender", ["sex"]),
-      age: resolveKey(d, "age", ["age_years", "ageYears"]),
-      country: resolveKey(d, "country", ["country_code", "countryCode"]),
-      city: resolveKey(d, "city", ["town"]),
 
       // Bike
       tireWidth: resolveKey(d, "tire_width_mm", ["tireWidthMm", "tire_width", "tireWidth"]),
+      bikeWeight: resolveKey(d, "bike_weight_kg", ["bikeWeightKg", "bikeWeight"]),
 
       // Aero
       cda: resolveKey(d, "cda", ["CdA", "aero_cda", "aeroCdA"]),
@@ -219,10 +213,15 @@ export default function OnboardingPage() {
       next[K.tireWidth] = 28;
       changed = true;
     }
+    // ✅ NEW: bike weight default (reasonable baseline)
+    if (!has(K.bikeWeight)) {
+      next[K.bikeWeight] = 8.0;
+      changed = true;
+    }
 
     if (changed) setDraft(next);
     defaultsAppliedRef.current = true;
-  }, [draft, setDraft, K.cda, K.crr, K.crankEff, K.tireWidth]);
+  }, [draft, setDraft, K.cda, K.crr, K.crankEff, K.tireWidth, K.bikeWeight]);
 
   // ✅ PATCH 1B: After “Finish” → re-analyze ALL rides from listAll() + refresh list before navigation
   const onFinish = async () => {
@@ -364,41 +363,35 @@ export default function OnboardingPage() {
           <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
         </FieldRow>
 
-        {/* ✅ PATCH 4D.3: removed Gender + Age blocks */}
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <FieldRow label="Country">
-            <input
-              className={inputBase}
-              placeholder="e.g. Norway"
-              value={strOrEmpty(d[K.country])}
-              onChange={(e) => update(K.country, e.target.value)}
-            />
-          </FieldRow>
-          <FieldRow label="City">
-            <input
-              className={inputBase}
-              placeholder="e.g. Oslo"
-              value={strOrEmpty(d[K.city])}
-              onChange={(e) => update(K.city, e.target.value)}
-            />
-          </FieldRow>
-        </div>
+        {/* ✅ Removed Gender/Age and Country/City */}
       </SectionCard>
 
       <SectionCard title="Bike Setup" subtitle="Used to estimate rolling losses and speed.">
-        {/* ✅ PATCH 4D.3: Tire width dropdown */}
-        <FieldRow label="Tire width">
-          <select
-            className={inputBase}
-            value={String(d[K.tireWidth] ?? 28)}
-            onChange={(e) => update(K.tireWidth, Number(e.target.value))}
-          >
-            <option value="25">25mm</option>
-            <option value="28">28mm</option>
-            <option value="31">30–32mm</option>
-          </select>
-        </FieldRow>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FieldRow label="Tire width">
+            <select
+              className={inputBase}
+              value={String(d[K.tireWidth] ?? 28)}
+              onChange={(e) => update(K.tireWidth, Number(e.target.value))}
+            >
+              <option value="25">25mm</option>
+              <option value="28">28mm</option>
+              <option value="31">30–32mm</option>
+            </select>
+          </FieldRow>
+
+          <FieldRow label="Bike weight (kg)">
+            <input
+              className={inputBase}
+              inputMode="decimal"
+              placeholder="e.g. 8.2"
+              value={numOrEmpty(d[K.bikeWeight])}
+              onChange={(e) =>
+                update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
+              }
+            />
+          </FieldRow>
+        </div>
       </SectionCard>
 
       <SectionCard title="Aerodynamics" subtitle="Used to estimate aerodynamic drag.">
