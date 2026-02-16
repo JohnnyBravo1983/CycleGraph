@@ -583,28 +583,26 @@ function ProfilePeekCard() {
                 </p>
 
                 <div className="bg-slate-800 rounded p-3 mb-3 space-y-2">
-                  <div className="font-semibold mb-2 text-emerald-300">Real-world examples:</div>
+                  <div className="font-semibold mb-2 text-emerald-300">Real-world examples (FTP):</div>
                   <div className="space-y-1.5 text-[11px] leading-relaxed">
                     <div>
-                      <span className="font-semibold text-white">Beginner:</span> 100-150W (just starting
-                      out)
+                      <span className="font-semibold text-white">Beginner:</span> 100-150W
                     </div>
                     <div>
-                      <span className="font-semibold text-white">Recreational:</span> 150-200W (regular weekend
-                      rides)
+                      <span className="font-semibold text-white">Recreational:</span> 150-200W
                     </div>
                     <div>
-                      <span className="font-semibold text-white">Serious amateur:</span> 200-280W (club racer,
-                      competitive)
+                      <span className="font-semibold text-white">Serious amateur:</span> 200-280W
                     </div>
                     <div>
-                      <span className="font-semibold text-white">Elite amateur:</span> 280-350W (podium
-                      finisher)
+                      <span className="font-semibold text-white">Elite amateur:</span> 280-350W
                     </div>
                     <div>
-                      <span className="font-semibold text-white">Pro cyclist:</span> 350-420W (World Tour
-                      level)
+                      <span className="font-semibold text-white">Pro cyclist:</span> 350-420W
                     </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-slate-700 text-[11px] leading-relaxed">
+                    <span className="text-yellow-300">💡</span> <span className="font-semibold text-white">FTP tracks your fitness progression reliably.</span> However, your speed (especially uphill) depends on W/kg ratio (FTP ÷ weight). Same FTP = better speed if you lose weight.
                   </div>
                 </div>
 
