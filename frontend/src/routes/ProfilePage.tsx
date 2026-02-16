@@ -36,6 +36,7 @@ function strOrEmpty(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+// ✅ PATCH 4D.4 — light theme components
 function Tooltip({
   text,
   className = "",
@@ -46,10 +47,10 @@ function Tooltip({
   return (
     <span className={`relative inline-flex items-center ${className}`}>
       <span className="group inline-flex items-center">
-        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-white/5 text-xs text-white/80">
+        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-xs text-slate-700">
           i
         </span>
-        <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-white/10 bg-slate-900/95 p-3 text-xs text-white/90 shadow-lg group-hover:block">
+        <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg group-hover:block">
           {text}
         </span>
       </span>
@@ -67,12 +68,10 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="mb-3">
-        <div className="text-sm font-semibold text-white/95">{title}</div>
-        {subtitle ? (
-          <div className="mt-1 text-xs text-white/60">{subtitle}</div>
-        ) : null}
+        <div className="text-sm font-semibold text-slate-900">{title}</div>
+        {subtitle ? <div className="mt-1 text-xs text-slate-600">{subtitle}</div> : null}
       </div>
       <div className="flex flex-col gap-3">{children}</div>
     </div>
@@ -93,8 +92,8 @@ function FieldRow({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-white/80">
-          {label} {required ? <span className="text-white/60">*</span> : null}
+        <label className="text-xs font-medium text-slate-700">
+          {label} {required ? <span className="text-slate-500">*</span> : null}
         </label>
         {right}
       </div>
@@ -104,7 +103,7 @@ function FieldRow({
 }
 
 const inputBase =
-  "w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/10";
+  "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200";
 
 export default function ProfilePage() {
   const { draft, loading, error, init, setDraft, commit } = useProfileStore();
@@ -153,11 +152,11 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto flex flex-col gap-4 p-4">
+    <div className="max-w-xl mx-auto flex flex-col gap-4 p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-white/95">Profile Settings</h1>
-          <div className="mt-1 text-sm text-white/60">
+          <h1 className="text-2xl font-semibold tracking-tight">Profile Settings</h1>
+          <div className="mt-1 text-sm text-slate-600">
             These values affect your FTP / PrecisionWatt modeling.
           </div>
         </div>
@@ -176,33 +175,10 @@ export default function ProfilePage() {
             value={numOrEmpty(d[K.weight])}
             onChange={(e) => update(K.weight, e.target.value === "" ? null : Number(e.target.value))}
           />
-          <div className="text-[11px] text-white/40">Required for accurate FTP modeling.</div>
+          <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
         </FieldRow>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <FieldRow label="Gender">
-            <select
-              className={inputBase}
-              value={strOrEmpty(d[K.gender])}
-              onChange={(e) => update(K.gender, e.target.value)}
-            >
-              <option value="">Prefer not to say</option>
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-              <option value="other">Other</option>
-            </select>
-          </FieldRow>
-
-          <FieldRow label="Age">
-            <input
-              className={inputBase}
-              inputMode="numeric"
-              placeholder="e.g. 41"
-              value={numOrEmpty(d[K.age])}
-              onChange={(e) => update(K.age, e.target.value === "" ? null : Number(e.target.value))}
-            />
-          </FieldRow>
-        </div>
+        {/* ✅ PATCH 4D.4: removed Gender + Age blocks */}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <FieldRow label="Country">
@@ -226,16 +202,17 @@ export default function ProfilePage() {
 
       {/* Bike Setup */}
       <SectionCard title="Bike Setup" subtitle="Used to estimate rolling losses and speed.">
-        <FieldRow label="Tire width (mm)">
-          <input
+        {/* ✅ PATCH 4D.4: Tire width dropdown */}
+        <FieldRow label="Tire width">
+          <select
             className={inputBase}
-            inputMode="numeric"
-            placeholder="e.g. 28"
-            value={numOrEmpty(d[K.tireWidth])}
-            onChange={(e) =>
-              update(K.tireWidth, e.target.value === "" ? null : Number(e.target.value))
-            }
-          />
+            value={String(d[K.tireWidth] ?? 28)}
+            onChange={(e) => update(K.tireWidth, Number(e.target.value))}
+          >
+            <option value="25">25mm</option>
+            <option value="28">28mm</option>
+            <option value="31">30–32mm</option>
+          </select>
         </FieldRow>
       </SectionCard>
 
@@ -244,7 +221,7 @@ export default function ProfilePage() {
         <FieldRow
           label="CdA"
           right={
-            <Tooltip text='Aerodynamic drag coefficient (0.250–0.350, lower = faster). Affects FTP modeling.' />
+            <Tooltip text="Aerodynamic drag coefficient (0.250–0.350, lower = faster). Affects FTP modeling." />
           }
         >
           <input
@@ -258,20 +235,16 @@ export default function ProfilePage() {
       </SectionCard>
 
       {/* Advanced */}
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((s) => !s)}
-          className="w-full text-left"
-        >
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <button type="button" onClick={() => setShowAdvanced((s) => !s)} className="w-full text-left">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-semibold text-white/95">Advanced settings</div>
-              <div className="mt-1 text-xs text-white/60">
+              <div className="text-sm font-semibold text-slate-900">Advanced settings</div>
+              <div className="mt-1 text-xs text-slate-600">
                 Optional — you can leave these as defaults.
               </div>
             </div>
-            <div className="text-xs text-white/70">{showAdvanced ? "Hide" : "Show"}</div>
+            <div className="text-xs text-slate-600">{showAdvanced ? "Hide" : "Show"}</div>
           </div>
         </button>
 
@@ -280,7 +253,7 @@ export default function ProfilePage() {
             <FieldRow
               label="Crr"
               right={
-                <Tooltip text='Rolling resistance (0.0030–0.0050, lower = faster). Affects FTP modeling.' />
+                <Tooltip text="Rolling resistance (0.0030–0.0050, lower = faster). Affects FTP modeling." />
               }
             >
               <input
@@ -294,9 +267,7 @@ export default function ProfilePage() {
 
             <FieldRow
               label="Crank efficiency"
-              right={
-                <Tooltip text='Power transfer efficiency (typically 96%). Affects FTP modeling.' />
-              }
+              right={<Tooltip text="Power transfer efficiency (typically 96%). Affects FTP modeling." />}
             >
               <input
                 className={inputBase}
@@ -317,7 +288,7 @@ export default function ProfilePage() {
         <button
           onClick={handleSave}
           disabled={loading}
-          className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
+          className="px-4 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
         >
           Save Profile
         </button>

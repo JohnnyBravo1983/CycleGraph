@@ -52,14 +52,15 @@ function strOrEmpty(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+// ✅ PATCH 4D.3 — light theme components
 function Tooltip({ text }: { text: string }) {
   return (
     <span className="relative inline-flex items-center">
       <span className="group inline-flex items-center">
-        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-white/5 text-xs text-white/80">
+        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-xs text-slate-700">
           i
         </span>
-        <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-white/10 bg-slate-900/95 p-3 text-xs text-white/90 shadow-lg group-hover:block">
+        <span className="pointer-events-none absolute left-0 top-6 z-20 hidden w-72 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg group-hover:block">
           {text}
         </span>
       </span>
@@ -77,10 +78,10 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="mb-3">
-        <div className="text-sm font-semibold text-white/95">{title}</div>
-        {subtitle ? <div className="mt-1 text-xs text-white/60">{subtitle}</div> : null}
+        <div className="text-sm font-semibold text-slate-900">{title}</div>
+        {subtitle ? <div className="mt-1 text-xs text-slate-600">{subtitle}</div> : null}
       </div>
       <div className="flex flex-col gap-3">{children}</div>
     </div>
@@ -101,8 +102,8 @@ function FieldRow({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-white/80">
-          {label} {required ? <span className="text-white/60">*</span> : null}
+        <label className="text-xs font-medium text-slate-700">
+          {label} {required ? <span className="text-slate-500">*</span> : null}
         </label>
         {right}
       </div>
@@ -112,7 +113,7 @@ function FieldRow({
 }
 
 const inputBase =
-  "w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/10";
+  "w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -264,7 +265,7 @@ export default function OnboardingPage() {
             : "";
           const sb = isRecord(b)
             ? typeof (b as any).start_time === "string"
-              ? (a as any).start_time
+              ? (b as any).start_time
               : ""
             : "";
           const ta = Date.parse(sa) || 0;
@@ -339,13 +340,12 @@ export default function OnboardingPage() {
   const tokenExpired = tokenState === "expired";
   const hasTokens = st?.has_tokens === true;
 
+  // ✅ PATCH 4D.3 — light wrapper + slate header text
   return (
-    <div className="max-w-2xl mx-auto flex flex-col gap-4 p-4">
-      <h1 className="text-2xl font-semibold tracking-tight text-white/95">
-        Welcome to CycleGraph
-      </h1>
+    <div className="max-w-xl mx-auto flex flex-col gap-4 p-4">
+      <h1 className="text-2xl font-semibold tracking-tight">Welcome to CycleGraph</h1>
 
-      <p className="text-sm text-white/60">
+      <p className="text-slate-600">
         Before we begin, we need a rough baseline for your profile. You can adjust this later.
       </p>
 
@@ -361,33 +361,10 @@ export default function OnboardingPage() {
             value={numOrEmpty(d[K.weight])}
             onChange={(e) => update(K.weight, e.target.value === "" ? null : Number(e.target.value))}
           />
-          <div className="text-[11px] text-white/40">Required for accurate FTP modeling.</div>
+          <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
         </FieldRow>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <FieldRow label="Gender">
-            <select
-              className={inputBase}
-              value={strOrEmpty(d[K.gender])}
-              onChange={(e) => update(K.gender, e.target.value)}
-            >
-              <option value="">Prefer not to say</option>
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-              <option value="other">Other</option>
-            </select>
-          </FieldRow>
-
-          <FieldRow label="Age">
-            <input
-              className={inputBase}
-              inputMode="numeric"
-              placeholder="e.g. 41"
-              value={numOrEmpty(d[K.age])}
-              onChange={(e) => update(K.age, e.target.value === "" ? null : Number(e.target.value))}
-            />
-          </FieldRow>
-        </div>
+        {/* ✅ PATCH 4D.3: removed Gender + Age blocks */}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <FieldRow label="Country">
@@ -410,16 +387,17 @@ export default function OnboardingPage() {
       </SectionCard>
 
       <SectionCard title="Bike Setup" subtitle="Used to estimate rolling losses and speed.">
-        <FieldRow label="Tire width (mm)">
-          <input
+        {/* ✅ PATCH 4D.3: Tire width dropdown */}
+        <FieldRow label="Tire width">
+          <select
             className={inputBase}
-            inputMode="numeric"
-            placeholder="e.g. 28"
-            value={numOrEmpty(d[K.tireWidth])}
-            onChange={(e) =>
-              update(K.tireWidth, e.target.value === "" ? null : Number(e.target.value))
-            }
-          />
+            value={String(d[K.tireWidth] ?? 28)}
+            onChange={(e) => update(K.tireWidth, Number(e.target.value))}
+          >
+            <option value="25">25mm</option>
+            <option value="28">28mm</option>
+            <option value="31">30–32mm</option>
+          </select>
         </FieldRow>
       </SectionCard>
 
@@ -441,20 +419,16 @@ export default function OnboardingPage() {
       </SectionCard>
 
       {/* Advanced */}
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((s) => !s)}
-          className="w-full text-left"
-        >
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <button type="button" onClick={() => setShowAdvanced((s) => !s)} className="w-full text-left">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-semibold text-white/95">Advanced settings</div>
-              <div className="mt-1 text-xs text-white/60">
+              <div className="text-sm font-semibold text-slate-900">Advanced settings</div>
+              <div className="mt-1 text-xs text-slate-600">
                 Optional — you can leave these as defaults.
               </div>
             </div>
-            <div className="text-xs text-white/70">{showAdvanced ? "Hide" : "Show"}</div>
+            <div className="text-xs text-slate-600">{showAdvanced ? "Hide" : "Show"}</div>
           </div>
         </button>
 
@@ -477,9 +451,7 @@ export default function OnboardingPage() {
 
             <FieldRow
               label="Crank efficiency"
-              right={
-                <Tooltip text="Power transfer efficiency (typically 96%). Affects FTP modeling." />
-              }
+              right={<Tooltip text="Power transfer efficiency (typically 96%). Affects FTP modeling." />}
             >
               <input
                 className={inputBase}
@@ -495,22 +467,22 @@ export default function OnboardingPage() {
         ) : null}
       </div>
 
-      {/* Strava Connect section (kept intact, only visual style aligned lightly) */}
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-sm">
+      {/* Strava Connect section */}
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-white/95">Connect Strava</h2>
-            <p className="text-sm text-white/60 mt-1">
+            <h2 className="font-semibold text-slate-900">Connect Strava</h2>
+            <p className="text-sm text-slate-600 mt-1">
               To import rides and build your first analysis, we need access to Strava.
             </p>
-            <p className="text-xs text-white/40 mt-1">
+            <p className="text-xs text-slate-500 mt-1">
               Backend: <span className="font-mono">{cgApi.baseUrl()}</span>
             </p>
           </div>
 
           <div className="shrink-0">
             {tokenValid ? (
-              <div className="px-3 py-2 rounded-xl border border-white/10 text-sm text-white/80 bg-slate-950/30">
+              <div className="px-3 py-2 rounded-md border border-slate-200 text-sm text-slate-700 bg-slate-50">
                 Strava connected ✅
               </div>
             ) : (
@@ -518,7 +490,7 @@ export default function OnboardingPage() {
                 type="button"
                 onClick={connectStrava}
                 disabled={stBusy}
-                className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
+                className="px-3 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:bg-slate-400"
                 title={tokenExpired ? "Token expired — connect again" : "Connect Strava"}
               >
                 {stBusy ? "Checking…" : tokenExpired ? "Reconnect Strava" : "Connect Strava"}
@@ -528,7 +500,7 @@ export default function OnboardingPage() {
         </div>
 
         <div className="mt-3 text-sm">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-white/80">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
             <div>
               has_tokens: <span className="font-semibold">{String(st?.has_tokens ?? "unknown")}</span>
             </div>
@@ -542,23 +514,21 @@ export default function OnboardingPage() {
           </div>
 
           {tokenExpired ? (
-            <div className="mt-2 text-xs text-amber-300/90">
+            <div className="mt-2 text-xs text-amber-700">
               Your Strava token has expired. Click <b>Reconnect Strava</b>, or import a ride later
               from the Dashboard to trigger a refresh.
             </div>
           ) : null}
 
           {!hasTokens && st ? (
-            <div className="mt-2 text-xs text-white/60">
+            <div className="mt-2 text-xs text-slate-600">
               You haven’t connected Strava yet. Click{" "}
               <span className="font-semibold">Connect Strava</span> and complete the login — the
               status will update automatically when you return.
             </div>
           ) : null}
 
-          {stErr ? (
-            <div className="mt-2 text-xs text-red-400 whitespace-pre-wrap">{stErr}</div>
-          ) : null}
+          {stErr ? <div className="mt-2 text-xs text-red-600 whitespace-pre-wrap">{stErr}</div> : null}
         </div>
       </div>
 
@@ -567,7 +537,7 @@ export default function OnboardingPage() {
           type="button"
           onClick={applyDefaults}
           disabled={loading}
-          className="px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+          className="px-4 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:bg-slate-100"
         >
           Use default values
         </button>
@@ -576,7 +546,7 @@ export default function OnboardingPage() {
           type="button"
           onClick={onFinish}
           disabled={loading || finishBusy}
-          className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
+          className="px-4 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
         >
           {finishBusy ? "Finishing…" : "Finish and continue"}
         </button>
