@@ -1,7 +1,10 @@
+// frontend/src/components/ProfileForm.tsx
 import React from "react";
 
 type ProfileDraft = {
   rider_weight_kg?: number | null;
+
+  // ✅ ensure present
   bike_weight_kg?: number | null;
 
   // Aerodynamics / rolling
@@ -52,7 +55,6 @@ export default function ProfileForm({ value, onChange, disabled }: Props) {
       onChange({ [key]: v === "" ? null : v } as Partial<ProfileDraft>);
     };
 
-  // ✅ PATCH 4D.7 — grouped cards + tooltips + tire dropdown (return block replaced)
   const Tip = ({ text }: { text: string }) => (
     <span className="relative inline-flex items-center">
       <span className="group inline-flex items-center">
@@ -118,6 +120,8 @@ export default function ProfileForm({ value, onChange, disabled }: Props) {
             />
           </label>
         </div>
+
+        {/* ✅ Patch: Country/City block removed (if it existed) */}
       </Card>
 
       {/* Bike */}
