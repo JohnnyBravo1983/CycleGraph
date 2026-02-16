@@ -2,9 +2,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useProfileStore } from "../state/profileStore";
 
-// ✅ MOVE 1:1 interactive model into /profile (no redesign, no backend changes)
-import Interactive3DCyclistProfile from "../components/Interactive3DCyclistProfile";
-
 /**
  * Profile Settings
  * - /profile is the single editing surface
@@ -210,68 +207,52 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
-        {/* LEFT: Profile form */}
-        <div className="flex flex-col gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Profile Settings</h1>
-            <div className="mt-1 text-sm text-slate-600">
-              These values affect your FTP / PrecisionWatt modeling.
-            </div>
-          </div>
-
-          <SectionCard
-            title="Rider Info"
-            subtitle="Keep this accurate — weight is the most important input."
-          >
-            <FieldRow label="Weight (kg)" required>
-              <input
-                className={inputBase}
-                inputMode="decimal"
-                placeholder="e.g. 78"
-                value={numOrEmpty(d[K.weight])}
-                onChange={(e) =>
-                  update(K.weight, e.target.value === "" ? null : Number(e.target.value))
-                }
-              />
-              <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
-            </FieldRow>
-          </SectionCard>
-
-          <SectionCard title="Bike Setup" subtitle="Used for mass modeling and climbing/acceleration.">
-            <FieldRow label="Bike weight (kg)">
-              <input
-                className={inputBase}
-                inputMode="decimal"
-                placeholder="e.g. 8.2"
-                value={numOrEmpty(d[K.bikeWeight])}
-                onChange={(e) =>
-                  update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
-                }
-              />
-            </FieldRow>
-          </SectionCard>
-
-          <DefaultValuesBox cda={DEFAULT_CDA} crr={DEFAULT_CRR} crankEff={DEFAULT_CRANK_EFF} />
-
-          <div className="flex items-center justify-end gap-3">
-            <button
-              onClick={handleSave}
-              disabled={loading || saveBusy}
-              className="px-4 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
-            >
-              {saveBusy ? "Saving…" : "Save Profile"}
-            </button>
-          </div>
+    <div className="max-w-xl mx-auto flex flex-col gap-4 p-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Profile Settings</h1>
+        <div className="mt-1 text-sm text-slate-600">
+          These values affect your FTP / PrecisionWatt modeling.
         </div>
+      </div>
 
-        {/* RIGHT: Interactive 3D cyclist model (as-is) */}
-        <div className="md:sticky md:top-6">
-          <Interactive3DCyclistProfile />
-        </div>
+      <SectionCard title="Rider Info" subtitle="Keep this accurate — weight is the most important input.">
+        <FieldRow label="Weight (kg)" required>
+          <input
+            className={inputBase}
+            inputMode="decimal"
+            placeholder="e.g. 78"
+            value={numOrEmpty(d[K.weight])}
+            onChange={(e) => update(K.weight, e.target.value === "" ? null : Number(e.target.value))}
+          />
+          <div className="text-[11px] text-slate-500">Required for accurate FTP modeling.</div>
+        </FieldRow>
+      </SectionCard>
+
+      <SectionCard title="Bike Setup" subtitle="Used for mass modeling and climbing/acceleration.">
+        <FieldRow label="Bike weight (kg)">
+          <input
+            className={inputBase}
+            inputMode="decimal"
+            placeholder="e.g. 8.2"
+            value={numOrEmpty(d[K.bikeWeight])}
+            onChange={(e) =>
+              update(K.bikeWeight, e.target.value === "" ? null : Number(e.target.value))
+            }
+          />
+        </FieldRow>
+      </SectionCard>
+
+      <DefaultValuesBox cda={DEFAULT_CDA} crr={DEFAULT_CRR} crankEff={DEFAULT_CRANK_EFF} />
+
+      <div className="flex items-center justify-end gap-3">
+        <button
+          onClick={handleSave}
+          disabled={loading || saveBusy}
+          className="px-4 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400"
+        >
+          {saveBusy ? "Saving…" : "Save Profile"}
+        </button>
       </div>
     </div>
   );
 }
-
