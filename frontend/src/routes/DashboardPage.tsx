@@ -503,7 +503,7 @@ const DemoProgressionPanel: React.FC = () => {
   );
 };
 
-// ProfilePeekCard - styled samme som ProfilePage
+// ProfilePeekCard - styled same as ProfilePage with FTP
 function ProfilePeekCard() {
   const { draft } = useProfileStore();
   const [hoveredParam, setHoveredParam] = React.useState<string | null>(null);
@@ -520,6 +520,7 @@ function ProfilePeekCard() {
 
   const riderWeight = d.rider_weight_kg ?? d.weight_kg ?? d.weightKg ?? d.weight ?? null;
   const bikeWeight = d.bike_weight_kg ?? d.bikeWeightKg ?? d.bikeWeight ?? null;
+  const ftp = d.ftp ?? d.FTP ?? d.current_ftp ?? d.currentFTP ?? null;
 
   return (
     <div className="rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden">
@@ -546,8 +547,8 @@ function ProfilePeekCard() {
 
       {/* Card Body */}
       <div className="p-6 space-y-6">
-        {/* Rider & Bike Weight */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* Rider & Bike Weight & FTP - 3 columns */}
+        <div className="grid grid-cols-3 gap-4">
           <div className="rounded-lg border-2 border-slate-200 bg-white p-3 text-center">
             <div className="text-xs font-medium text-slate-500 mb-1">Rider weight</div>
             <div className="text-lg font-bold text-slate-900">
@@ -559,6 +560,69 @@ function ProfilePeekCard() {
             <div className="text-lg font-bold text-slate-900">
               {typeof bikeWeight === "number" ? `${bikeWeight} kg` : "—"}
             </div>
+          </div>
+          <div
+            className="relative rounded-lg border-2 border-emerald-200 bg-emerald-50 p-3 text-center cursor-help transition-all hover:border-emerald-400 hover:shadow-md"
+            onMouseEnter={() => setHoveredParam("ftp")}
+            onMouseLeave={() => setHoveredParam(null)}
+          >
+            <div className="text-xs font-medium text-emerald-700 mb-1">FTP</div>
+            <div className="text-lg font-bold text-emerald-700">
+              {typeof ftp === "number" ? `${ftp} W` : "—"}
+            </div>
+
+            {/* FTP Tooltip */}
+            {hoveredParam === "ftp" && (
+              <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-4 bg-slate-900 text-white text-xs rounded-lg shadow-2xl">
+                <div className="font-bold mb-2 text-sm text-emerald-300">
+                  Functional Threshold Power (FTP)
+                </div>
+                <p className="leading-relaxed mb-3">
+                  Your sustainable power output for ~1 hour. This is THE number that defines your cycling
+                  fitness level.
+                </p>
+
+                <div className="bg-slate-800 rounded p-3 mb-3 space-y-2">
+                  <div className="font-semibold mb-2 text-emerald-300">Real-world examples:</div>
+                  <div className="space-y-1.5 text-[11px] leading-relaxed">
+                    <div>
+                      <span className="font-semibold text-white">Beginner:</span> 100-150W (just starting
+                      out)
+                    </div>
+                    <div>
+                      <span className="font-semibold text-white">Recreational:</span> 150-200W (regular weekend
+                      rides)
+                    </div>
+                    <div>
+                      <span className="font-semibold text-white">Serious amateur:</span> 200-280W (club racer,
+                      competitive)
+                    </div>
+                    <div>
+                      <span className="font-semibold text-white">Elite amateur:</span> 280-350W (podium
+                      finisher)
+                    </div>
+                    <div>
+                      <span className="font-semibold text-white">Pro cyclist:</span> 350-420W (World Tour
+                      level)
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800 rounded p-3 mb-3">
+                  <div className="font-semibold mb-1 text-emerald-300">How to improve FTP:</div>
+                  <div className="text-[11px] leading-relaxed space-y-1">
+                    <div>• Structured training (intervals, tempo rides)</div>
+                    <div>• Consistency over months (10-20W gains per year typical)</div>
+                    <div>• Weight loss improves W/kg ratio</div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-slate-300">
+                  ✓ We calculate your FTP automatically from your rides using physics-based power modeling
+                </div>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-900 rotate-45"></div>
+              </div>
+            )}
           </div>
         </div>
 
