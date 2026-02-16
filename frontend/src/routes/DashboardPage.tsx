@@ -573,7 +573,7 @@ function ProfilePeekCard() {
 
             {/* FTP Tooltip */}
             {hoveredParam === "ftp" && (
-              <div className="absolute z-[100] right-full -top-5 mr-3 w-80 p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white text-xs rounded-xl shadow-2xl border-2 border-emerald-500/30">
+              <div className="absolute z-[100] right-full -top-10 mr-3 w-80 p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white text-xs rounded-xl shadow-2xl border-2 border-emerald-500/30">
                 {/* Header with icon */}
                 <div className="flex items-center gap-2 mb-3 pb-3 border-b border-emerald-500/20">
                   <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
