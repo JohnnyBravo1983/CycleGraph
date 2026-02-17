@@ -1033,6 +1033,8 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "weather_source": weather_source,
         "debug_source_path": str(source_path).replace("\\", "/"),
         "analyzed": True,
+        "elapsed_s": _to_float(doc.get("elapsed_s")),
+        "moving_s": _to_float(doc.get("moving_s")),
         "elevation_gain_m": (
             _to_float(metrics.get("elevation_gain_m") if isinstance(metrics, dict) else None)
             or _to_float(strava.get("total_elevation_gain"))

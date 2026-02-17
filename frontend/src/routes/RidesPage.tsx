@@ -102,24 +102,27 @@ const getElevationGain = (row: any): number | null => {
 };
 
 // NEW: Average speed calculated from distance + elapsed, or from field
+// Average speed: prefer moving_s (excludes pauses) over elapsed_s
+const getMovingS = (row: any): number | null => {
+  const raw = row?.moving_s ?? row?.metrics?.moving_s;
+  const v = coerceNum(raw);
+  if (v != null && v > 0) return v;
+  return null;
+};
 const getAvgSpeedKmh = (row: any): number | null => {
-  // Try direct field first
   const direct =
     row?.avg_speed_kmh ??
     row?.metrics?.avg_speed_kmh ??
     row?.average_speed_kmh;
   const dv = coerceNum(direct);
   if (dv != null && dv > 0) return dv;
-
-  // Calculate from distance + elapsed
   const dist = getDistanceKm(row);
-  const elapsed = getElapsedS(row);
-  if (dist != null && elapsed != null && elapsed > 0) {
-    const hours = elapsed / 3600;
+  const seconds = getMovingS(row) ?? getElapsedS(row);
+  if (dist != null && seconds != null && seconds > 0) {
+    const hours = seconds / 3600;
     const speed = dist / hours;
-    if (speed > 0 && speed < 150) return speed; // sanity check
+    if (speed > 0 && speed < 150) return speed;
   }
-
   return null;
 };
 
