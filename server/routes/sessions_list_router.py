@@ -137,6 +137,7 @@ def _derive_meta_from_samples(samples: list) -> dict:
         "elapsed_s": None,
         "end_time": None,
         "distance_km": None,
+        "elevation_gain_m": None,
     }
 
     if not isinstance(samples, list) or not samples:
@@ -173,7 +174,18 @@ def _derive_meta_from_samples(samples: list) -> dict:
 
     # ---- distance_km ----
     out["distance_km"] = _distance_km_from_samples(samples)
-
+    # ---- elevation_gain_m ----
+    gain = 0.0
+    prev_alt = None
+    for s in samples:
+        if not isinstance(s, dict):
+            continue
+        alt = s.get("altitude_m")
+        if isinstance(alt, (int, float)) and -500 < alt < 9000:
+            if prev_alt is not None and alt > prev_alt:
+                gain += alt - prev_alt
+            prev_alt = alt
+    out["elevation_gain_m"] = round(gain, 1) if gain > 0 else None
     return out
 
 
@@ -1374,13 +1386,14 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
             "debug_source_path": source_path,
             "analyzed": analyzed,
             "status": status,
+            "elevation_gain_m": None,
         }
 
         # -------------------------------
         # PATCH S6-B: Merge meta inn i hver row
         # -------------------------------
         m = meta.get(str(sid)) or {}
-        for k in ["hr_avg", "hr_max", "elapsed_s", "end_time", "distance_km", "start_time"]:
+        for k in ["hr_avg", "hr_max", "elapsed_s", "end_time", "distance_km", "start_time", "elevation_gain_m"]:
             if row.get(k) is None and m.get(k) is not None:
                 row[k] = m.get(k)
 
