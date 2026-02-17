@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -17,20 +17,34 @@ from server.auth.local_auth import (
     verify_session,
 )
 
+# NEW: admin alert helper (fail-safe)
+from server.utils.admin_alerts import send_admin_alert_new_user
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 COOKIE_SECURE = os.getenv("CG_COOKIE_SECURE", "0").strip() == "1"
 COOKIE_SAMESITE = os.getenv("CG_COOKIE_SAMESITE", "lax")  # lax|strict|none
 COOKIE_TTL = int(os.getenv("CG_AUTH_TTL_SECONDS", str(60 * 60 * 24 * 7)))  # 7d
 
+# Optional feature flag (safe rollout)
+NEW_USER_ALERTS_ENABLED = os.getenv("NEW_USER_ALERTS_ENABLED", "1").strip() == "1"
+
 
 class SignupIn(BaseModel):
     email: str = Field(..., min_length=3)
     password: str = Field(..., min_length=8)
+
+    # NEW: identity fields wanted in auth.json + email alert
+    full_name: str = Field(..., min_length=2)
+
+    # existing demographic fields
     gender: Literal["male", "female"]
     country: str = Field(..., min_length=2)
     city: str = Field(..., min_length=2)
     age: int = Field(..., ge=13, le=100)
+
+    # OPTIONAL: include if you want it in the admin mail (and stored in auth.json)
+    bike_name: Optional[str] = Field(None, min_length=1)
 
 
 class LoginIn(BaseModel):
@@ -69,10 +83,14 @@ def signup(req: Request, payload: SignupIn):
     - Ignorer eksisterende cookies
     - Slett eksisterende auth-cookies eksplisitt
     - Deretter opprett ny identitet (uid)
+
+    NEW (Sprint: New User Alerts v0)
+    - Persist full_name -> auth.json (display_name)
+    - Optional: persist bike_name
+    - Send admin email alert (fail-safe)
     """
 
     # 🔒 HARD RESET AUTH CONTEXT (signup er alltid identitetsskapende)
-    # NB: Slett først, så setter vi ny state etterpå.
     resp = JSONResponse({"ok": False})  # midlertidig; overskrives før return
     resp.delete_cookie(COOKIE_NAME, path="/")
     resp.delete_cookie("cg_uid", path="/")
@@ -83,6 +101,7 @@ def signup(req: Request, payload: SignupIn):
     uid = "u_" + secrets.token_urlsafe(16).replace("-", "").replace("_", "")
 
     try:
+        # NOTE: signup_for_uid MUST be updated to accept display_name/bike_name
         u = signup_for_uid(
             uid,
             payload.email,
@@ -91,17 +110,36 @@ def signup(req: Request, payload: SignupIn):
             payload.country,
             payload.city,
             payload.age,
+            display_name=payload.full_name,
+            bike_name=payload.bike_name,
         )
     except ValueError as e:
-        # Returner med cookies allerede slettet for å unngå halv-state
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Fire-and-forget style: do NOT block signup on SMTP issues
+    if NEW_USER_ALERTS_ENABLED:
+        try:
+            ok = send_admin_alert_new_user(u)
+            if ok:
+                print(f"NEW_USER_ALERT sent uid={u.get('uid')} email={u.get('email')}")
+        except Exception as e:
+            print(
+                f"NEW_USER_ALERT crashed uid={u.get('uid')} email={u.get('email')} "
+                f"err={type(e).__name__}: {e}"
+            )
 
     token = sign_session(uid, ttl_seconds=COOKIE_TTL)
 
-    # ✅ bruk JSONResponse (unngå Content-Length/body crash)
-    resp = JSONResponse({"ok": True, "uid": u["uid"], "email": u["email"]})
+    resp = JSONResponse(
+        {
+            "ok": True,
+            "uid": u["uid"],
+            "email": u["email"],
+            # optional to return (handy for UI)
+            "display_name": u.get("display_name"),
+        }
+    )
 
-    # 🔥 OVERSKRIV ALL TIDLIGERE AUTH STATE
     _set_auth_cookie(resp, token)
 
     # legacy helper cookie (ikke autoritativ identitet)
@@ -140,7 +178,6 @@ def login(req: Request, payload: LoginIn):
     uid = str(u["uid"])
     token = sign_session(uid, ttl_seconds=COOKIE_TTL)
 
-    # ✅ PATCH: bruk JSONResponse (unngå Content-Length/body crash)
     resp = JSONResponse({"ok": True, "uid": uid, "email": u["email"]})
     _set_auth_cookie(resp, token)
 
@@ -159,7 +196,6 @@ def login(req: Request, payload: LoginIn):
 
 @router.post("/logout")
 def logout():
-    # ✅ PATCH: bruk JSONResponse + clear cg_auth og legacy helper cookies
     resp = JSONResponse({"ok": True})
 
     _clear_auth_cookie(resp)
@@ -212,3 +248,4 @@ def me(req: Request):
     u = me_from_request(req)
     email = (u or {}).get("email")
     return {"ok": True, "uid": uid, "email": email}
+

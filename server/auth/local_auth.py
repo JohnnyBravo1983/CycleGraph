@@ -223,7 +223,6 @@ def verify_session(value: str) -> Optional[Dict[str, Any]]:
 def ensure_uid(req: Request, resp: Optional[Response] = None) -> str:
     return _get_or_set_uid(req, resp)
 
-
 def signup_for_uid(
     uid: str,
     email: str,
@@ -232,6 +231,8 @@ def signup_for_uid(
     country: str,
     city: str,
     age: int,
+    display_name: str | None = None,
+    bike_name: str | None = None,
 ) -> Dict[str, Any]:
     email_norm = (email or "").strip().lower()
     if not email_norm or "@" not in email_norm:
@@ -246,6 +247,9 @@ def signup_for_uid(
     if existing and existing.get("password_hash"):
         raise ValueError("User already has local auth.")
 
+    dn = (display_name or "").strip()
+    bn = (bike_name or "").strip()
+
     doc = {
         "uid": uid,
         "email": email_norm,
@@ -256,13 +260,31 @@ def signup_for_uid(
         "country": (country or "").strip(),
         "city": (city or "").strip(),
         "age": int(age),
+        # ✅ Sprint: New User Alerts v0 (identity fields)
+        "display_name": dn,
     }
+
+    # Optional: store bike name if provided
+    if bn:
+        doc["bike_name"] = bn
+
     save_auth(uid, doc)
 
     # ensure index points to this uid
     set_uid_for_email(email_norm, uid)
 
-    return {"uid": uid, "email": doc["email"]}
+    # Return enough fields for admin alert + client convenience (non-sensitive)
+    return {
+        "uid": uid,
+        "email": doc["email"],
+        "created_at": doc["created_at"],
+        "gender": doc.get("gender"),
+        "country": doc.get("country"),
+        "city": doc.get("city"),
+        "age": doc.get("age"),
+        "display_name": doc.get("display_name"),
+        "bike_name": doc.get("bike_name"),
+    }
 
 
 def login_for_uid(uid: str, email: str, password: str) -> Dict[str, Any]:

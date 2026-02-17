@@ -59,6 +59,24 @@ def _safe_float(x):
     except Exception:
         return None
 
+def _t_abs_to_epoch(x) -> float | None:
+    """Parse t_abs til epoch seconds — støtter ISO-streng og epoch float."""
+    if x is None:
+        return None
+    # Allerede et tall (epoch seconds)
+    v = _safe_float(x)
+    if v is not None:
+        return v
+    # ISO-streng: "2025-08-18T17:34:05Z"
+    if isinstance(x, str):
+        try:
+            from datetime import datetime, timezone
+            s = x.strip().replace("Z", "+00:00")
+            return datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            return None
+    return None
+
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371000.0
@@ -161,9 +179,8 @@ def _derive_meta_from_samples(samples: list) -> dict:
     # ---- elapsed_s + end_time via t_abs ----
     s0 = samples[0] if isinstance(samples[0], dict) else None
     s1 = samples[-1] if isinstance(samples[-1], dict) else None
-
-    t0 = _safe_float(s0.get("t_abs")) if s0 else None
-    t1 = _safe_float(s1.get("t_abs")) if s1 else None
+    t0 = _t_abs_to_epoch(s0.get("t_abs")) if s0 else None
+    t1 = _t_abs_to_epoch(s1.get("t_abs")) if s1 else None
 
     if t0 is not None and t1 is not None and t1 >= t0:
         elapsed = t1 - t0
