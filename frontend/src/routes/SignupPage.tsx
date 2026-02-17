@@ -98,6 +98,7 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       await cgApi.authSignup(email.trim(), password, {
+        full_name: fullName.trim(),
         gender,
         country: country.trim(),
         city: city.trim(),

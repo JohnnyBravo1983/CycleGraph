@@ -302,7 +302,14 @@ async function profileSave(body: ProfileSaveBody): Promise<ProfileSaveResp> {
 async function authSignup(
   email: string,
   password: string,
-  extra?: { gender: "male" | "female"; country: string; city: string; age: number }
+  extra?: {
+    full_name: string; // ✅ NEW (required by backend)
+    gender: "male" | "female";
+    country: string;
+    city: string;
+    age: number;
+    bike_name?: string; // optional (if you want it)
+  }
 ): Promise<void> {
   await cgFetchJson<unknown>("/api/auth/signup", {
     method: "POST",
