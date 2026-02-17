@@ -40,6 +40,7 @@ export type SessionListItem = {
 
   profile_label?: string | null;
   weather_source?: string | null;
+  elevation_gain_m?: number | null;
   debug_source_path?: string | null;
 
   // keep any other backend fields without losing them

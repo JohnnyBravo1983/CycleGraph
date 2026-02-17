@@ -1004,11 +1004,12 @@ def _row_from_doc(doc: Dict[str, Any], source_path: Path, fallback_sid: str) -> 
         "weather_source": weather_source,
         "debug_source_path": str(source_path).replace("\\", "/"),
         "analyzed": True,
-        # NB: status settes i _build_rows_from_state via _compute_status(uid, sid)
+        "elevation_gain_m": (
+            _to_float(metrics.get("elevation_gain_m") if isinstance(metrics, dict) else None)
+            or _to_float(strava.get("total_elevation_gain"))
+        ),
     }
-
     return row
-
 
 def _read_user_sessions_index(root: Path, uid: str) -> Tuple[Path, set[str], dict | list | None, list[str]]:
     """
