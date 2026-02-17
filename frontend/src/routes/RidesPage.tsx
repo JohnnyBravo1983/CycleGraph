@@ -27,9 +27,7 @@ const getPrecisionWattAvg = (row: any): number | null => {
   return null;
 };
 
-// -------------------------------
-// PATCH S6-C.1: Coerce numeric strings helper
-// -------------------------------
+// Coerce numeric strings helper
 const coerceNum = (v: any): number | null => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v.trim() !== "") {
@@ -39,9 +37,6 @@ const coerceNum = (v: any): number | null => {
   return null;
 };
 
-// -------------------------------
-// PATCH S6-C: HR + elapsed + distance helpers (robust vs None + different shapes/types)
-// -------------------------------
 const fmtMmSs = (sec: number | null | undefined): string => {
   if (typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return "—";
   const s = Math.round(sec);
@@ -62,8 +57,7 @@ const getDistanceKm = (row: any): number | null => {
     row?.distance_km ??
     row?.metrics?.distance_km ??
     row?.distanceKm ??
-    row?.distance; // legacy/alt
-
+    row?.distance;
   const v = coerceNum(raw);
   if (v != null && v > 0) return v;
   return null;
@@ -75,8 +69,7 @@ const getElapsedS = (row: any): number | null => {
     row?.metrics?.elapsed_s ??
     row?.elapsed ??
     row?.elapsedSec ??
-    row?.moving_time_s; // possible later fallback
-
+    row?.moving_time_s;
   const v = coerceNum(raw);
   if (v != null && v > 0) return v;
   return null;
@@ -96,12 +89,45 @@ const getHrMax = (row: any): number | null => {
   return null;
 };
 
-// Robust time parsing: support ISO string, "YYYY-MM-DD", epoch seconds, and epoch ms
+// NEW: Elevation gain getter
+const getElevationGain = (row: any): number | null => {
+  const raw =
+    row?.elevation_gain_m ??
+    row?.metrics?.elevation_gain_m ??
+    row?.total_elevation_gain ??
+    row?.elevationGain;
+  const v = coerceNum(raw);
+  if (v != null && v >= 0) return v;
+  return null;
+};
+
+// NEW: Average speed calculated from distance + elapsed, or from field
+const getAvgSpeedKmh = (row: any): number | null => {
+  // Try direct field first
+  const direct =
+    row?.avg_speed_kmh ??
+    row?.metrics?.avg_speed_kmh ??
+    row?.average_speed_kmh;
+  const dv = coerceNum(direct);
+  if (dv != null && dv > 0) return dv;
+
+  // Calculate from distance + elapsed
+  const dist = getDistanceKm(row);
+  const elapsed = getElapsedS(row);
+  if (dist != null && elapsed != null && elapsed > 0) {
+    const hours = elapsed / 3600;
+    const speed = dist / hours;
+    if (speed > 0 && speed < 150) return speed; // sanity check
+  }
+
+  return null;
+};
+
+// Robust time parsing
 function toMillis(v: any): number | null {
   if (v == null) return null;
 
   if (typeof v === "number" && Number.isFinite(v)) {
-    // heuristic: < 1e11 => seconds, otherwise ms
     return v < 1e11 ? Math.round(v * 1000) : Math.round(v);
   }
 
@@ -117,7 +143,6 @@ function toMillis(v: any): number | null {
       return new Date(y, mo, d, 12, 0, 0).getTime();
     }
 
-    // numeric string?
     const asNum = Number(v);
     if (Number.isFinite(asNum)) return toMillis(asNum);
   }
@@ -194,15 +219,34 @@ const Badge: React.FC<{ tone: "good" | "warn" | "neutral"; children: React.React
   );
 };
 
+// Metric stat box used in ride card
+const StatBox: React.FC<{
+  icon: string;
+  label: string;
+  value: string;
+  highlight?: boolean;
+}> = ({ icon, label, value, highlight = false }) => (
+  <div className="flex flex-col gap-0.5 min-w-0">
+    <span className="text-xs font-medium text-slate-500 whitespace-nowrap">
+      {icon} {label}
+    </span>
+    <span
+      className={`text-base font-black tabular-nums whitespace-nowrap ${
+        highlight ? "text-indigo-600" : "text-slate-900"
+      }`}
+    >
+      {value}
+    </span>
+  </div>
+);
+
 // -------------------------------
 // DEMO PAGE
 // -------------------------------
 const DemoRidesPage: React.FC = () => {
-  // CANARY (component render)
   console.log("RIDES DEBUG COMPONENT RENDER v1");
-
-  // PATCH E2.B — expose demo rows to window
   (window as any).__CG_RIDES_CANARY = "rides-demo-canary";
+
   useEffect(() => {
     (window as any).__cg_rides_rows = demoRides ?? [];
   }, []);
@@ -214,7 +258,6 @@ const DemoRidesPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 px-4 py-8">
       <div className="mx-auto max-w-5xl">
-        {/* Header */}
         <section className="mb-8">
           <h1 className="text-4xl font-black tracking-tight text-slate-900 mb-3">Your Rides</h1>
           <p className="text-lg text-slate-600 font-medium max-w-2xl">
@@ -227,7 +270,6 @@ const DemoRidesPage: React.FC = () => {
           </div>
         </section>
 
-        {/* Rides List */}
         <section className="space-y-4">
           {rows.map((r) => {
             const durationMin = r.duration > 0 ? Math.round(r.duration / 60) : 0;
@@ -241,10 +283,8 @@ const DemoRidesPage: React.FC = () => {
                 aria-label={`Open ride ${r.name}`}
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  {/* Left */}
                   <div className="min-w-0 space-y-2">
                     <div className="text-xl font-black text-slate-900 truncate">{r.name}</div>
-
                     <div className="flex flex-wrap items-center gap-3 text-sm">
                       <span className="text-slate-600 font-medium">
                         📅 {new Date(`${r.date}T12:00:00`).toLocaleDateString("en-GB")}
@@ -254,29 +294,21 @@ const DemoRidesPage: React.FC = () => {
                         {r.rideType.replace("-", " ")}
                       </span>
                     </div>
-
                     <div className="flex flex-wrap items-center gap-4 text-base">
                       <span className="text-slate-700 font-semibold">🚴 {km.toFixed(1)} km</span>
                       <span className="text-slate-400">•</span>
                       <span className="text-slate-700 font-semibold">⏱️ {durationMin} min</span>
                     </div>
                   </div>
-
-                  {/* Right */}
                   <div className="flex shrink-0 flex-row items-center justify-between gap-4 sm:flex-col sm:items-end sm:justify-start">
                     <div className="text-3xl font-black text-indigo-600 leading-none tracking-tight">
                       {Math.round(r.precisionWatt)} W
                     </div>
-
-                    <div
-                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 px-4 py-2 text-xs font-bold text-indigo-700 shadow-sm"
-                      title="Precision Watt (beta) · Target accuracy ~3–5% in good conditions"
-                    >
+                    <div className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 px-4 py-2 text-xs font-bold text-indigo-700 shadow-sm">
                       <span className="text-base">⚡</span> Precision
                     </div>
                   </div>
                 </div>
-
                 <div className="mt-4 flex items-center gap-2 text-sm font-bold text-indigo-600 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
                   <span>Open ride details</span>
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -296,10 +328,7 @@ const DemoRidesPage: React.FC = () => {
 // REAL PAGE
 // -------------------------------
 const RealRidesPage: React.FC = () => {
-  // CANARY (component render)
   console.log("RIDES DEBUG COMPONENT RENDER v1");
-
-  // PATCH E2.C — expose real canary to window
   (window as any).__CG_RIDES_CANARY = "rides-real-canary";
 
   const navigate = useNavigate();
@@ -311,7 +340,6 @@ const RealRidesPage: React.FC = () => {
   const lastReloadKeyRef = useRef<string>("");
   const didInitRef = useRef<boolean>(false);
 
-  // PATCH A — Normalize API response (array vs {value:[...]} etc) as a failsafe
   const normalizeSessionsList = (data: SessionsListResponse): any[] => {
     if (Array.isArray(data)) return data;
     const d: any = data as any;
@@ -382,19 +410,13 @@ const RealRidesPage: React.FC = () => {
     );
   }, [sessionsList]);
 
-  // PATCH E2.C — expose the *rendered* list to window
   useEffect(() => {
     (window as any).__cg_rides_rows = rows ?? [];
   }, [rows]);
 
-  // DEBUG (temporary): verify rows shape + watt fields
   useEffect(() => {
     console.log("RIDES rows len", (rows as any)?.length ?? 0);
     console.log("RIDES sample keys", (rows as any)?.[0] ? Object.keys(rows[0] as any) : null);
-
-    const want = new Set(["15378170998", "15412107820"]);
-    const hits = (rows ?? []).filter((r: any) => want.has(String(r?.session_id ?? r?.ride_id ?? "")));
-    console.log("RIDES hits", hits);
   }, [rows]);
 
   if (loadingList) {
@@ -432,6 +454,7 @@ const RealRidesPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 px-4 py-8">
       <div className="mx-auto max-w-5xl">
+
         {/* Header */}
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
@@ -475,38 +498,39 @@ const RealRidesPage: React.FC = () => {
             <p className="text-lg font-medium text-slate-600">No rides found.</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {rows.map((s) => {
               const sid = String((s as any).session_id ?? (s as any).ride_id ?? "");
               const wx = weatherBadge((s as any).weather_source ?? null);
 
               const open = () => navigate(`/session/${sid}`, { state: { from: "rides" } });
 
-              // Time range: supports both ISO and epoch (sec/ms)
               const mins = minutesBetween((s as any).start_time ?? null, (s as any).end_time ?? null);
               const startTxt = formatStartDateTime((s as any).start_time ?? null);
               const endTxt = formatEndTime((s as any).end_time ?? null);
-              const timeRange = endTxt && mins != null ? `${startTxt} – ${endTxt} (${mins} min)` : startTxt;
+              const timeRange =
+                endTxt && mins != null
+                  ? `${startTxt} – ${endTxt} (${mins} min)`
+                  : startTxt;
 
-              // S6 meta (best-effort)
               const distKm = getDistanceKm(s);
               const elapsedS = getElapsedS(s);
               const hrAvg = getHrAvg(s);
               const hrMax = getHrMax(s);
+              const elevGain = getElevationGain(s);
+              const avgSpeed = getAvgSpeedKmh(s);
 
-              const kmTxt = distKm != null ? `${distKm.toFixed(1)} km` : "—";
-              const durTxt = elapsedS != null ? fmtMmSs(elapsedS) : mins != null ? `${mins} min` : "—";
+              const durTxt =
+                elapsedS != null ? fmtMmSs(elapsedS) : mins != null ? `${mins} min` : "—";
               const hrTxt =
                 hrAvg != null || hrMax != null
                   ? `${hrAvg != null ? fmtHr(hrAvg) : "—"} / ${hrMax != null ? fmtHr(hrMax) : "—"}`
                   : "—";
 
-              // PATCH FINAL #2: watt read via robust helper
               const pw = getPrecisionWattAvg(s);
 
               return (
                 <div
-                  // PATCH FINAL #3: stable key (never index)
                   key={String((s as any).session_id ?? (s as any).ride_id ?? "")}
                   role="button"
                   tabIndex={0}
@@ -514,89 +538,55 @@ const RealRidesPage: React.FC = () => {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") open();
                   }}
-                  className="group rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-xl cursor-pointer"
+                  className="group rounded-2xl border-2 border-slate-200 bg-white px-7 py-6 shadow-lg transition-all duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-xl cursor-pointer"
                 >
                   <div className="flex items-start justify-between gap-6">
-                    <div className="min-w-0 space-y-3">
-                      {/* Headline */}
+                    <div className="min-w-0 flex-1 space-y-4">
+
+                      {/* Headline row: time + badges */}
                       <div className="flex flex-wrap items-center gap-3">
-                        <div className="text-base font-black text-slate-900">{timeRange}</div>
+                        <span className="text-base font-black text-slate-900">{timeRange}</span>
                         <Badge tone={wx.tone}>Weather: {wx.label}</Badge>
-                        <Badge tone="neutral">Profile: {(s as any).profile_label ?? "unknown"}</Badge>
+                        <Badge tone="neutral">
+                          Profile: {(s as any).profile_label ?? "unknown"}
+                        </Badge>
                       </div>
 
-                      {/* Metrics */}
-                      <div className="flex flex-wrap gap-x-8 gap-y-2 text-base">
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-600 font-medium">🚴 Distance:</span>
-                          <span className="font-black text-slate-900 tabular-nums">{kmTxt}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-600 font-medium">⏱️ Duration:</span>
-                          <span className="font-black text-slate-900 tabular-nums">{durTxt}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-600 font-medium">❤️ HR (avg/max):</span>
-                          <span className="font-black text-slate-900 tabular-nums">{hrTxt}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-600 font-medium">⚡ Precision Watt:</span>
-                          <span className="font-black text-indigo-600 tabular-nums">
-                            {pw !== null ? `${pw.toFixed(0)} W` : "—"}
-                          </span>
-                        </div>
+                      {/* Stats grid — 3 cols on sm, wraps on mobile */}
+                      <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+                        <StatBox
+                          icon="🚴"
+                          label="Distance"
+                          value={distKm != null ? `${distKm.toFixed(1)} km` : "—"}
+                        />
+                        <StatBox
+                          icon="⏱️"
+                          label="Duration"
+                          value={durTxt}
+                        />
+                        <StatBox
+                          icon="💨"
+                          label="Avg Speed"
+                          value={avgSpeed != null ? `${avgSpeed.toFixed(1)} km/h` : "—"}
+                        />
+                        <StatBox
+                          icon="⛰️"
+                          label="Elevation"
+                          value={elevGain != null ? `${Math.round(elevGain)} m` : "—"}
+                        />
+                        <StatBox
+                          icon="❤️"
+                          label="HR avg/max"
+                          value={hrTxt}
+                        />
+                        <StatBox
+                          icon="⚡"
+                          label="Precision Watt"
+                          value={pw !== null ? `${pw.toFixed(0)} W` : "—"}
+                          highlight
+                        />
                       </div>
 
-                      {/* DEV: remove after debugging */}
-                      <div className="mt-1 text-[11px] font-mono text-slate-500">
-                        sid={String((s as any).session_id ?? (s as any).ride_id ?? "")} · pw=
-                        {pw === null ? "null" : String(pw)} · raw=
-                        {String((s as any).precision_watt_avg ?? "undefined")} · hr=
-                        {hrTxt} · elapsed={elapsedS == null ? "null" : String(elapsedS)} · end=
-                        {String((s as any).end_time ?? "null")}
-                      </div>
-
-                      {/* DEV details */}
-                      {showDev && (
-                        <div className="mt-3 rounded-xl border-2 border-slate-200 bg-slate-50 p-4 text-xs space-y-1 font-mono text-slate-600">
-                          <div>
-                            <span className="font-bold">session_id:</span> {sid}
-                          </div>
-                          <div>
-                            <span className="font-bold">ride_id:</span> {String((s as any).ride_id ?? "")}
-                          </div>
-                          <div>
-                            <span className="font-bold">weather_source:</span> {String((s as any).weather_source ?? "")}
-                          </div>
-                          <div>
-                            <span className="font-bold">start_time:</span> {String((s as any).start_time ?? "")}
-                          </div>
-                          <div>
-                            <span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}
-                          </div>
-                          <div>
-                            <span className="font-bold">mins:</span> {mins == null ? "—" : String(mins)}
-                          </div>
-                          <div>
-                            <span className="font-bold">elapsed_s:</span>{" "}
-                            {elapsedS == null ? "—" : String(elapsedS)}
-                          </div>
-                          <div>
-                            <span className="font-bold">distance_km:</span>{" "}
-                            {distKm == null ? "—" : String(distKm)}
-                          </div>
-                          <div>
-                            <span className="font-bold">hr_avg/hr_max:</span>{" "}
-                            {hrAvg == null ? "—" : fmtHr(hrAvg)}/{hrMax == null ? "—" : fmtHr(hrMax)}
-                          </div>
-                          <div>
-                            <span className="font-bold">precision_watt_avg:</span> {pw === null ? "null" : String(pw)}
-                          </div>
-                        </div>
-                      )}
                     </div>
 
                     {/* CTA */}
@@ -611,7 +601,12 @@ const RealRidesPage: React.FC = () => {
                       >
                         Open
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 5l7 7-7 7"
+                          />
                         </svg>
                       </button>
                       <div className="text-xs text-slate-400 font-medium group-hover:text-slate-600 transition-colors">
@@ -619,6 +614,23 @@ const RealRidesPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* DEV details (hidden by default) */}
+                  {showDev && (
+                    <div className="mt-4 rounded-xl border-2 border-slate-200 bg-slate-50 p-4 text-xs space-y-1 font-mono text-slate-600">
+                      <div><span className="font-bold">session_id:</span> {sid}</div>
+                      <div><span className="font-bold">ride_id:</span> {String((s as any).ride_id ?? "")}</div>
+                      <div><span className="font-bold">weather_source:</span> {String((s as any).weather_source ?? "")}</div>
+                      <div><span className="font-bold">start_time:</span> {String((s as any).start_time ?? "")}</div>
+                      <div><span className="font-bold">end_time:</span> {String((s as any).end_time ?? "")}</div>
+                      <div><span className="font-bold">elapsed_s:</span> {elapsedS == null ? "—" : String(elapsedS)}</div>
+                      <div><span className="font-bold">distance_km:</span> {distKm == null ? "—" : String(distKm)}</div>
+                      <div><span className="font-bold">elevation_gain_m:</span> {elevGain == null ? "—" : String(elevGain)}</div>
+                      <div><span className="font-bold">avg_speed_kmh:</span> {avgSpeed == null ? "—" : avgSpeed.toFixed(1)}</div>
+                      <div><span className="font-bold">hr_avg/hr_max:</span> {hrAvg == null ? "—" : fmtHr(hrAvg)}/{hrMax == null ? "—" : fmtHr(hrMax)}</div>
+                      <div><span className="font-bold">precision_watt_avg:</span> {pw === null ? "null" : String(pw)}</div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -630,9 +642,7 @@ const RealRidesPage: React.FC = () => {
 };
 
 const RidesPage: React.FC = () => {
-  // CANARY (component render)
   console.log("RIDES DEBUG COMPONENT RENDER v1");
-
   return isDemoMode() ? <DemoRidesPage /> : <RealRidesPage />;
 };
 
