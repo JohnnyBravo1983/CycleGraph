@@ -117,7 +117,7 @@ const getAvgSpeedKmh = (row: any): number | null => {
   const dv = coerceNum(direct);
   if (dv != null && dv > 0) return dv;
   const dist = getDistanceKm(row);
-  const seconds = getElapsedS(row);  // Use elapsed for now, moving_s is unreliable
+  const seconds = getMovingS(row) ?? getElapsedS(row);
   if (dist != null && seconds != null && seconds > 0) {
     const hours = seconds / 3600;
     const speed = dist / hours;
