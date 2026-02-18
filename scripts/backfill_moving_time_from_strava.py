@@ -48,9 +48,33 @@ def refresh_token_if_needed(uid: str, tokens: Dict[str, Any]) -> Optional[str]:
         if not refresh_token:
             return None
         
-        # Refresh token (you need Strava client_id and client_secret)
-        # For now, just return existing token and hope it works
-        print(f"  WARNING: Token refresh not implemented, using existing token")
+        # Refresh token using Strava OAuth
+        client_id = "171819"
+        client_secret = "90845b55b04d073a1568465ac1e0ca55da269c82"
+        
+        url = "https://www.strava.com/oauth/token"
+        data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        }
+        
+        try:
+            resp = requests.post(url, data=data, timeout=10)
+            if resp.status_code == 200:
+                new_tokens = resp.json()
+                # Update tokens file
+                tokens_path = STATE_ROOT / uid / 'strava_tokens.json'
+                tokens_path.write_text(json.dumps(new_tokens))
+                print(f"  Token refreshed successfully")
+                return new_tokens['access_token']
+            else:
+                print(f"  Token refresh failed: {resp.status_code} {resp.text[:100]}")
+                return None
+        except Exception as e:
+            print(f"  Token refresh error: {e}")
+            return None
     
     return tokens.get('access_token')
 
@@ -165,8 +189,8 @@ def backfill_user(uid: str) -> Dict[str, int]:
                     meta[sid]['elapsed_s'] = elapsed_time
                     meta_changed = True
             
-            # Rate limit: 100 requests per 15 minutes = ~6/min = 10s between requests
-            time.sleep(0.6)
+            # Rate limit: 300 requests per 15 minutes with safety margin
+            time.sleep(3)
             
         except Exception as e:
             print(f"  Error processing {session_file}: {e}")
@@ -183,6 +207,7 @@ def main():
     """Run backfill for all users."""
     print("Starting Strava moving_time backfill...")
     print(f"State root: {STATE_ROOT}")
+    print(f"Allowed users: {len(ALLOWED_USERS)}")
     
     total_stats = {
         'users': 0,
@@ -197,6 +222,11 @@ def main():
             continue
         
         uid = user_dir.name
+        
+        # Skip if not in whitelist
+        if uid not in ALLOWED_USERS:
+            continue
+        
         print(f"\nProcessing user: {uid}")
         
         stats = backfill_user(uid)
