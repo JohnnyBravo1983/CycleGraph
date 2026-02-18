@@ -13,6 +13,17 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+
+# Kun prosesser disse brukerne (ekte brukere)
+ALLOWED_USERS = [
+    'u_4QFmO3FTSmV8ydpjngdBA',  # martin.skjelhaugen@gmail.com
+    'u_8ZhvK5kxwQnthCpBkUCZQ',  # johnny@cyclegraph.app
+    'u_pCF4KkLF3sjdFUaMCNkjJQ',  # senorita197@gmail.com
+    'u_tvgir2OwesN4LUEodZlHw',  # vladepl2001@gmail.com
+    'u_xHzQokLEtgr4bT92nicg',   # kaareeriksen@icloud.com
+]
+
+
 STATE_ROOT = Path('/app/state/users')
 
 def load_strava_tokens(uid: str) -> Optional[Dict[str, Any]]:
