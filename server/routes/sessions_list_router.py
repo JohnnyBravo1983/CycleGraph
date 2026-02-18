@@ -1406,13 +1406,15 @@ def _build_rows_from_state(uid: str, debug: bool = False) -> Tuple[list[dict], D
             "analyzed": analyzed,
             "status": status,
             "elevation_gain_m": None,
+            "elapsed_s": None,
+            "moving_s": None,
         }
 
         # -------------------------------
         # PATCH S6-B: Merge meta inn i hver row
         # -------------------------------
         m = meta.get(str(sid)) or {}
-        for k in ["hr_avg", "hr_max", "elapsed_s", "end_time", "distance_km", "start_time", "elevation_gain_m"]:
+        for k in ["hr_avg", "hr_max", "elapsed_s", "moving_s", "end_time", "distance_km", "start_time", "elevation_gain_m"]:
             if row.get(k) is None and m.get(k) is not None:
                 row[k] = m.get(k)
 
