@@ -16,9 +16,9 @@ export const LandingPage: React.FC = () => {
         className="relative min-h-[100vh] flex items-center justify-center overflow-hidden"
         style={{
           backgroundImage:
-            "linear-gradient(135deg, rgba(99, 102, 241, 0.92) 0%, rgba(168, 85, 247, 0.88) 100%), url('https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1920&q=80')",
+            "linear-gradient(135deg, rgba(99, 102, 241, 0.75) 0%, rgba(168, 85, 247, 0.70) 100%), url('https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1920&q=80')",
           backgroundSize: "cover",
-          backgroundPosition: "center",
+          backgroundPosition: "center 30%",
         }}
       >
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
