@@ -24,19 +24,6 @@ export const LandingPage: React.FC = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
 
         <div className="relative z-10 mx-auto max-w-5xl px-6 text-center text-white">
-          <div className="mx-auto mb-8 flex items-center justify-center">
-            <div className="relative">
-              <div className="absolute -inset-8 rounded-[2.5rem] bg-white/15 blur-3xl" />
-              <div className="relative rounded-[2.5rem] border-2 border-white/30 bg-white/10 px-8 py-6 backdrop-blur-xl shadow-[0_20px_80px_rgba(0,0,0,0.4)] ring-2 ring-white/20">
-                <img
-                  src="/CycleGraph_Logo.png"
-                  alt="CycleGraph"
-                  className="h-24 w-auto object-contain drop-shadow-[0_12px_35px_rgba(0,0,0,0.5)] max-md:h-20"
-                />
-              </div>
-            </div>
-          </div>
-
           <h1 className="mt-4 text-6xl font-black leading-[1.05] tracking-tight drop-shadow-[0_6px_25px_rgba(0,0,0,0.4)] max-md:text-4xl">
             Revolutionary Power Analysis.
             <br />
