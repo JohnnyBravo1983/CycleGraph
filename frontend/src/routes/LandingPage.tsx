@@ -13,7 +13,7 @@ export const LandingPage: React.FC = () => {
     <div className={`${fullBleed} -mt-6`}>
       {/* HERO */}
       <section
-        className="relative min-h-[100vh] flex items-center justify-center overflow-hidden"
+        className="relative min-h-[100vh] flex items-center justify-center overflow-hidden -mx-4 sm:-mx-6 lg:-mx-8"
         style={{
           backgroundImage:
             "linear-gradient(135deg, rgba(99, 102, 241, 0.60) 0%, rgba(168, 85, 247, 0.55) 100%), url('https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1920&q=80')",
