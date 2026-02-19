@@ -454,7 +454,7 @@ const DemoProgressionPanel: React.FC = () => {
           to="/"
           className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm hover:bg-slate-50"
         >
-          <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-8 w-auto object-contain" />
+          <img src="/Cyclegraph_logo.jpg" alt="CycleGraph" className="h-8 w-auto object-contain" />
           <span className="text-sm font-semibold text-slate-900">CycleGraph</span>
         </Link>
         <div className="text-xs text-slate-500">Demo dashboard</div>
@@ -914,7 +914,7 @@ export default function DashboardPage() {
             to="/"
             className="inline-flex items-center gap-2.5 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md px-3.5 py-2 shadow-lg hover:bg-white/15 transition-all duration-200"
           >
-            <img src="/CycleGraph_Logo.png" alt="CycleGraph" className="h-7 w-auto" />
+            <img src="/Cyclegraph_logo.jpg" alt="CycleGraph" className="h-7 w-auto" />
             <span className="text-sm font-semibold text-white tracking-tight">CycleGraph</span>
           </Link>
 
