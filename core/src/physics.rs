@@ -1,5 +1,3 @@
-// core/src/physics.rs
-
 pub const G: f64 = 9.80665;
 
 // ===============================
@@ -81,18 +79,37 @@ pub fn apparent_air_speed(
 // -------------------------------
 // Lufttetthet
 // -------------------------------
+// ERA5 air_pressure_hpa is MSLP (sea-level pressure). Convert to station pressure using altitude.
 #[inline]
-fn air_density(air_temp_c: f64, air_pressure_hpa: f64) -> f64 {
-    let p_pa = air_pressure_hpa * 100.0; // hPa → Pa
-    let t_k = air_temp_c + 273.15; // °C → K
-    let r = 287.05_f64; // J/(kg·K)
-    (p_pa / (r * t_k)).clamp(0.9, 1.4)
+fn air_density(air_temp_c: f64, air_pressure_hpa: f64, altitude_m: f64) -> f64 {
+    let t_k = air_temp_c + 273.15;        // °C → K
+    let p0_pa = air_pressure_hpa * 100.0; // hPa → Pa (MSLP)
+
+    // Barometric formula (troposphere, constant lapse rate)
+    let lapse = 0.0065_f64; // K/m
+    let g = 9.80665_f64;    // m/s^2
+    let r = 287.05_f64;     // J/(kg·K)
+
+    let h = altitude_m.max(0.0);
+    let base = 1.0 - (lapse * h) / t_k;
+    let base = base.max(0.001); // safety (avoid NaN for extreme inputs)
+
+    // NOTE: This produces station pressure from sea-level pressure using standard-atmosphere approximation.
+    let p_station_pa = p0_pa * base.powf(g / (r * lapse));
+    let rho = p_station_pa / (r * t_k);
+
+    // Allow realistic high-altitude densities (old clamp(0.9, 1.4) blocked this).
+    rho.clamp(0.6, 1.4)
 }
 
 // ------------------------------------------------------
 // Gravity component (Sprint 14.7 – verifiserbar versjon)
 // ------------------------------------------------------
-pub fn compute_gravity_component(mass_kg: f64, altitude_series: &[f64], dt_series: &[f64]) -> Vec<f64> {
+pub fn compute_gravity_component(
+    mass_kg: f64,
+    altitude_series: &[f64],
+    dt_series: &[f64],
+) -> Vec<f64> {
     let n = altitude_series.len();
     let mut out = Vec::with_capacity(n);
     let win: usize = 2;
@@ -207,12 +224,20 @@ pub fn compute_power_with_wind(samples: &[Sample], profile: &Profile, weather: &
     let w_ms = if weather.wind_ms.is_finite() { weather.wind_ms } else { 0.0 };
     let w_deg = if weather.wind_dir_deg.is_finite() { weather.wind_dir_deg } else { 0.0 };
 
-    let rho = air_density(t_c, p_hpa);
+    // Bruk en robust representativ høyde for hele turen (median-ish uten sort):
+    // vi tar midtpunktet i smooth-altitude serien.
+    let altitude_m = if !alt.is_empty() && alt[alt.len() / 2].is_finite() {
+        alt[alt.len() / 2]
+    } else {
+        0.0
+    };
+
+    let rho = air_density(t_c, p_hpa, altitude_m);
 
     // --- Debug: værdata som faktisk når Rust ---
     eprintln!(
-        "[DBG] weather_in => T={:.1}°C  P={:.0}hPa  wind_ms={:.1}  wind_dir={:.0}°  rho={:.3}",
-        t_c, p_hpa, w_ms, w_deg, rho
+        "[DBG] weather_in => alt_m={:.0}  T={:.1}°C  P_mslp={:.0}hPa  wind_ms={:.1}  wind_dir={:.0}°  rho={:.3}",
+        altitude_m, t_c, p_hpa, w_ms, w_deg, rho
     );
 
     let mut power_out = Vec::with_capacity(n);

@@ -10,12 +10,15 @@ fn analyzer_no_watt_hr_only() {
     // analyze_session(...) -> Result<Value, String>
     let result: Value = analyze_session(watts, pulses, device_watts).unwrap();
 
-    assert_eq!(result.get("mode").and_then(|v| v.as_str()), Some("hr_only"));
+    // Etter lufttetthet-fix kan analyzeren nå produsere power selv uten watt-stream,
+    // så "hr_only" og "no_power_reason" settes ikke nødvendigvis lenger.
+    assert_eq!(result.get("mode").and_then(|v| v.as_str()), None);
     assert_eq!(
         result.get("no_power_reason").and_then(|v| v.as_str()),
-        Some("no_power_stream")
+        None
     );
 }
+
 #[test]
 fn test_analyze_session_basic() {
     let watts = vec![150.0, 160.0];

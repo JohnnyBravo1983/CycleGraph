@@ -1,0 +1,566 @@
+================================================================================
+CYCLEGRAPH PIONEER BETA — SPRINT BACKLOG (REMAINING DAYS)
+Feb 19 – Mar 1, 2026
+================================================================================
+
+[!] ROADMAP UPDATE: Data Integrity Hardening merged in.
+    Se nye krav (merket med [NY]) på Dag 8, 9-10, 11-12 og 13-14.
+
+Prinsipp: Precision Watt skal vaere konservativ og troverdig —
+vi foretrekker litt forsiktig FTP fremfor imponerende men upaalitelig tall.
+
+--------------------------------------------------------------------------------
+OVERSIKT — HVA SOM ER MERGET INN
+--------------------------------------------------------------------------------
+Tre kritiske beskyttelser er lagt til:
+  1. Precision Watt Safety Guard — full enforcement end-to-end
+  2. Minimum Valid Ride Protection — valid_rides_used tracking
+  3. Data Quality Signal — i alle Power Profile API-responser
+  4. Frontend empty/low-data states — eksplisitte krav
+
+================================================================================
+DAG 8 — Onsdag, Feb 19  [GRØNN / I DAG]
+Focus: Import Rides UX + Precision Guard Smoke Test
+================================================================================
+
+KONTEKST:
+  Pioneer Beta import: KUN 10 eller 50 rides.
+  50 anbefalt for meningsfull Power Profile + FTP Progression.
+  10 rides: rask testmulighet.
+
+OPPGAVER — Import UX:
+  [ ] Enkel dropdown: 10 rides ELLER 50 rides — ingen andre valg
+  [ ] Standard: 50 rides (anbefalt). 10 rides: hurtigtest
+  [ ] Vis fremdrift: "Importing ride 5 of 50..." med progress bar
+  [ ] Feilhåndtering: vis hvilke rides som feilet, tillat retry
+  [ ] Test både 10 og 50 ride-import
+
+[NY] Precision Guard Smoke Test:
+  Foer import UX er ferdig — manuelt verifiser at feltene
+  precision_watt_status og watts_source finnes i minst en
+  result_<sid>.json fra gjeldende kodebase.
+  Hvis mangler: flagg umiddelbart. Dag 9-10 avhenger av dette.
+
+LEVERANSE: Import UX er enkel og tydelig. Precision guard bekreftet.
+Tidsestimat: 3-4 timer
+Blokkere: Ingen
+
+VALIDERING:
+  [ ] Dropdown viser KUN 10 eller 50 rides
+  [ ] 50 rides er standard/anbefalt
+  [ ] Fremdrift synlig under import
+  [ ] Feil håndtert ryddig
+  [ ] Begge import-størrelser fungerer
+  [ ] UI forklarer: "50 rides anbefalt for full Power Profile"
+  [NY] precision_watt_status finnes i result-schema (smoke test OK)
+
+================================================================================
+DAG 9-10 — Torsdag-Fredag, Feb 20-21  [RØD / KRITISK]
+Focus: Power Profile Backend (Rust + Python) + Data Integrity Hardening
+================================================================================
+
+KONTEKST:
+  #1 WOW-feature. Maa fungere uavhengig av om bruker har
+  50 rides fra 1 maaned eller 2 aar.
+  Data integrity-beskyttelser er ikke valgfrie.
+
+DAG 9 — Peak Efforts + FTP (Rust + Python):
+  [ ] Peak efforts (Rust):
+      - Sliding window over watt-streams
+      - Varigheter: 1min, 5min, 20min, 45min, 60min
+      - Returner: {duration: watts} per ride
+  [ ] Smart FTP (Python):
+      - Fra 5min:  best_5min * 0.85
+      - Fra 20min: best_20min * 0.95
+      - Fra 45min: best_45min * 0.98
+      - Fra 60min: best_60min * 1.00
+      - Ta hoeyeste estimat som FTP
+  [ ] W/kg: hent vekt fra profile.json, beregn alle metrics i W/kg
+  [ ] Lagre i result-filer: ftp_watts, ftp_watts_per_kg,
+      peak_1min, peak_5min, peak_20min, peak_60min (W + W/kg)
+
+[NY] KRITISK — Precision Watt Safety Guard (full enforcement):
+  Precision-modellering MÅ vaere deaktivert naer:
+    - ride.type == 'VirtualRide' eller lignende virtuell aktivitet
+    - Ekte power meter detektert i ride-data
+    - Speed stream mangler eller inneholder ugyldige/null-verdier
+
+  result_<sid>.json MAAT inkludere:
+    precision_watt_status:
+      'enabled' | 'disabled_virtual' | 'disabled_power_meter' | 'disabled_no_speed'
+    watts_source:
+      'precision_model' | 'strava_power' | 'none'
+
+  Peak effort og FTP MÅ KUN bruke rides der watts_source == 'precision_model'.
+
+[NY] KRITISK — Minimum Valid Ride Protection:
+  Etter filtrering av utrygge rides, MAAT valid_rides_used beregnes
+  og inkluderes i Power Profile API-respons.
+
+  Systemet MÅ IKKE krasje og MÅ IKKE presentere overkonﬁdent FTP naer:
+    - Bruker importerer 10 rides men kun faae er gyldige
+    - Bruker importerer nesten bare virtual rides
+    - Bruker bruker power meter paa de ﬂeste rides
+
+DAG 10 — /api/analytics/power-profile endepunkt:
+  [ ] Input: user_id
+  [ ] Last alle result_<sid>.json-filer
+  [ ] Filtrer: KUN rides der watts_source == 'precision_model'
+  [ ] Hent peak efforts fra gyldige rides
+  [ ] Finn samlet beste (maks paa tvers av gyldige rides)
+  [ ] Beregn FTP (beste fra gyldige rides)
+  [ ] Beregn progresjon (foerste gyldige ride FTP vs naaVaerende)
+
+[NY] Data Quality Signal — obligatorisk i API-respons:
+  "data_quality": {
+    "valid_rides_used": int,
+    "total_rides": int,
+    "confidence": "high | medium | low"
+  }
+  Heuristikk:
+    >= 20 gyldige rides  --> high
+    8-19 gyldige rides   --> medium
+    < 8 gyldige rides    --> low
+
+Full API-respons-struktur:
+  {
+    "current_ftp_watts": 265,
+    "current_ftp_wkg": 2.7,
+    "first_ftp_watts": 250,
+    "first_ftp_wkg": 2.5,
+    "progression_watts": 15,
+    "progression_percent": 6,
+    "peak_efforts": {
+      "1min":  {"watts": 420, "wkg": 4.2},
+      "5min":  {"watts": 340, "wkg": 3.4},
+      "20min": {"watts": 280, "wkg": 2.8},
+      "60min": {"watts": 260, "wkg": 2.6}
+    },
+    "data_quality": {
+      "valid_rides_used": 38,
+      "total_rides": 50,
+      "confidence": "high"
+    }
+  }
+
+Test-scenarier:
+  [ ] Bruker med 50 rides fra 2 maaneder (mest gyldig precision)
+  [ ] Bruker med 50 rides fra 1 aar
+  [ ] Bruker med kun 10 rides
+  [NY] Bruker med nesten bare virtual rides
+       --> forvent lav valid_rides_used + confidence: low
+  [NY] Bruker med power meter paa nesten alle rides
+       --> forvent disabled_power_meter status
+  [NY] Bruker med < 8 gyldige rides etter filtrering
+       --> forvent confidence: low, ingen krasj
+
+LEVERANSE: Backend beregner Power Profile med data integrity-garantier.
+Tidsestimat: 12 timer (2 dager) + ~2t hvis guard ikke er paa plass
+Blokkere: precision_watt_status maa finnes i schema
+
+VALIDERING:
+  [ ] Peak efforts beregnet korrekt fra watt-streams
+  [ ] FTP-estimat noeyaktig (beste av ﬂere varigheter)
+  [ ] W/kg beregnet korrekt
+  [ ] API returnerer konsistent data
+  [ ] Fungerer med ulike ride-antall/tidsspenn
+  [NY] Virtual rides ekskludert fra analytics
+  [NY] Power meter-rides ekskludert fra precision-modellering
+  [NY] Rides med manglende speed stream ekskludert
+  [NY] precision_watt_status i alle result_<sid>.json
+  [NY] watts_source i alle result_<sid>.json
+  [NY] data_quality-blokk returnert av API
+  [NY] valid_rides_used telt korrekt
+  [NY] confidence korrekt utledet fra valid_rides_used
+  [NY] Ingen krasj naer valid_rides_used er 0 eller veldig lavt
+  [NY] FTP ikke presentert naer confidence er low (eller tydelig flagget)
+
+================================================================================
+DAG 11-12 — Lørdag-Søndag, Feb 22-23  [RØD / KRITISK]
+Focus: Power Analytics Frontend + Physics Update + FTP Progression
+================================================================================
+
+ARKITEKTUR:
+  Analytics beregnes ON-DEMAND (ikke cachet).
+  Hvert Dashboard/Trends-kall henter fersk data fra /api/analytics/*.
+  Backend leser ALLE result_<sid>.json og beregner.
+
+DAG 11 — Dashboard Key Metrics Widget:
+  [ ] Lag "Key Metrics"-widget i Dashboard (topp av side)
+  [ ] Hent fra /api/analytics/power-profile
+  [ ] Vis sammendrag: FTP (W + W/kg), progresjon, beste 5min
+  [ ] Lenke: [View Full Analysis ->] til Trends-side
+
+[NY] Dashboard empty/low-data states — obligatorisk:
+  Widget MÅ haandtere:
+  - Null gyldige precision rides:
+    Vis "Import precision rides to unlock Power Profile" — ingen fake tall
+  - confidence == 'low':
+    Vis FTP med advarsel "Low data — limited rides available"
+  - Virtual-only bruker:
+    Vis "No precision rides available — virtual rides are excluded"
+  - Power-meter-only bruker:
+    Vis "Rides with power meters are excluded from precision modeling"
+  Ingen krasj. Ingen misvisende tall.
+
+DAG 11 — Trends-side Power Profile-seksjon:
+  [ ] Lag /trends-side (legg til i navigasjon)
+  [ ] Seksjon 1: Power Profile
+      - FTP (W + W/kg), foerste ride-sammenligning, forbedring
+      - Peak efforts: 1/5/20/60min med tooltips
+  [ ] Tooltips: FTP, W/kg, peak efforts
+
+[NY] Trends-side low-data states — obligatorisk:
+  - confidence == 'medium':
+    Vis note "Based on limited precision rides — import more for better accuracy"
+  - confidence == 'low':
+    Vis fremtredende advarsel, suppres eller tydelig kaveater FTP-tall
+  - Aldri vis et selvsikkert FTP til bruker med < 8 gyldige rides
+
+DAG 12 — Physics Model (Crr):
+  [ ] Legg til dekk-bredde-valg i Profil: 25mm, 28mm (standard), 30-32mm
+  [ ] Crr-mapping:
+      25mm    --> 0.0037
+      28mm    --> 0.0034
+      30-32mm --> 0.0035
+  [ ] Faste standarder: CdA = 0.300, Krankeﬃsienz = 0.96
+  [ ] Crr ikke direkte redigbar — kun via dekk-bredde
+  [ ] Eksisterende rides gjenbruker lagret result-data
+  [ ] Re-importer 50 testrider, verifiser rimelig powerskift og ingen regresjon
+
+DAG 12 — FTP Progression Backend:
+  [ ] Lag /api/analytics/ftp-progression endepunkt
+  [ ] Bruk siste 6 maaneder hvis tidsrom > 6 maaneder
+  [ ] Grupper per ISO-uke (YYYY-Wxx)
+  [ ] Ukentlig FTP, W/kg, rides per uke
+  [ ] Linear regresjon: watt per uke, uker analysert
+  [ ] Projeksjoner: +4, +8, +12 uker
+
+[NY] FTP Progression maa respektere data quality:
+  - Inkluder kun uker med minst en gyldig precision ride
+  - Returner valid_rides_used og confidence i respons
+  - Hvis for faae gyldige uker: returner trend_watts_per_week: null
+    og confidence: 'low' — ikke fabriker en trend
+
+FTP Progression API-respons:
+  {
+    "ftp_by_week": [
+      {"week": "2025-W40", "ftp_watts": 250, "ftp_wkg": 2.5},
+      ...
+    ],
+    "trend_watts_per_week": 1.9,
+    "rides_per_week": 6.2,
+    "weeks_analyzed": 12,
+    "projections": {
+      "4_weeks":  {"watts": 273, "wkg": 2.73},
+      "8_weeks":  {"watts": 281, "wkg": 2.81},
+      "12_weeks": {"watts": 289, "wkg": 2.89}
+    },
+    "confidence": "high | medium | low",
+    "data_quality": {"valid_rides_used": 38, "total_rides": 50}
+  }
+
+DAG 12 — Trends-side FTP Progression-seksjon:
+  [ ] Seksjon 2: FTP Progression under Power Profile
+  [ ] Linjediagram: uker paa X-akse, ukentlig FTP paa Y-akse
+  [ ] Rides per uke med aktivitetsmelding:
+      3+   rides/uke --> "Great consistency!"
+      1-3  rides/uke --> "For faster gains: 3-4x per week"
+      < 1  ride/uke  --> "Low activity — projection uncertain"
+  [ ] Trend: +X.Xw per uke
+  [ ] Projeksjonsblokk: 4/8/12 uker
+
+[NY] Projeksjoner low-data:
+  Hvis confidence == 'low' eller trend_watts_per_week == null:
+    Suppres projeksjoner helt.
+    Vis: "Not enough data for projections — import more precision rides"
+    Aldri vis fabrikkerte projeksjonstall.
+
+VALIDERING:
+  [ ] Crr oppdateres naer dekk-bredde endres
+  [ ] CdA og krank forblir faste standarder
+  [ ] FTP Progression korrekt for 50 rides/1 mnd, 1 aar, 10 rides
+  [ ] Projeksjoner rimelige
+  [ ] Ingen stor ytelsesforringelse
+  [ ] Analytics oppdateres etter ny import
+  [NY] Dashboard-widget: ingen fake tall for virtual-only bruker
+  [NY] Dashboard-widget: ingen fake tall for power-meter-only bruker
+  [NY] Dashboard-widget: confidence-advarsel ved lite data
+  [NY] Trends: ingen krasj med null gyldige rides
+  [NY] Trends: FTP suppressert naer confidence er low
+  [NY] Trends: projeksjoner suppressert naer trend er null
+  [NY] FTP Progression bruker kun gyldige precision-uker
+  [NY] Begge API-responser inkluderer data_quality-blokk
+
+================================================================================
+DAG 13-14 — Tirsdag-Onsdag, Feb 25-26  [GRØNN / VIKTIG]
+Focus: End-to-End Testing & Bugfikser
+================================================================================
+
+FULL BRUKERREISE-TEST:
+  [ ] Signup -> Onboarding -> Koble Strava -> Importer 50 rides
+  [ ] Vis Dashboard -> Sjekk at key metrics vises
+  [ ] Vis Trends -> Sjekk full Power Profile + FTP Progression
+  [ ] Rides-liste -> Sesjondetalj -> Rediger profil
+  [ ] Importer 1 ride til -> Verifiser at analytics oppdateres
+  [ ] Refresh Dashboard -> Verifiser ny FTP/peaks hvis bedre
+  [ ] Refresh Trends -> Verifiser nytt datapunkt i progresjonskart
+  [ ] Verifiser proﬁl-versjonering
+  [ ] Dokumenter bugs -> Fiks kritiske bugs
+  [ ] Test Chrome, Firefox, Safari + mobil responsiv
+
+SPESIELLE TEST-SCENARIER:
+  [ ] Bruker med 50 rides fra 1 mnd (veldig aktiv)
+  [ ] Bruker med 50 rides fra 1 aar (sporadisk)
+  [ ] Bruker med kun 10 rides
+  [ ] Bruker som endrer vekt underveis
+  [ ] Bruker importerer 50 rides, deretter 10 til -> analytics korrekt
+
+[NY] DATA INTEGRITY TEST-SCENARIER — obligatoriske for Pioneer Beta sign-off:
+  [ ] Bruker importerer 50 rides som er ALLE virtuelle:
+      -> Null gyldige precision rides, korrekt advarsel, ingen krasj, ingen FTP
+  [ ] Bruker med power meter paa alle rides:
+      -> Samme forventning som over
+  [ ] Bruker importerer 10 rides, kun 3 er gyldige precision:
+      -> confidence: low, FTP tydelig kaveater eller suppressert
+  [ ] Blandet bruker: 30 precision + 15 virtual + 5 power meter:
+      -> valid_rides_used = 30, confidence basert paa 30
+  [ ] Verifiser precision_watt_status og watts_source korrekte
+      for hver ride-type i result-filer
+
+LEVERANSE: Stabil system. Data integrity bekreftet for alle brukertyper.
+           Pioneer Beta kan ikke produsere misvisende FTP.
+Tidsestimat: 8 timer (2 dager)
+Blokkere: Alle features maa vaere ferdige
+
+VALIDERING:
+  [ ] Ingen kritiske bugs
+  [ ] Fungerer i ﬂere nettlesere
+  [ ] Mobilvennlig
+  [ ] Rask nok
+  [ ] Power analytics fungerer for ulike aktivitetsmoenstre
+  [ ] Dashboard-metrics oppdateres etter import
+  [ ] Trends oppdateres etter import
+  [ ] Kan demo trygt
+  [NY] Virtual-only bruker: ingen fake FTP, korrekt advarsel
+  [NY] Power-meter-only bruker: ingen fake FTP, korrekt advarsel
+  [NY] Lavt valid ride-antall: confidence: low, projeksjoner suppressert
+  [NY] Blandet bruker: valid_rides_used teller kun precision rides
+  [NY] precision_watt_status korrekt for hver ride-type i result-filer
+  [NY] Ingen krasj i noen av de testede edge cases
+
+================================================================================
+DAG 15 — Torsdag, Feb 27  [GRØNN]
+Focus: Dokumentasjon & Opprydning
+================================================================================
+
+OPPGAVER:
+  [ ] Oppdater README.md: feature-liste (legg til Power Profile, FTP Progression,
+      Data Quality), oppsettsinstruksjoner, tech stack
+  [ ] Legg til inline kode-kommentarer der noedvendig
+  [ ] Rens console.logs, fjern utkommentert kode
+  [ ] Oppdater API_REFERENCE.md med nye endepunkter:
+      - /api/analytics/power-profile
+        (dokumenter data_quality-blokk og precision-filtrering)
+      - /api/analytics/ftp-progression
+        (dokumenter confidence og valid_rides_used-felt)
+  [NY] Dokumenter precision_watt_status og watts_source i result-schema
+  [NY] Forklar i API-referansen hvordan virtual rides, power meter-rides
+       og manglende speed stream håndteres
+  [ ] Ta skjermbilder: Dashboard med metrics, Trends (full visning),
+      Rides-liste, Profil
+
+LEVERANSE: Ryddig kodebase. Dokumentasjon reﬂekterer faktisk oppfoersel
+           inkludert data quality-signaler.
+Tidsestimat: 4-5 timer
+Blokkere: Ingen
+
+VALIDERING:
+  [ ] README er oppdatert
+  [ ] Kode er ryddig
+  [ ] Skjermbilder tatt
+  [ ] Dokumentasjon stemmer med virkelighet
+  [ ] API-referanse oppdatert
+  [NY] Precision guard-oppfoersel dokumentert
+  [NY] data_quality-felt dokumentert i API-referanse
+
+================================================================================
+DAG 16 — Fredag, Feb 28  [GRØNN]
+Focus: Klargjøring for Pioneer-brukere
+================================================================================
+
+OPPGAVER:
+  [ ] Lag onboarding-guide for pioneers:
+      - "Velkommen til CycleGraph Beta"
+      - Steg-for-steg instruksjoner
+      - Hva som skal testes
+      - Hvordan rapportere bugs
+      - "Importer 50 rides (anbefalt) for full Power Profile og FTP Progression"
+      - "10 rides tilgjengelig for rask testing, men analytics begrenset"
+      [NY] "Rides registrert paa virtuelle plattformer (Rouvy, Zwift, etc.)
+           eller med power meter er ikke inkludert i precision power-modellering"
+  [ ] Sett opp feedback-mekanisme (skjema eller e-post, Discord/Slack)
+  [ ] Forbered demo-script: signup -> import -> Power Profile -> FTP Progression
+  [ ] Deploy til produksjon: verifiser Vercel + Fly.io, test prod, sjekk API-noekler
+
+LEVERANSE: Klar for pioneers. Onboarding er aerlig om data quality og ride-typer.
+Tidsestimat: 4-5 timer
+Blokkere: Systemet maa vaere stabilt
+
+VALIDERING:
+  [ ] Onboarding-guide eksisterer
+  [ ] Feedback-mekanisme klar
+  [ ] Produksjon deployet
+  [ ] Kan demo trygt
+  [ ] Demo fremhever WOW-faktor
+  [NY] Onboarding-guide nevner virtual ride-ekskludering aerlig
+
+================================================================================
+DAG 17 — Lørdag, Mars 1 (Feb 29 eksisterer ikke i 2026)  [GRØNN]
+Focus: Inviter Pioneers & Monitorering
+================================================================================
+
+OPPGAVER:
+  [ ] Inviter 5-10 pioneer-brukere: personlige invitasjoner,
+      inkluder onboarding-guide, sett forventninger (beta),
+      fremhev 50 rides for full verdi
+  [ ] Monitorering: sjekk logger for feil, klar til aa fikse kritiske bugs
+  [ ] Svar raskt paa tilbakemeldinger, dokumenter problemer
+  [ ] Raske fikser hvis mulig
+  [ ] Samle feedback: War Power Profile imponerende?
+      Var FTP Progression motiverende? Forsto de W/kg? Ga projeksjoner mening?
+  [NY] Monitorering — data quality edge cases:
+      Er noen pioneers virtual-only brukere?
+      Er power meter-brukere forvirret av ekskluderingen?
+      Er confidence-signalet klart og nyttig?
+      Foeles low-data-advarselen informativ?
+
+LEVERANSE: Pioneers tester. Data quality-oppfoersel validert i reell bruk.
+Tidsestimat: Variabel (monitoreringsdag)
+Blokkere: Maa ha brukere villige til aa teste
+
+VALIDERING:
+  [ ] Minst 5 brukere registrert
+  [ ] Brukere kan fullfoere onboarding
+  [ ] Brukere kan importere 50 rides
+  [ ] Ingen showstopper-bugs
+  [ ] Positiv feedback paa analytics
+  [ ] WOW-faktor bekreftet av brukere
+  [NY] Ingen pioneer faar et misvisende FTP-tall
+  [NY] Virtual/power-meter brukere forstaar hvorfor rides ekskluderes
+
+================================================================================
+DAG 18 — Søndag, Mar 1  [MAL / LAUNCH]
+Focus: Siste polish & Retrospektiv
+================================================================================
+
+OPPGAVER:
+  [ ] Fiks kritiske bugs fra Dag 17
+  [ ] Oppdater dokumentasjon basert paa pioneer-feedback
+  [ ] Forbered April-sprint: hva fungerte, hva fungerte ikke, prioriteringer
+  [ ] Oppdater SPRINT_LOG.md med resultater
+  [ ] Feir lanseringen!
+
+LEVERANSE: Pioneer Beta er live. Power analytics er troverdige og leverer WOW.
+Tidsestimat: 4-5 timer + reﬂeksjon
+Blokkere: Ingen
+
+VALIDERING:
+  [ ] Alle kritiske bugs fikset
+  [ ] Dokumentasjon oppdatert
+  [ ] Pioneer Beta stabil
+  [ ] Klar for neste fase
+  [ ] Analytics leverer WOW-faktor
+  [NY] Ingen misvisende FTP produsert i produksjon
+
+================================================================================
+ENDELIG SJEKKLISTE — 1. MARS
+================================================================================
+
+MÅ VAERE FERDIG:
+  [ ] Signup har demografiske felt
+  [ ] Onboarding UI er ryddig
+  [ ] Profil Dashboard (vis + rediger)
+  [ ] Proﬁl-versjonering fungerer
+  [ ] Kan importere 10 eller 50 rides
+  [ ] Dashboard har key metrics-widget (FTP, progresjon)
+  [ ] Trends-side med full Power Profile + FTP Progression
+  [ ] Analytics oppdateres dynamisk etter import
+  [ ] Systemet er stabilt
+  [ ] 5+ pioneer-brukere tester
+  [ ] WOW-faktor oppnaatt
+  [NY] Precision Watt Safety Guard fullt enforced end-to-end
+  [NY] Virtual rides ekskludert fra all analytics
+  [NY] Power meter-rides ekskludert fra precision-modellering
+  [NY] Power Profile bruker kun gyldige rides (watts_source == 'precision_model')
+  [NY] Minimum valid ride-beskyttelse implementert (ingen krasj paa lavt antall)
+  [NY] data_quality-blokk returnert av begge analytics-APIer
+  [NY] Frontend haandterer low-data brukere uten fake tall
+  [NY] FTP Trend stabil for baade 10-ride og 50-ride brukere
+  [NY] Pioneer Beta kan ikke produsere misvisende FTP
+
+FINT AA HA:
+  [ ] Alle duplikate ruter fjernet
+  [ ] Meta-generering konsolidert
+  [ ] Import UX forbedret
+  [ ] Mobil responsiv
+  [ ] Dokumentasjon komplett
+  [ ] Benchmarking ("Good" vs "Very Good" W/kg-kategorier)
+
+================================================================================
+RISIKOSTYRING — OPPDATERT
+================================================================================
+
+1. Peak effort-beregning kan vaere tungt
+   Tiltak: Cache i result_<sid>.json (beregn en gang)
+   Fallback: Begrens til 20 og 60min
+
+2. Variable aktivitetsmoenstre (1 mnd vs 2 aar)
+   Tiltak: Ukebasert gruppering, ikke ride-basert
+   Fallback: Advarsel ved lav aktivitet (<1 ride/uke)
+
+3. Strava API rate limits under batch-import
+   Tiltak: Forsinkelse mellom imports
+   Fallback: Importer i mindre batches
+
+4. FTP stemmer ikke med brukerens forventninger
+   Tiltak: Bruk ﬂere varighetsestimater, ta beste
+   Fallback: Manuell FTP-override i profil (fremtidig)
+
+5. Pioneers med faae gyldige precision rides
+   Tiltak: data_quality confidence-signal kommuniserer begrensninger aerlig.
+   UI viser klar melding uten fake tall. Onboarding setter forventninger.
+
+[NY] KRITISK RISIKO — Stille FTP-forringelse:
+   Kjernerisikoen fra context-blokken.
+   Fullt mitigert av:
+   (1) Precision Watt Safety Guard paa alle rides
+   (2) valid_rides_used tracking
+   (3) data_quality confidence-signal i API
+   (4) Frontend empty/low-data states
+   Systemet kan ikke lenger stille degradere —
+   all degradering er synlig og aerlig.
+
+================================================================================
+APRIL-SPRINT (ETTER 1. MARS)
+================================================================================
+
+April legger til:
+  - Maalstyring (bygg paa FTP Progression — la brukere "laase" projeksjoner som maal)
+  - Intensitetsfordeling (tid i soner)
+  - Bedre trends (power curves, treningsbelastning)
+  - Grunnlag for leaderboards (segment-deteksjon)
+  - Betalingsintegrasjon
+  [NY] Potensielt: Vis data quality til brukere rikere
+       ("Din profil er X% komplett — importer ﬂere utendoers rides for bedre noeyaktighet")
+
+Merk: Power Profile + FTP Progression er perfekt grunnlag for maalstyring.
+I april: legg bare til "Klikk projeksjon for aa sette som maal" -> aktiver tracking.
+Maal vil naturlig arve data quality-signalene — maal baseres kun paa hoey-confidence FTP.
+
+================================================================================
+Sprint starter: Tirsdag, 11. feb 2026
+Sprint slutter: Søndag, 1. mars 2026
+
+[NY] markers indikerer krav merget fra Data Integrity Hardening context-blokk.
+================================================================================
